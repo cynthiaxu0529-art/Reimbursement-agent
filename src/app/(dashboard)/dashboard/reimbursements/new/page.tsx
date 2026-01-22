@@ -2,9 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import Link from 'next/link';
 
 const expenseCategories = [
   { value: 'flight', label: '机票', icon: '✈️' },
@@ -34,6 +32,7 @@ export default function NewReimbursementPage() {
   const router = useRouter();
   const [title, setTitle] = useState('');
   const [tripId, setTripId] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [items, setItems] = useState<ExpenseItem[]>([
     {
       id: '1',
@@ -79,83 +78,191 @@ export default function NewReimbursementPage() {
   );
 
   const handleSubmit = async (isDraft: boolean) => {
+    setIsSubmitting(true);
     // TODO: 调用 API 保存
     console.log({ title, tripId, items, isDraft });
-    router.push('/dashboard/reimbursements');
+    setTimeout(() => {
+      router.push('/dashboard/reimbursements');
+    }, 500);
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '0.625rem 0.875rem',
+    border: '1px solid #d1d5db',
+    borderRadius: '0.5rem',
+    fontSize: '0.875rem',
+    outline: 'none',
+    boxSizing: 'border-box' as const,
+    backgroundColor: 'white'
+  };
+
+  const labelStyle = {
+    display: 'block',
+    fontSize: '0.875rem',
+    fontWeight: 500,
+    color: '#374151',
+    marginBottom: '0.375rem'
+  };
+
+  const selectStyle = {
+    ...inputStyle,
+    height: '38px',
+    cursor: 'pointer'
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div style={{ maxWidth: '900px', margin: '0 auto' }}>
       {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold">新建报销</h2>
-        <p className="text-gray-600">填写报销信息并上传票据</p>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+          <Link
+            href="/dashboard/reimbursements"
+            style={{ color: '#6b7280', textDecoration: 'none', fontSize: '0.875rem' }}
+          >
+            我的报销
+          </Link>
+          <span style={{ color: '#9ca3af' }}>/</span>
+          <span style={{ color: '#111827', fontSize: '0.875rem' }}>新建报销</span>
+        </div>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', marginBottom: '0.25rem' }}>
+          新建报销
+        </h2>
+        <p style={{ color: '#6b7280' }}>填写报销信息并上传票据</p>
       </div>
 
-      {/* Basic Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle>基本信息</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">报销标题</label>
-            <Input
-              placeholder="例如：上海出差报销"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
+      {/* Basic Info Card */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '0.75rem',
+        border: '1px solid #e5e7eb',
+        marginBottom: '1.5rem',
+        overflow: 'hidden'
+      }}>
+        <div style={{
+          padding: '1rem 1.25rem',
+          borderBottom: '1px solid #e5e7eb',
+          backgroundColor: '#f9fafb'
+        }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>基本信息</h3>
+        </div>
+        <div style={{ padding: '1.25rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div>
+              <label style={labelStyle}>报销标题 *</label>
+              <input
+                type="text"
+                placeholder="例如：上海出差报销"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>关联行程（可选）</label>
+              <select
+                value={tripId}
+                onChange={(e) => setTripId(e.target.value)}
+                style={selectStyle}
+              >
+                <option value="">不关联行程</option>
+                <option value="trip1">上海客户拜访 (1/15-1/17)</option>
+                <option value="trip2">北京技术培训 (1/20-1/22)</option>
+              </select>
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">关联行程（可选）</label>
-            <select
-              className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-              value={tripId}
-              onChange={(e) => setTripId(e.target.value)}
-            >
-              <option value="">不关联行程</option>
-              <option value="trip1">上海客户拜访 (1/15-1/17)</option>
-              <option value="trip2">北京技术培训 (1/20-1/22)</option>
-            </select>
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      {/* Expense Items */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>费用明细</CardTitle>
-          <Button variant="outline" size="sm" onClick={addItem}>
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            添加费用
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-6">
+      {/* Expense Items Card */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '0.75rem',
+        border: '1px solid #e5e7eb',
+        marginBottom: '1.5rem',
+        overflow: 'hidden'
+      }}>
+        <div style={{
+          padding: '1rem 1.25rem',
+          borderBottom: '1px solid #e5e7eb',
+          backgroundColor: '#f9fafb',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>费用明细</h3>
+          <button
+            onClick={addItem}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.375rem',
+              padding: '0.5rem 0.875rem',
+              backgroundColor: 'white',
+              color: '#2563eb',
+              border: '1px solid #2563eb',
+              borderRadius: '0.5rem',
+              fontSize: '0.875rem',
+              fontWeight: 500,
+              cursor: 'pointer'
+            }}
+          >
+            <span style={{ fontSize: '1rem' }}>+</span> 添加费用
+          </button>
+        </div>
+        <div style={{ padding: '1.25rem' }}>
           {items.map((item, index) => (
-            <div key={item.id} className="p-4 bg-gray-50 rounded-lg space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="font-medium">费用 #{index + 1}</span>
+            <div
+              key={item.id}
+              style={{
+                backgroundColor: '#f9fafb',
+                borderRadius: '0.75rem',
+                padding: '1.25rem',
+                marginBottom: index < items.length - 1 ? '1rem' : 0,
+                border: '1px solid #e5e7eb'
+              }}
+            >
+              {/* Item Header */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '1rem'
+              }}>
+                <span style={{ fontWeight: 600, color: '#111827' }}>费用 #{index + 1}</span>
                 {items.length > 1 && (
                   <button
                     onClick={() => removeItem(item.id)}
-                    className="text-red-500 hover:text-red-700"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#dc2626',
+                      cursor: 'pointer',
+                      padding: '0.25rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                      fontSize: '0.875rem'
+                    }}
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
+                    <span>🗑️</span> 删除
                   </button>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {/* Row 1: Category, Amount, Date */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '1rem',
+                marginBottom: '1rem'
+              }}>
                 <div>
-                  <label className="block text-sm font-medium mb-1">费用类别</label>
+                  <label style={labelStyle}>费用类别 *</label>
                   <select
-                    className="w-full h-9 rounded-md border border-input bg-white px-3 py-1 text-sm"
                     value={item.category}
                     onChange={(e) => updateItem(item.id, 'category', e.target.value)}
+                    style={selectStyle}
                   >
                     <option value="">选择类别</option>
                     {expenseCategories.map((cat) => (
@@ -167,91 +274,176 @@ export default function NewReimbursementPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-1">金额</label>
-                  <div className="flex">
+                  <label style={labelStyle}>金额 *</label>
+                  <div style={{ display: 'flex' }}>
                     <select
-                      className="h-9 rounded-l-md border border-r-0 border-input bg-white px-2 text-sm"
                       value={item.currency}
                       onChange={(e) => updateItem(item.id, 'currency', e.target.value)}
+                      style={{
+                        padding: '0.625rem 0.5rem',
+                        border: '1px solid #d1d5db',
+                        borderRight: 'none',
+                        borderRadius: '0.5rem 0 0 0.5rem',
+                        fontSize: '0.875rem',
+                        backgroundColor: '#f3f4f6',
+                        cursor: 'pointer'
+                      }}
                     >
                       <option value="CNY">¥</option>
                       <option value="USD">$</option>
                       <option value="EUR">€</option>
                     </select>
-                    <Input
+                    <input
                       type="number"
                       placeholder="0.00"
-                      className="rounded-l-none"
                       value={item.amount}
                       onChange={(e) => updateItem(item.id, 'amount', e.target.value)}
+                      style={{
+                        ...inputStyle,
+                        borderRadius: '0 0.5rem 0.5rem 0',
+                        flex: 1
+                      }}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-1">日期</label>
-                  <Input
+                  <label style={labelStyle}>日期 *</label>
+                  <input
                     type="date"
                     value={item.date}
                     onChange={(e) => updateItem(item.id, 'date', e.target.value)}
+                    style={inputStyle}
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Row 2: Description, Location */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '1rem',
+                marginBottom: '1rem'
+              }}>
                 <div>
-                  <label className="block text-sm font-medium mb-1">费用说明</label>
-                  <Input
+                  <label style={labelStyle}>费用说明 *</label>
+                  <input
+                    type="text"
                     placeholder="例如：往返机票"
                     value={item.description}
                     onChange={(e) => updateItem(item.id, 'description', e.target.value)}
+                    style={inputStyle}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-1">消费地点（可选）</label>
-                  <Input
+                  <label style={labelStyle}>消费地点（可选）</label>
+                  <input
+                    type="text"
                     placeholder="例如：上海"
                     value={item.location || ''}
                     onChange={(e) => updateItem(item.id, 'location', e.target.value)}
+                    style={inputStyle}
                   />
                 </div>
               </div>
 
+              {/* Receipt Upload */}
               <div>
-                <label className="block text-sm font-medium mb-1">上传票据</label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-500 transition cursor-pointer">
-                  <svg className="w-8 h-8 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                  </svg>
-                  <p className="text-sm text-gray-500">点击或拖拽上传发票/收据</p>
-                  <p className="text-xs text-gray-400 mt-1">支持 JPG, PNG, PDF 格式</p>
+                <label style={labelStyle}>上传票据</label>
+                <div style={{
+                  border: '2px dashed #d1d5db',
+                  borderRadius: '0.5rem',
+                  padding: '1.5rem',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  backgroundColor: 'white',
+                  transition: 'border-color 0.2s'
+                }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📷</div>
+                  <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>
+                    点击或拖拽上传发票/收据
+                  </p>
+                  <p style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                    支持 JPG, PNG, PDF 格式
+                  </p>
                 </div>
               </div>
             </div>
           ))}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Summary & Actions */}
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">费用合计</p>
-              <p className="text-3xl font-bold">¥{totalAmount.toLocaleString()}</p>
-            </div>
-            <div className="flex gap-3">
-              <Button variant="outline" onClick={() => handleSubmit(true)}>
-                保存草稿
-              </Button>
-              <Button onClick={() => handleSubmit(false)}>
-                提交审批
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '0.75rem',
+        border: '1px solid #e5e7eb',
+        padding: '1.5rem',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between'
+      }}>
+        <div>
+          <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>费用合计</p>
+          <p style={{ fontSize: '2rem', fontWeight: 700, color: '#111827' }}>
+            ¥{totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+          </p>
+          <p style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+            共 {items.length} 笔费用
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button
+            onClick={() => router.push('/dashboard/reimbursements')}
+            style={{
+              padding: '0.625rem 1.25rem',
+              backgroundColor: 'white',
+              color: '#6b7280',
+              border: '1px solid #d1d5db',
+              borderRadius: '0.5rem',
+              fontSize: '0.875rem',
+              fontWeight: 500,
+              cursor: 'pointer'
+            }}
+          >
+            取消
+          </button>
+          <button
+            onClick={() => handleSubmit(true)}
+            disabled={isSubmitting}
+            style={{
+              padding: '0.625rem 1.25rem',
+              backgroundColor: 'white',
+              color: '#2563eb',
+              border: '1px solid #2563eb',
+              borderRadius: '0.5rem',
+              fontSize: '0.875rem',
+              fontWeight: 500,
+              cursor: isSubmitting ? 'not-allowed' : 'pointer',
+              opacity: isSubmitting ? 0.6 : 1
+            }}
+          >
+            保存草稿
+          </button>
+          <button
+            onClick={() => handleSubmit(false)}
+            disabled={isSubmitting || !title}
+            style={{
+              padding: '0.625rem 1.25rem',
+              background: isSubmitting || !title ? '#9ca3af' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '0.5rem',
+              fontSize: '0.875rem',
+              fontWeight: 500,
+              cursor: isSubmitting || !title ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {isSubmitting ? '提交中...' : '提交审批'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
