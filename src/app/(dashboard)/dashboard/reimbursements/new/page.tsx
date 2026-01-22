@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -17,6 +17,11 @@ const expenseCategories = [
   { value: 'other', label: '其他', icon: '📦' },
 ];
 
+interface UploadedFile {
+  file: File;
+  preview: string;
+}
+
 interface ExpenseItem {
   id: string;
   category: string;
@@ -25,7 +30,7 @@ interface ExpenseItem {
   currency: string;
   date: string;
   location?: string;
-  receiptUrl?: string;
+  files: UploadedFile[];
 }
 
 export default function NewReimbursementPage() {
@@ -41,8 +46,11 @@ export default function NewReimbursementPage() {
       amount: '',
       currency: 'CNY',
       date: new Date().toISOString().split('T')[0],
+      files: [],
     },
   ]);
+
+  const fileInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
 
   const addItem = () => {
     setItems([
@@ -54,6 +62,7 @@ export default function NewReimbursementPage() {
         amount: '',
         currency: 'CNY',
         date: new Date().toISOString().split('T')[0],
+        files: [],
       },
     ]);
   };
@@ -64,12 +73,46 @@ export default function NewReimbursementPage() {
     }
   };
 
-  const updateItem = (id: string, field: keyof ExpenseItem, value: string) => {
+  const updateItem = (id: string, field: keyof ExpenseItem, value: any) => {
     setItems(
       items.map((item) =>
         item.id === id ? { ...item, [field]: value } : item
       )
     );
+  };
+
+  const handleFileSelect = (itemId: string, files: FileList | null) => {
+    if (!files) return;
+
+    const newFiles: UploadedFile[] = Array.from(files).map(file => ({
+      file,
+      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
+    }));
+
+    const item = items.find(i => i.id === itemId);
+    if (item) {
+      updateItem(itemId, 'files', [...item.files, ...newFiles]);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, itemId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer.files;
+    handleFileSelect(itemId, files);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const removeFile = (itemId: string, fileIndex: number) => {
+    const item = items.find(i => i.id === itemId);
+    if (item) {
+      const newFiles = item.files.filter((_, idx) => idx !== fileIndex);
+      updateItem(itemId, 'files', newFiles);
+    }
   };
 
   const totalAmount = items.reduce(
@@ -166,8 +209,6 @@ export default function NewReimbursementPage() {
                 style={selectStyle}
               >
                 <option value="">不关联行程</option>
-                <option value="trip1">上海客户拜访 (1/15-1/17)</option>
-                <option value="trip2">北京技术培训 (1/20-1/22)</option>
               </select>
             </div>
           </div>
@@ -351,23 +392,85 @@ export default function NewReimbursementPage() {
               {/* Receipt Upload */}
               <div>
                 <label style={labelStyle}>上传票据</label>
-                <div style={{
-                  border: '2px dashed #d1d5db',
-                  borderRadius: '0.5rem',
-                  padding: '1.5rem',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  backgroundColor: 'white',
-                  transition: 'border-color 0.2s'
-                }}>
-                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📷</div>
-                  <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>
-                    点击或拖拽上传发票/收据
+                <input
+                  type="file"
+                  ref={el => { fileInputRefs.current[item.id] = el; }}
+                  onChange={(e) => handleFileSelect(item.id, e.target.files)}
+                  accept="image/*,.pdf"
+                  multiple
+                  style={{ display: 'none' }}
+                />
+                <div
+                  onClick={() => fileInputRefs.current[item.id]?.click()}
+                  onDrop={(e) => handleDrop(e, item.id)}
+                  onDragOver={handleDragOver}
+                  onDragEnter={handleDragOver}
+                  style={{
+                    border: '2px dashed #2563eb',
+                    borderRadius: '0.5rem',
+                    padding: '1.5rem',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    backgroundColor: '#eff6ff',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📤</div>
+                  <p style={{ fontSize: '0.875rem', color: '#2563eb', marginBottom: '0.25rem', fontWeight: 500 }}>
+                    点击选择或拖拽文件到此处
                   </p>
-                  <p style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                  <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
                     支持 JPG, PNG, PDF 格式
                   </p>
                 </div>
+
+                {/* Uploaded Files Preview */}
+                {item.files.length > 0 && (
+                  <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    {item.files.map((uploadedFile, fileIndex) => (
+                      <div
+                        key={fileIndex}
+                        style={{
+                          position: 'relative',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          padding: '0.5rem 0.75rem',
+                          backgroundColor: 'white',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '0.5rem'
+                        }}
+                      >
+                        {uploadedFile.preview ? (
+                          <img
+                            src={uploadedFile.preview}
+                            alt="预览"
+                            style={{ width: '32px', height: '32px', objectFit: 'cover', borderRadius: '0.25rem' }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: '1.25rem' }}>📄</span>
+                        )}
+                        <span style={{ fontSize: '0.75rem', color: '#374151', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {uploadedFile.file.name}
+                        </span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeFile(item.id, fileIndex); }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#dc2626',
+                            cursor: 'pointer',
+                            padding: '0.125rem',
+                            fontSize: '1rem',
+                            lineHeight: 1
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ))}
