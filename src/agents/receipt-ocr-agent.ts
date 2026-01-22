@@ -3,10 +3,8 @@
  * 使用 AI 识别发票和收据中的信息
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { OpenRouterClient } from '@/lib/ai/openrouter';
 import type {
-  Receipt,
-  OCRResult,
   ExpenseCategoryType,
   CurrencyType,
 } from '@/types';
@@ -62,42 +60,21 @@ export interface ReceiptItem {
 // ============================================================================
 
 export class ReceiptOCRAgent {
-  private client: Anthropic;
+  private client: OpenRouterClient;
 
   constructor() {
-    this.client = new Anthropic();
+    this.client = new OpenRouterClient();
   }
 
   /**
    * 识别票据
    */
   async recognize(request: OCRRequest): Promise<ParsedReceipt> {
-    const imageContent = await this.buildImageContent(request);
+    const imageData = await this.buildImageData(request);
 
-    const response = await this.client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            imageContent,
-            {
-              type: 'text',
-              text: OCR_PROMPT,
-            },
-          ],
-        },
-      ],
-    });
+    const response = await this.client.vision(imageData, OCR_PROMPT);
 
-    // 解析响应
-    const textContent = response.content.find((c) => c.type === 'text');
-    if (!textContent || textContent.type !== 'text') {
-      throw new Error('OCR failed: no text response');
-    }
-
-    return this.parseOCRResponse(textContent.text);
+    return this.parseOCRResponse(response);
   }
 
   /**
@@ -119,33 +96,21 @@ export class ReceiptOCRAgent {
   }
 
   /**
-   * 构建图片内容
-   * 如果提供 URL，先下载并转换为 base64
+   * 构建图片数据
    */
-  private async buildImageContent(
+  private async buildImageData(
     request: OCRRequest
-  ): Promise<Anthropic.ImageBlockParam> {
+  ): Promise<{ url?: string; base64?: string; mimeType?: MediaType }> {
     if (request.imageUrl) {
       // 下载图片并转换为 base64
       const { base64, mimeType } = await this.downloadImageAsBase64(request.imageUrl);
-      return {
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: mimeType,
-          data: base64,
-        },
-      };
+      return { base64, mimeType };
     }
 
     if (request.imageBase64) {
       return {
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: request.mimeType || 'image/jpeg',
-          data: request.imageBase64,
-        },
+        base64: request.imageBase64,
+        mimeType: request.mimeType || 'image/jpeg',
       };
     }
 
@@ -206,7 +171,7 @@ export class ReceiptOCRAgent {
         confidence: parsed.confidence || 0.8,
         rawText: parsed.rawText || text,
       };
-    } catch (error) {
+    } catch {
       // 如果 JSON 解析失败，返回低置信度结果
       return {
         type: 'unknown',
@@ -264,7 +229,7 @@ export class ReceiptOCRAgent {
   /**
    * 推断费用类别
    */
-  private inferCategory(parsed: any): ExpenseCategoryType {
+  private inferCategory(parsed: Record<string, unknown>): ExpenseCategoryType {
     const typeToCategory: Record<ReceiptType, ExpenseCategoryType> = {
       flight_itinerary: ExpenseCategory.FLIGHT,
       train_ticket: ExpenseCategory.TRAIN,
@@ -278,11 +243,11 @@ export class ReceiptOCRAgent {
       unknown: ExpenseCategory.OTHER,
     };
 
-    const type = this.mapReceiptType(parsed.type);
+    const type = this.mapReceiptType(parsed.type as string);
 
     // 如果是通用发票，尝试从商家名称推断
     if (type === 'vat_invoice' || type === 'general_receipt') {
-      const vendor = (parsed.vendor || '').toLowerCase();
+      const vendor = ((parsed.vendor as string) || '').toLowerCase();
 
       if (vendor.includes('酒店') || vendor.includes('hotel')) {
         return ExpenseCategory.HOTEL;
@@ -307,12 +272,12 @@ export class ReceiptOCRAgent {
   async verifyInvoice(
     invoiceCode: string,
     invoiceNumber: string,
-    invoiceDate: string,
-    amount: number
+    _invoiceDate: string,
+    _amount: number
   ): Promise<{
     isValid: boolean;
     message: string;
-    details?: any;
+    details?: Record<string, unknown>;
   }> {
     // TODO: 接入税务局发票查验接口
     // 这里返回模拟结果

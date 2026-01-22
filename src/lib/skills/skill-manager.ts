@@ -170,7 +170,7 @@ export class SkillManager {
 
     // 按优先级排序
     for (const [, skills] of this.triggerIndex) {
-      skills.sort((a, b) => {
+      skills.sort((a: Skill, b: Skill) => {
         const aPriority = a.triggers[0]?.priority || 0;
         const bPriority = b.triggers[0]?.priority || 0;
         return bPriority - aPriority;
@@ -188,8 +188,8 @@ export class SkillManager {
     this.skills.delete(skillId);
 
     // 从触发器索引中移除
-    for (const [triggerType, skills] of this.triggerIndex) {
-      const index = skills.findIndex((s) => s.id === skillId);
+    for (const [_triggerType, skills] of this.triggerIndex) {
+      const index = skills.findIndex((s: Skill) => s.id === skillId);
       if (index !== -1) {
         skills.splice(index, 1);
       }
