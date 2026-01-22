@@ -2,154 +2,361 @@ import Link from 'next/link';
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+    <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
       {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold">R</span>
+      <header style={{
+        backgroundColor: 'white',
+        borderBottom: '1px solid #e5e7eb',
+        position: 'sticky',
+        top: 0,
+        zIndex: 50
+      }}>
+        <div style={{
+          maxWidth: '1200px',
+          margin: '0 auto',
+          padding: '1rem 1.5rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
+              borderRadius: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <span style={{ color: 'white', fontWeight: 'bold', fontSize: '1.25rem' }}>R</span>
             </div>
-            <span className="font-semibold text-lg">Reimbursement Portal</span>
+            <span style={{ fontWeight: 600, fontSize: '1.25rem', color: '#111827' }}>
+              报销助手
+            </span>
           </div>
-          <nav className="flex items-center gap-4">
+          <nav style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <Link
               href="/login"
-              className="text-gray-600 hover:text-gray-900 transition"
+              style={{
+                color: '#4b5563',
+                textDecoration: 'none',
+                padding: '0.5rem 1rem',
+                fontWeight: 500
+              }}
             >
               登录
             </Link>
             <Link
               href="/register"
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+              style={{
+                backgroundColor: '#2563eb',
+                color: 'white',
+                padding: '0.625rem 1.25rem',
+                borderRadius: '0.5rem',
+                textDecoration: 'none',
+                fontWeight: 500
+              }}
             >
-              注册
+              免费注册
             </Link>
           </nav>
         </div>
       </header>
 
-      {/* Hero */}
-      <main className="container mx-auto px-4 py-20">
-        <div className="max-w-4xl mx-auto text-center">
-          <h1 className="text-5xl font-bold text-gray-900 mb-6">
-            智能报销，从此简单
+      {/* Hero Section */}
+      <section style={{
+        background: 'linear-gradient(180deg, #eff6ff 0%, #ffffff 100%)',
+        padding: '5rem 1.5rem'
+      }}>
+        <div style={{ maxWidth: '800px', margin: '0 auto', textAlign: 'center' }}>
+          <div style={{
+            display: 'inline-block',
+            backgroundColor: '#dbeafe',
+            color: '#1d4ed8',
+            padding: '0.375rem 1rem',
+            borderRadius: '9999px',
+            fontSize: '0.875rem',
+            fontWeight: 500,
+            marginBottom: '1.5rem'
+          }}>
+            🚀 AI 驱动的智能报销平台
+          </div>
+          <h1 style={{
+            fontSize: '3rem',
+            fontWeight: 700,
+            color: '#111827',
+            lineHeight: 1.2,
+            marginBottom: '1.5rem'
+          }}>
+            让报销变得
+            <span style={{ color: '#2563eb' }}>简单高效</span>
           </h1>
-          <p className="text-xl text-gray-600 mb-8">
-            AI 驱动的企业报销管理平台，自动收集票据、智能审批、一键打款
+          <p style={{
+            fontSize: '1.25rem',
+            color: '#6b7280',
+            marginBottom: '2.5rem',
+            lineHeight: 1.6
+          }}>
+            自动收集票据、智能识别信息、一键提交审批<br />
+            告别繁琐的报销流程，让 AI 帮你搞定一切
           </p>
-          <div className="flex items-center justify-center gap-4">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
             <Link
               href="/register"
-              className="bg-blue-600 text-white px-8 py-3 rounded-lg text-lg font-medium hover:bg-blue-700 transition"
+              style={{
+                background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                color: 'white',
+                padding: '0.875rem 2rem',
+                borderRadius: '0.5rem',
+                textDecoration: 'none',
+                fontWeight: 600,
+                fontSize: '1rem',
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.3)'
+              }}
             >
-              免费试用
+              开始使用 →
             </Link>
             <Link
-              href="/demo"
-              className="border border-gray-300 text-gray-700 px-8 py-3 rounded-lg text-lg font-medium hover:bg-gray-50 transition"
+              href="/login"
+              style={{
+                backgroundColor: 'white',
+                color: '#374151',
+                padding: '0.875rem 2rem',
+                borderRadius: '0.5rem',
+                textDecoration: 'none',
+                fontWeight: 500,
+                fontSize: '1rem',
+                border: '1px solid #d1d5db'
+              }}
             >
-              查看演示
+              已有账号
             </Link>
           </div>
         </div>
+      </section>
 
-        {/* Features */}
-        <div className="mt-24 grid md:grid-cols-3 gap-8">
-          <div className="bg-white p-6 rounded-xl shadow-sm border">
-            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-semibold mb-2">智能票据识别</h3>
-            <p className="text-gray-600">
-              AI 自动识别发票信息，支持机票、酒店、餐饮等多种票据类型
+      {/* Features Section */}
+      <section style={{ padding: '5rem 1.5rem', backgroundColor: 'white' }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
+            <h2 style={{ fontSize: '2rem', fontWeight: 700, color: '#111827', marginBottom: '1rem' }}>
+              核心功能
+            </h2>
+            <p style={{ color: '#6b7280', fontSize: '1.125rem' }}>
+              强大的 AI 能力，让报销管理变得轻松
             </p>
           </div>
 
-          <div className="bg-white p-6 rounded-xl shadow-sm border">
-            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
-              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-              </svg>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: '1.5rem'
+          }}>
+            {/* Feature 1 */}
+            <div style={{
+              backgroundColor: '#f8fafc',
+              borderRadius: '1rem',
+              padding: '2rem',
+              border: '1px solid #e2e8f0'
+            }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                backgroundColor: '#dbeafe',
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '1.25rem'
+              }}>
+                <span style={{ fontSize: '1.5rem' }}>📷</span>
+              </div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
+                智能票据识别
+              </h3>
+              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
+                拍照上传发票，AI 自动识别金额、日期、商家等关键信息
+              </p>
             </div>
-            <h3 className="text-lg font-semibold mb-2">自动合规检查</h3>
-            <p className="text-gray-600">
-              实时检查费用是否符合公司政策，提前预警超标风险
-            </p>
-          </div>
 
-          <div className="bg-white p-6 rounded-xl shadow-sm border">
-            <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
-              <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
+            {/* Feature 2 */}
+            <div style={{
+              backgroundColor: '#f8fafc',
+              borderRadius: '1rem',
+              padding: '2rem',
+              border: '1px solid #e2e8f0'
+            }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                backgroundColor: '#dcfce7',
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '1.25rem'
+              }}>
+                <span style={{ fontSize: '1.5rem' }}>✅</span>
+              </div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
+                自动合规检查
+              </h3>
+              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
+                实时检查是否符合公司报销政策，避免退回重提
+              </p>
             </div>
-            <h3 className="text-lg font-semibold mb-2">一键打款</h3>
-            <p className="text-gray-600">
-              审批通过后自动发起打款，资金秒到账
-            </p>
+
+            {/* Feature 3 */}
+            <div style={{
+              backgroundColor: '#f8fafc',
+              borderRadius: '1rem',
+              padding: '2rem',
+              border: '1px solid #e2e8f0'
+            }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                backgroundColor: '#fef3c7',
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '1.25rem'
+              }}>
+                <span style={{ fontSize: '1.5rem' }}>💬</span>
+              </div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
+                AI 对话助手
+              </h3>
+              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
+                用自然语言描述出差情况，AI 帮你自动整理报销单
+              </p>
+            </div>
+
+            {/* Feature 4 */}
+            <div style={{
+              backgroundColor: '#f8fafc',
+              borderRadius: '1rem',
+              padding: '2rem',
+              border: '1px solid #e2e8f0'
+            }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                backgroundColor: '#e0e7ff',
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '1.25rem'
+              }}>
+                <span style={{ fontSize: '1.5rem' }}>⚡</span>
+              </div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
+                快速审批
+              </h3>
+              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
+                智能审批流程，一键批量审批，提高效率
+              </p>
+            </div>
+
+            {/* Feature 5 */}
+            <div style={{
+              backgroundColor: '#f8fafc',
+              borderRadius: '1rem',
+              padding: '2rem',
+              border: '1px solid #e2e8f0'
+            }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                backgroundColor: '#fce7f3',
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '1.25rem'
+              }}>
+                <span style={{ fontSize: '1.5rem' }}>💰</span>
+              </div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
+                一键打款
+              </h3>
+              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
+                审批通过后自动发起打款，资金快速到账
+              </p>
+            </div>
+
+            {/* Feature 6 */}
+            <div style={{
+              backgroundColor: '#f8fafc',
+              borderRadius: '1rem',
+              padding: '2rem',
+              border: '1px solid #e2e8f0'
+            }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                backgroundColor: '#ccfbf1',
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '1.25rem'
+              }}>
+                <span style={{ fontSize: '1.5rem' }}>📊</span>
+              </div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
+                数据报表
+              </h3>
+              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
+                可视化报表分析，了解费用支出趋势
+              </p>
+            </div>
           </div>
         </div>
+      </section>
 
-        {/* AI Features */}
-        <div className="mt-24">
-          <h2 className="text-3xl font-bold text-center mb-12">AI 智能助手</h2>
-          <div className="bg-white rounded-2xl shadow-lg border p-8">
-            <div className="flex flex-col md:flex-row gap-8">
-              <div className="flex-1">
-                <div className="bg-gray-100 rounded-lg p-4 mb-4">
-                  <p className="text-gray-600 text-sm mb-2">你可以这样说：</p>
-                  <p className="font-medium">"我刚从上海出差回来，帮我整理报销"</p>
-                </div>
-                <div className="bg-blue-50 rounded-lg p-4 border-l-4 border-blue-600">
-                  <p className="text-gray-600 text-sm mb-2">AI 助手回复：</p>
-                  <p className="text-gray-800">
-                    我来帮你整理上海出差的报销。已从邮箱找到机票确认和酒店订单，
-                    共发现 4 笔费用，总计 ¥3,895。缺少 1/16 晚餐票据，需要补充吗？
-                  </p>
-                </div>
-              </div>
-              <div className="flex-1 space-y-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                    <span className="text-blue-600 text-sm">1</span>
-                  </div>
-                  <div>
-                    <h4 className="font-medium">自动收集邮件</h4>
-                    <p className="text-sm text-gray-600">扫描邮箱提取机票、酒店预订确认</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                    <span className="text-blue-600 text-sm">2</span>
-                  </div>
-                  <div>
-                    <h4 className="font-medium">识别日历行程</h4>
-                    <p className="text-sm text-gray-600">从日历事件自动识别出差安排</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                    <span className="text-blue-600 text-sm">3</span>
-                  </div>
-                  <div>
-                    <h4 className="font-medium">智能提醒补充</h4>
-                    <p className="text-sm text-gray-600">检查材料完整性，提示缺失票据</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* CTA Section */}
+      <section style={{
+        background: 'linear-gradient(135deg, #1e40af 0%, #7c3aed 100%)',
+        padding: '4rem 1.5rem',
+        textAlign: 'center'
+      }}>
+        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+          <h2 style={{ fontSize: '2rem', fontWeight: 700, color: 'white', marginBottom: '1rem' }}>
+            准备好简化你的报销流程了吗？
+          </h2>
+          <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: '1.125rem', marginBottom: '2rem' }}>
+            免费注册，立即体验 AI 驱动的智能报销
+          </p>
+          <Link
+            href="/register"
+            style={{
+              display: 'inline-block',
+              backgroundColor: 'white',
+              color: '#1e40af',
+              padding: '0.875rem 2.5rem',
+              borderRadius: '0.5rem',
+              textDecoration: 'none',
+              fontWeight: 600,
+              fontSize: '1rem'
+            }}
+          >
+            免费开始使用
+          </Link>
         </div>
-      </main>
+      </section>
 
       {/* Footer */}
-      <footer className="border-t mt-24 py-8">
-        <div className="container mx-auto px-4 text-center text-gray-600">
-          <p>© 2024 Reimbursement Portal. All rights reserved.</p>
-        </div>
+      <footer style={{
+        backgroundColor: '#111827',
+        color: '#9ca3af',
+        padding: '2rem 1.5rem',
+        textAlign: 'center'
+      }}>
+        <p>© 2024 报销助手. All rights reserved.</p>
       </footer>
     </div>
   );
