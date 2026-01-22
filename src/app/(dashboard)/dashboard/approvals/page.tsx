@@ -3,95 +3,15 @@
 import { useState } from 'react';
 import Link from 'next/link';
 
-// 模拟数据
-const pendingApprovals = [
-  {
-    id: '1',
-    title: '深圳出差报销',
-    submitter: '张三',
-    submitterAvatar: 'Z',
-    department: '技术部',
-    amount: 4560,
-    items: 5,
-    submittedAt: '2024-01-18 14:30',
-    trip: '深圳客户演示',
-    complianceStatus: 'passed',
-    details: [
-      { category: '机票', amount: 1280, icon: '✈️' },
-      { category: '酒店', amount: 1800, icon: '🏨' },
-      { category: '餐饮', amount: 580, icon: '🍽️' },
-      { category: '交通', amount: 450, icon: '🚕' },
-      { category: '其他', amount: 450, icon: '📦' },
-    ]
-  },
-  {
-    id: '2',
-    title: '云服务费用报销',
-    submitter: '李四',
-    submitterAvatar: 'L',
-    department: '技术部',
-    amount: 8900,
-    items: 3,
-    submittedAt: '2024-01-17 10:15',
-    complianceStatus: 'warning',
-    complianceIssue: '云资源费用超出月度预算的 80%',
-    details: [
-      { category: 'AWS 服务', amount: 5200, icon: '☁️' },
-      { category: 'OpenAI API', amount: 2500, icon: '🤖' },
-      { category: '其他云服务', amount: 1200, icon: '💾' },
-    ]
-  },
-  {
-    id: '3',
-    title: '团建活动费用',
-    submitter: '王五',
-    submitterAvatar: 'W',
-    department: '人力资源',
-    amount: 3200,
-    items: 2,
-    submittedAt: '2024-01-16 16:45',
-    complianceStatus: 'passed',
-    details: [
-      { category: '聚餐', amount: 2400, icon: '🍽️' },
-      { category: '活动', amount: 800, icon: '🎯' },
-    ]
-  },
-];
-
-const approvalHistory = [
-  {
-    id: '4',
-    title: '上海出差报销',
-    submitter: '赵六',
-    amount: 3895,
-    action: 'approved',
-    actionAt: '2024-01-15 11:20',
-  },
-  {
-    id: '5',
-    title: '办公用品采购',
-    submitter: '张三',
-    amount: 560,
-    action: 'approved',
-    actionAt: '2024-01-14 09:30',
-  },
-  {
-    id: '6',
-    title: '超标差旅费用',
-    submitter: '李四',
-    amount: 12000,
-    action: 'rejected',
-    actionAt: '2024-01-13 15:00',
-    reason: '酒店费用超出政策限额，未提前申请特批',
-  },
-];
-
 export default function ApprovalsPage() {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
   const [comment, setComment] = useState('');
   const [showApproveModal, setShowApproveModal] = useState<string | null>(null);
   const [showRejectModal, setShowRejectModal] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
+
+  // 空数据状态 - 实际数据将从API获取
+  const pendingApprovals: any[] = [];
+  const approvalHistory: any[] = [];
 
   const handleApprove = (id: string) => {
     console.log('Approve:', id, comment);
@@ -104,8 +24,6 @@ export default function ApprovalsPage() {
     setShowRejectModal(null);
     setComment('');
   };
-
-  const totalPendingAmount = pendingApprovals.reduce((sum, a) => sum + a.amount, 0);
 
   return (
     <div>
@@ -133,7 +51,7 @@ export default function ApprovalsPage() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
               <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>待审批</p>
-              <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#d97706' }}>{pendingApprovals.length}</p>
+              <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#d97706' }}>0</p>
             </div>
             <div style={{
               width: '48px',
@@ -159,7 +77,7 @@ export default function ApprovalsPage() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
               <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>本月已审批</p>
-              <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#16a34a' }}>24</p>
+              <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#16a34a' }}>0</p>
             </div>
             <div style={{
               width: '48px',
@@ -185,9 +103,7 @@ export default function ApprovalsPage() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
               <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>待审批金额</p>
-              <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#2563eb' }}>
-                ¥{totalPendingAmount.toLocaleString()}
-              </p>
+              <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#2563eb' }}>¥0</p>
             </div>
             <div style={{
               width: '48px',
@@ -225,7 +141,7 @@ export default function ApprovalsPage() {
             cursor: 'pointer'
           }}
         >
-          待审批 ({pendingApprovals.length})
+          待审批 (0)
         </button>
         <button
           onClick={() => setActiveTab('history')}
@@ -243,247 +159,76 @@ export default function ApprovalsPage() {
         </button>
       </div>
 
-      {/* Pending Approvals */}
-      {activeTab === 'pending' && (
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden'
-        }}>
-          {pendingApprovals.length === 0 ? (
-            <div style={{ padding: '3rem', textAlign: 'center' }}>
-              <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>✅</div>
-              <p style={{ color: '#6b7280' }}>没有待审批的报销</p>
+      {/* Content */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '0.75rem',
+        border: '1px solid #e5e7eb',
+        overflow: 'hidden'
+      }}>
+        {activeTab === 'pending' ? (
+          <div style={{ padding: '3rem', textAlign: 'center' }}>
+            <div style={{
+              width: '80px',
+              height: '80px',
+              backgroundColor: '#f3f4f6',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 1rem',
+              fontSize: '2rem'
+            }}>
+              ✅
             </div>
-          ) : (
-            pendingApprovals.map((approval, index) => (
-              <div
-                key={approval.id}
-                style={{
-                  padding: '1.25rem',
-                  borderBottom: index < pendingApprovals.length - 1 ? '1px solid #e5e7eb' : 'none'
-                }}
-              >
-                {/* Main Row */}
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-                      <div style={{
-                        width: '36px',
-                        height: '36px',
-                        backgroundColor: '#2563eb',
-                        borderRadius: '50%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'white',
-                        fontWeight: 500,
-                        fontSize: '0.875rem'
-                      }}>
-                        {approval.submitterAvatar}
-                      </div>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <h4 style={{ fontWeight: 600, color: '#111827' }}>{approval.title}</h4>
-                          {approval.complianceStatus === 'warning' && (
-                            <span style={{
-                              padding: '0.125rem 0.5rem',
-                              backgroundColor: '#fef3c7',
-                              color: '#d97706',
-                              borderRadius: '9999px',
-                              fontSize: '0.75rem',
-                              fontWeight: 500
-                            }}>
-                              合规警告
-                            </span>
-                          )}
-                        </div>
-                        <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                          {approval.submitter} · {approval.department} · {approval.items} 项费用
-                        </p>
-                      </div>
-                    </div>
-
-                    <div style={{ marginLeft: '2.75rem' }}>
-                      <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: '0.25rem' }}>
-                        提交于 {approval.submittedAt}
-                      </p>
-                      {approval.trip && (
-                        <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                          关联行程：{approval.trip}
-                        </p>
-                      )}
-                      {approval.complianceIssue && (
-                        <p style={{
-                          fontSize: '0.875rem',
-                          color: '#d97706',
-                          marginTop: '0.5rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.25rem'
-                        }}>
-                          ⚠️ {approval.complianceIssue}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div style={{ textAlign: 'right' }}>
-                    <p style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', marginBottom: '0.75rem' }}>
-                      ¥{approval.amount.toLocaleString()}
-                    </p>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button
-                        onClick={() => setExpandedId(expandedId === approval.id ? null : approval.id)}
-                        style={{
-                          padding: '0.375rem 0.75rem',
-                          backgroundColor: 'white',
-                          color: '#6b7280',
-                          border: '1px solid #d1d5db',
-                          borderRadius: '0.375rem',
-                          fontSize: '0.875rem',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {expandedId === approval.id ? '收起' : '详情'}
-                      </button>
-                      <button
-                        onClick={() => setShowApproveModal(approval.id)}
-                        style={{
-                          padding: '0.375rem 0.75rem',
-                          background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '0.375rem',
-                          fontSize: '0.875rem',
-                          fontWeight: 500,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        批准
-                      </button>
-                      <button
-                        onClick={() => setShowRejectModal(approval.id)}
-                        style={{
-                          padding: '0.375rem 0.75rem',
-                          backgroundColor: '#dc2626',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '0.375rem',
-                          fontSize: '0.875rem',
-                          fontWeight: 500,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        拒绝
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Expanded Details */}
-                {expandedId === approval.id && (
-                  <div style={{
-                    marginTop: '1rem',
-                    marginLeft: '2.75rem',
-                    padding: '1rem',
-                    backgroundColor: '#f9fafb',
-                    borderRadius: '0.5rem'
-                  }}>
-                    <h5 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
-                      费用明细
-                    </h5>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '0.75rem' }}>
-                      {approval.details.map((item, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            backgroundColor: 'white',
-                            padding: '0.75rem',
-                            borderRadius: '0.5rem',
-                            border: '1px solid #e5e7eb'
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                            <span>{item.icon}</span>
-                            <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{item.category}</span>
-                          </div>
-                          <p style={{ fontWeight: 600, color: '#111827' }}>¥{item.amount.toLocaleString()}</p>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ marginTop: '1rem' }}>
-                      <p style={{ fontSize: '0.875rem', color: '#16a34a' }}>
-                        ✓ 已上传 {approval.items} 张票据 · OCR 识别完成
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Approval History */}
-      {activeTab === 'history' && (
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden'
-        }}>
-          {approvalHistory.map((item, index) => (
-            <div
-              key={item.id}
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.5rem' }}>
+              没有待审批的报销
+            </h3>
+            <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>
+              当团队成员提交报销申请后，将会在这里显示
+            </p>
+            <Link
+              href="/dashboard/settings"
               style={{
-                padding: '1rem 1.25rem',
-                borderBottom: index < approvalHistory.length - 1 ? '1px solid #f3f4f6' : 'none',
-                display: 'flex',
+                display: 'inline-flex',
                 alignItems: 'center',
-                justifyContent: 'space-between'
+                gap: '0.5rem',
+                padding: '0.625rem 1.25rem',
+                backgroundColor: '#eff6ff',
+                color: '#2563eb',
+                borderRadius: '0.5rem',
+                textDecoration: 'none',
+                fontSize: '0.875rem',
+                fontWeight: 500
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <div style={{
-                  width: '36px',
-                  height: '36px',
-                  backgroundColor: item.action === 'approved' ? '#dcfce7' : '#fee2e2',
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '1rem'
-                }}>
-                  {item.action === 'approved' ? '✓' : '✕'}
-                </div>
-                <div>
-                  <p style={{ fontWeight: 500, color: '#111827' }}>{item.title}</p>
-                  <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                    {item.submitter} · {item.actionAt}
-                  </p>
-                  {item.reason && (
-                    <p style={{ fontSize: '0.875rem', color: '#dc2626', marginTop: '0.25rem' }}>
-                      {item.reason}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <p style={{ fontWeight: 600, color: '#111827' }}>¥{item.amount.toLocaleString()}</p>
-                <span style={{
-                  fontSize: '0.75rem',
-                  fontWeight: 500,
-                  color: item.action === 'approved' ? '#16a34a' : '#dc2626'
-                }}>
-                  {item.action === 'approved' ? '已批准' : '已拒绝'}
-                </span>
-              </div>
+              邀请团队成员 →
+            </Link>
+          </div>
+        ) : (
+          <div style={{ padding: '3rem', textAlign: 'center' }}>
+            <div style={{
+              width: '80px',
+              height: '80px',
+              backgroundColor: '#f3f4f6',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 1rem',
+              fontSize: '2rem'
+            }}>
+              📋
             </div>
-          ))}
-        </div>
-      )}
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.5rem' }}>
+              暂无审批记录
+            </h3>
+            <p style={{ color: '#6b7280' }}>
+              审批过的报销申请将会显示在这里
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* Approve Modal */}
       {showApproveModal && (
