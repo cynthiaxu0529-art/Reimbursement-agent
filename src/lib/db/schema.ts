@@ -77,10 +77,10 @@ export const tenants = pgTable('tenants', {
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id')
-    .notNull()
-    .references(() => tenants.id),
+    .references(() => tenants.id),  // Optional for OAuth users without company
   email: text('email').notNull().unique(),
   name: text('name').notNull(),
+  passwordHash: text('password_hash'),  // For credentials auth
   avatar: text('avatar'),
   role: userRoleEnum('role').notNull().default('employee'),
   department: text('department'),

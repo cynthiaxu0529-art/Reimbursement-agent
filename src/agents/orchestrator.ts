@@ -3,16 +3,13 @@
  * 负责理解用户意图，协调各个专门的 Agent 完成任务
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { OpenRouterClient, type ToolDefinition, type ChatMessage } from '@/lib/ai/openrouter';
 import { getAgentPrompt } from '@/lib/prompts/sample-prompts';
 import type {
   Reimbursement,
   Trip,
-  ReimbursementItem,
   User,
   Policy,
-  BudgetEstimationRequest,
-  BudgetEstimationResponse,
 } from '@/types';
 
 // ============================================================================
@@ -31,12 +28,12 @@ export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface AgentAction {
   type: AgentActionType;
-  params: Record<string, any>;
+  params: Record<string, unknown>;
   description: string;
 }
 
@@ -58,18 +55,18 @@ export interface AgentResponse {
   message: string;
   actions: AgentAction[];
   suggestions?: string[];
-  data?: Record<string, any>;
+  data?: Record<string, unknown>;
 }
 
 // ============================================================================
 // 工具定义
 // ============================================================================
 
-const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
+const ORCHESTRATOR_TOOLS: ToolDefinition[] = [
   {
     name: 'collect_travel_emails',
     description: '从用户邮箱中收集差旅相关的邮件，包括机票、酒店、火车票预订确认等',
-    input_schema: {
+    parameters: {
       type: 'object' as const,
       properties: {
         date_range: {
@@ -92,7 +89,7 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'scan_calendar_events',
     description: '扫描用户日历，识别出差行程和相关会议',
-    input_schema: {
+    parameters: {
       type: 'object' as const,
       properties: {
         date_range: {
@@ -114,7 +111,7 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'parse_receipt',
     description: '解析票据/发票图片，提取金额、日期、商家等信息',
-    input_schema: {
+    parameters: {
       type: 'object' as const,
       properties: {
         receipt_url: {
@@ -133,7 +130,7 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_trip',
     description: '创建新的出差行程记录',
-    input_schema: {
+    parameters: {
       type: 'object' as const,
       properties: {
         title: { type: 'string', description: '行程标题' },
@@ -148,7 +145,7 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'estimate_trip_budget',
     description: '预估出差行程的预算',
-    input_schema: {
+    parameters: {
       type: 'object' as const,
       properties: {
         destination: { type: 'string', description: '目的地' },
@@ -163,7 +160,7 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_reimbursement',
     description: '创建新的报销申请',
-    input_schema: {
+    parameters: {
       type: 'object' as const,
       properties: {
         title: { type: 'string', description: '报销标题' },
@@ -176,7 +173,7 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'add_expense_item',
     description: '向报销单添加费用明细',
-    input_schema: {
+    parameters: {
       type: 'object' as const,
       properties: {
         reimbursement_id: { type: 'string', description: '报销单 ID' },
@@ -195,7 +192,7 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'check_compliance',
     description: '检查报销项目是否符合公司政策',
-    input_schema: {
+    parameters: {
       type: 'object' as const,
       properties: {
         reimbursement_id: { type: 'string', description: '报销单 ID' },
@@ -207,7 +204,7 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'submit_reimbursement',
     description: '提交报销申请进入审批流程',
-    input_schema: {
+    parameters: {
       type: 'object' as const,
       properties: {
         reimbursement_id: { type: 'string', description: '报销单 ID' },
@@ -218,7 +215,7 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_missing_items',
     description: '检查行程或报销单缺少的材料',
-    input_schema: {
+    parameters: {
       type: 'object' as const,
       properties: {
         trip_id: { type: 'string', description: '行程 ID' },
@@ -234,12 +231,12 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
 // ============================================================================
 
 export class ReimbursementOrchestrator {
-  private client: Anthropic;
+  private client: OpenRouterClient;
   private context: AgentContext;
-  private toolHandlers: Map<string, (params: any) => Promise<any>>;
+  private toolHandlers: Map<string, (params: Record<string, unknown>) => Promise<Record<string, unknown>>>;
 
   constructor(context: AgentContext) {
-    this.client = new Anthropic();
+    this.client = new OpenRouterClient();
     this.context = context;
     this.toolHandlers = new Map();
     this.registerToolHandlers();
@@ -316,20 +313,21 @@ export class ReimbursementOrchestrator {
     const systemPrompt = this.buildSystemPrompt();
 
     // 构建消息历史
-    const messages: Anthropic.MessageParam[] = this.context.conversationHistory.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
+    const messages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      ...this.context.conversationHistory.map((msg) => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+      })),
+    ];
 
     try {
-      // 调用 Claude API
-      const response = await this.client.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
-        system: systemPrompt,
-        tools: ORCHESTRATOR_TOOLS,
+      // 调用 OpenRouter API
+      const response = await this.client.chatWithTools(
         messages,
-      });
+        ORCHESTRATOR_TOOLS,
+        { maxTokens: 4096 }
+      );
 
       // 处理响应
       return await this.processResponse(response);
@@ -363,24 +361,24 @@ ${this.context.currentReimbursement ? `当前报销单: ${this.context.currentRe
   /**
    * 处理 API 响应
    */
-  private async processResponse(response: Anthropic.Message): Promise<AgentResponse> {
+  private async processResponse(response: {
+    content: string;
+    toolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> }>;
+    finishReason: string;
+  }): Promise<AgentResponse> {
     const actions: AgentAction[] = [];
-    let textContent = '';
+    const textContent = response.content || '';
 
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        textContent += block.text;
-      } else if (block.type === 'tool_use') {
-        // 执行工具调用
-        const handler = this.toolHandlers.get(block.name);
-        if (handler) {
-          const result = await handler(block.input);
-          actions.push({
-            type: block.name as AgentActionType,
-            params: block.input as Record<string, any>,
-            description: result.message || `执行 ${block.name}`,
-          });
-        }
+    // 处理工具调用
+    for (const toolCall of response.toolCalls) {
+      const handler = this.toolHandlers.get(toolCall.name);
+      if (handler) {
+        const result = await handler(toolCall.arguments);
+        actions.push({
+          type: toolCall.name as AgentActionType,
+          params: toolCall.arguments as Record<string, unknown>,
+          description: (result as { message?: string }).message || `执行 ${toolCall.name}`,
+        });
       }
     }
 
