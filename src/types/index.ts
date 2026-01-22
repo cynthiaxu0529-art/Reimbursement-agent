@@ -242,7 +242,7 @@ export interface Trip {
   userId: string;
   title: string;                          // "北京出差 - 客户拜访"
   purpose?: string;                       // 出差目的
-  destination?: string;                   // 目的地（允许缺失）
+  destination: string;                     // 目的地（必填）
   startDate: Date;
   endDate: Date;
   status: TripStatusType;
@@ -680,3 +680,231 @@ export interface PaginatedResponse<T> extends ApiResponse<T[]> {
     totalPages: number;
   };
 }
+
+// ----------------------------------------------------------------------------
+// Skill 插件系统
+// ----------------------------------------------------------------------------
+
+/**
+ * Skill 类型 - 用户可自定义的报销相关能力
+ */
+export const SkillCategory = {
+  DATA_EXTRACTION: 'data_extraction',     // 数据提取（如从特定系统提取数据）
+  VALIDATION: 'validation',               // 验证类（如发票真伪验证）
+  CALCULATION: 'calculation',             // 计算类（如里程补贴计算）
+  INTEGRATION: 'integration',             // 集成类（如与 ERP 系统对接）
+  NOTIFICATION: 'notification',           // 通知类（如发送到特定渠道）
+  APPROVAL: 'approval',                   // 审批类（如自定义审批逻辑）
+  REPORT: 'report',                       // 报表类（如生成自定义报表）
+  AI_ENHANCEMENT: 'ai_enhancement',       // AI 增强类（如自定义 AI 处理）
+} as const;
+
+export type SkillCategoryType = typeof SkillCategory[keyof typeof SkillCategory];
+
+/**
+ * Skill 触发时机
+ */
+export const SkillTrigger = {
+  ON_RECEIPT_UPLOAD: 'on_receipt_upload',           // 票据上传时
+  ON_EXPENSE_ADD: 'on_expense_add',                 // 添加费用时
+  ON_REIMBURSEMENT_CREATE: 'on_reimbursement_create', // 创建报销单时
+  ON_REIMBURSEMENT_SUBMIT: 'on_reimbursement_submit', // 提交报销单时
+  ON_APPROVAL_REQUEST: 'on_approval_request',       // 请求审批时
+  ON_APPROVAL_COMPLETE: 'on_approval_complete',     // 审批完成时
+  ON_PAYMENT_REQUEST: 'on_payment_request',         // 请求付款时
+  ON_PAYMENT_COMPLETE: 'on_payment_complete',       // 付款完成时
+  ON_TRIP_CREATE: 'on_trip_create',                 // 创建行程时
+  ON_TRIP_COMPLETE: 'on_trip_complete',             // 行程结束时
+  ON_SCHEDULE: 'on_schedule',                       // 定时触发
+  ON_MANUAL: 'on_manual',                           // 手动触发
+  ON_CHAT_COMMAND: 'on_chat_command',               // Chat 命令触发
+} as const;
+
+export type SkillTriggerType = typeof SkillTrigger[keyof typeof SkillTrigger];
+
+/**
+ * Skill 定义
+ */
+export interface Skill {
+  id: string;
+  tenantId: string;
+
+  // 基本信息
+  name: string;
+  description: string;
+  category: SkillCategoryType;
+  icon?: string;
+  version: string;
+  author?: string;
+
+  // 触发配置
+  triggers: SkillTriggerConfig[];
+
+  // 执行配置
+  executor: SkillExecutor;
+
+  // 输入输出定义
+  inputSchema?: SkillIOSchema;
+  outputSchema?: SkillIOSchema;
+
+  // 权限和状态
+  permissions: SkillPermission[];
+  isActive: boolean;
+  isBuiltIn: boolean;                     // 是否系统内置
+
+  // 配置
+  config?: Record<string, any>;
+  configSchema?: SkillConfigSchema;
+
+  // 统计
+  stats?: SkillStats;
+
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Skill 触发配置
+ */
+export interface SkillTriggerConfig {
+  type: SkillTriggerType;
+  conditions?: SkillCondition[];          // 触发条件
+  priority?: number;                      // 优先级
+  async?: boolean;                        // 是否异步执行
+  timeout?: number;                       // 超时时间（毫秒）
+}
+
+/**
+ * Skill 条件
+ */
+export interface SkillCondition {
+  field: string;                          // 字段路径，如 "expense.category"
+  operator: 'eq' | 'ne' | 'gt' | 'lt' | 'in' | 'not_in' | 'contains' | 'regex';
+  value: any;
+}
+
+/**
+ * Skill 执行器
+ */
+export interface SkillExecutor {
+  type: 'javascript' | 'webhook' | 'mcp' | 'ai_prompt';
+
+  // JavaScript 执行器
+  code?: string;
+
+  // Webhook 执行器
+  webhookUrl?: string;
+  webhookMethod?: 'GET' | 'POST' | 'PUT';
+  webhookHeaders?: Record<string, string>;
+
+  // MCP 执行器
+  mcpServer?: string;
+  mcpTool?: string;
+
+  // AI Prompt 执行器
+  prompt?: string;
+  model?: string;
+}
+
+/**
+ * Skill 输入/输出 Schema
+ */
+export interface SkillIOSchema {
+  type: 'object' | 'array' | 'string' | 'number' | 'boolean';
+  properties?: Record<string, {
+    type: string;
+    description?: string;
+    required?: boolean;
+    default?: any;
+  }>;
+  description?: string;
+}
+
+/**
+ * Skill 配置 Schema
+ */
+export interface SkillConfigSchema {
+  fields: {
+    key: string;
+    type: 'string' | 'number' | 'boolean' | 'select' | 'secret';
+    label: string;
+    description?: string;
+    required?: boolean;
+    default?: any;
+    options?: { label: string; value: any }[];  // for select type
+  }[];
+}
+
+/**
+ * Skill 权限
+ */
+export interface SkillPermission {
+  resource: 'reimbursement' | 'trip' | 'receipt' | 'user' | 'policy' | 'payment';
+  actions: ('read' | 'write' | 'delete')[];
+}
+
+/**
+ * Skill 统计
+ */
+export interface SkillStats {
+  totalExecutions: number;
+  successfulExecutions: number;
+  failedExecutions: number;
+  averageExecutionTime: number;           // 毫秒
+  lastExecutedAt?: Date;
+}
+
+/**
+ * Skill 执行结果
+ */
+export interface SkillExecutionResult {
+  success: boolean;
+  data?: any;
+  error?: {
+    code: string;
+    message: string;
+    details?: any;
+  };
+  executionTime: number;
+  logs?: string[];
+}
+
+/**
+ * Skill 执行上下文
+ */
+export interface SkillExecutionContext {
+  trigger: SkillTriggerType;
+  user: User;
+  tenant: Tenant;
+
+  // 根据触发类型，以下字段可选
+  reimbursement?: Reimbursement;
+  trip?: Trip;
+  receipt?: Receipt;
+  expenseItem?: ReimbursementItem;
+
+  // 额外参数
+  params?: Record<string, any>;
+}
+
+/**
+ * 内置 Skill 示例
+ */
+export const BUILT_IN_SKILLS = {
+  // 里程补贴计算
+  MILEAGE_CALCULATOR: 'mileage_calculator',
+  // 发票验真
+  INVOICE_VERIFICATION: 'invoice_verification',
+  // 汇率转换
+  CURRENCY_CONVERTER: 'currency_converter',
+  // 预算检查
+  BUDGET_CHECKER: 'budget_checker',
+  // 审批提醒
+  APPROVAL_REMINDER: 'approval_reminder',
+  // 报销统计
+  EXPENSE_ANALYTICS: 'expense_analytics',
+  // 重复检测
+  DUPLICATE_DETECTOR: 'duplicate_detector',
+  // 智能分类
+  SMART_CATEGORIZER: 'smart_categorizer',
+} as const;

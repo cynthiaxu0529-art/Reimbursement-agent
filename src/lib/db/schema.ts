@@ -305,6 +305,65 @@ export const auditLogs = pgTable('audit_logs', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
+/**
+ * Skills 表
+ */
+export const skills = pgTable('skills', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+
+  name: text('name').notNull(),
+  description: text('description'),
+  category: text('category').notNull(),
+  icon: text('icon'),
+  version: text('version').notNull().default('1.0.0'),
+  author: text('author'),
+
+  triggers: jsonb('triggers').notNull().default([]),
+  executor: jsonb('executor').notNull(),
+
+  inputSchema: jsonb('input_schema'),
+  outputSchema: jsonb('output_schema'),
+
+  permissions: jsonb('permissions').notNull().default([]),
+  isActive: boolean('is_active').notNull().default(true),
+  isBuiltIn: boolean('is_built_in').notNull().default(false),
+
+  config: jsonb('config'),
+  configSchema: jsonb('config_schema'),
+
+  stats: jsonb('stats'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * Skill 执行日志表
+ */
+export const skillExecutionLogs = pgTable('skill_execution_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  skillId: uuid('skill_id')
+    .notNull()
+    .references(() => skills.id),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  userId: uuid('user_id').references(() => users.id),
+
+  trigger: text('trigger').notNull(),
+  success: boolean('success').notNull(),
+  executionTime: integer('execution_time').notNull(), // 毫秒
+
+  input: jsonb('input'),
+  output: jsonb('output'),
+  error: jsonb('error'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
 // ============================================================================
 // Relations
 // ============================================================================
