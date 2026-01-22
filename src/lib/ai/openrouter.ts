@@ -30,7 +30,8 @@ export class OpenRouterClient {
   private getClient(): OpenAI {
     if (this.client) return this.client;
 
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    // 支持多种环境变量名
+    const apiKey = process.env.OPENROUTER_API_KEY || process.env.openrouter || process.env.OPENROUTER;
     if (!apiKey) {
       throw new Error('OPENROUTER_API_KEY environment variable is required');
     }
