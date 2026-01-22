@@ -4,6 +4,9 @@ import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems } from '@/lib/db/schema';
 import { eq, desc, and } from 'drizzle-orm';
 
+// 强制动态渲染，避免构建时预渲染
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/reimbursements - 获取报销列表
  */

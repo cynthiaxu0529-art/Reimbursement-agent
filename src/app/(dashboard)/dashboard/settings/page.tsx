@@ -1,374 +1,624 @@
 'use client';
 
 import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 
 const tabs = [
-  { id: 'general', label: '基本设置' },
-  { id: 'policies', label: '报销政策' },
-  { id: 'skills', label: 'Skills 插件' },
-  { id: 'integrations', label: '集成' },
-  { id: 'team', label: '团队' },
+  { id: 'profile', label: '👤 个人信息', icon: '👤' },
+  { id: 'company', label: '🏢 公司设置', icon: '🏢' },
+  { id: 'team', label: '👥 团队管理', icon: '👥' },
+  { id: 'policies', label: '📋 报销政策', icon: '📋' },
 ];
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('general');
+  const [activeTab, setActiveTab] = useState('profile');
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('employee');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+
+  // Mock user data
+  const [profile, setProfile] = useState({
+    name: '用户',
+    email: 'user@example.com',
+    department: '',
+    phone: '',
+    bankName: '',
+    bankAccount: '',
+  });
+
+  // Mock company data
+  const [company, setCompany] = useState({
+    name: '我的公司',
+    currency: 'CNY',
+    autoApproveLimit: 100,
+  });
+
+  // Mock team members
+  const [members] = useState([
+    { id: '1', name: '张三', email: 'zhangsan@example.com', role: 'admin', department: '技术部', status: 'active' },
+    { id: '2', name: '李四', email: 'lisi@example.com', role: 'manager', department: '产品部', status: 'active' },
+  ]);
+
+  const [pendingInvites] = useState([
+    { email: 'newuser@example.com', role: 'employee', sentAt: '2024-01-20' },
+  ]);
+
+  const handleSaveProfile = async () => {
+    setSaving(true);
+    // TODO: Call API to save profile
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    setMessage('个人信息已保存');
+    setSaving(false);
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const handleSaveCompany = async () => {
+    setSaving(true);
+    // TODO: Call API to save company settings
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    setMessage('公司设置已保存');
+    setSaving(false);
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const handleInvite = async () => {
+    if (!inviteEmail) return;
+    setSaving(true);
+    // TODO: Call API to send invite
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    setMessage(`邀请已发送至 ${inviteEmail}`);
+    setShowInviteModal(false);
+    setInviteEmail('');
+    setSaving(false);
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '0.625rem 0.875rem',
+    border: '1px solid #d1d5db',
+    borderRadius: '0.5rem',
+    fontSize: '0.875rem',
+    outline: 'none',
+    boxSizing: 'border-box' as const,
+  };
+
+  const labelStyle = {
+    display: 'block',
+    fontSize: '0.875rem',
+    fontWeight: 500,
+    color: '#374151',
+    marginBottom: '0.375rem',
+  };
+
+  const cardStyle = {
+    backgroundColor: 'white',
+    borderRadius: '0.75rem',
+    border: '1px solid #e5e7eb',
+    overflow: 'hidden',
+  };
+
+  const roleLabels: Record<string, string> = {
+    admin: '管理员',
+    manager: '经理',
+    finance: '财务',
+    employee: '员工',
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold">设置</h2>
-        <p className="text-gray-600">管理报销系统的配置和集成</p>
-      </div>
+    <div>
+      {/* Success Message */}
+      {message && (
+        <div style={{
+          position: 'fixed',
+          top: '1rem',
+          right: '1rem',
+          backgroundColor: '#dcfce7',
+          color: '#166534',
+          padding: '0.75rem 1rem',
+          borderRadius: '0.5rem',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+          zIndex: 50,
+        }}>
+          ✅ {message}
+        </div>
+      )}
 
       {/* Tabs */}
-      <div className="border-b">
-        <nav className="flex gap-4">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`pb-3 px-1 text-sm font-medium border-b-2 transition ${
-                activeTab === tab.id
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
+      <div style={{
+        display: 'flex',
+        gap: '0.5rem',
+        marginBottom: '1.5rem',
+        borderBottom: '1px solid #e5e7eb',
+        paddingBottom: '0.5rem',
+      }}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              padding: '0.5rem 1rem',
+              borderRadius: '0.5rem',
+              border: 'none',
+              backgroundColor: activeTab === tab.id ? '#eff6ff' : 'transparent',
+              color: activeTab === tab.id ? '#2563eb' : '#6b7280',
+              fontWeight: 500,
+              fontSize: '0.875rem',
+              cursor: 'pointer',
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* General Settings */}
-      {activeTab === 'general' && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>公司信息</CardTitle>
-              <CardDescription>设置公司的基本信息</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">公司名称</label>
-                <Input defaultValue="我的公司" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">记账本位币</label>
-                <select className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm">
-                  <option value="CNY">人民币 (CNY)</option>
-                  <option value="USD">美元 (USD)</option>
-                  <option value="EUR">欧元 (EUR)</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">财年开始月份</label>
-                <select className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm">
-                  <option value="1">1月</option>
-                  <option value="4">4月</option>
-                  <option value="7">7月</option>
-                </select>
-              </div>
-              <Button>保存更改</Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>审批流程</CardTitle>
-              <CardDescription>配置报销审批的流程和规则</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+      {/* Profile Tab */}
+      {activeTab === 'profile' && (
+        <div style={{ maxWidth: '600px' }}>
+          <div style={cardStyle}>
+            <div style={{ padding: '1.25rem', borderBottom: '1px solid #e5e7eb' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>个人信息</h3>
+              <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                更新您的个人资料和银行账户信息
+              </p>
+            </div>
+            <div style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'grid', gap: '1rem' }}>
                 <div>
-                  <p className="font-medium">自动审批</p>
-                  <p className="text-sm text-gray-500">金额低于阈值的报销自动批准</p>
+                  <label style={labelStyle}>姓名</label>
+                  <input
+                    type="text"
+                    value={profile.name}
+                    onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                    style={inputStyle}
+                  />
                 </div>
-                <div className="flex items-center gap-2">
-                  <Input type="number" className="w-24" defaultValue="100" />
-                  <span className="text-sm text-gray-500">元以下</span>
-                </div>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div>
-                  <p className="font-medium">多级审批</p>
-                  <p className="text-sm text-gray-500">超过金额需要更高级别审批</p>
+                  <label style={labelStyle}>邮箱</label>
+                  <input
+                    type="email"
+                    value={profile.email}
+                    disabled
+                    style={{ ...inputStyle, backgroundColor: '#f3f4f6' }}
+                  />
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" className="sr-only peer" defaultChecked />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                </label>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+                <div>
+                  <label style={labelStyle}>部门</label>
+                  <input
+                    type="text"
+                    value={profile.department}
+                    onChange={(e) => setProfile({ ...profile, department: e.target.value })}
+                    placeholder="例如：技术部"
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label style={labelStyle}>手机号</label>
+                  <input
+                    type="tel"
+                    value={profile.phone}
+                    onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+                    placeholder="例如：13800138000"
+                    style={inputStyle}
+                  />
+                </div>
 
-      {/* Policies */}
-      {activeTab === 'policies' && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>报销政策</CardTitle>
-                <CardDescription>定义费用限额和审批规则</CardDescription>
-              </div>
-              <Button>
-                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                新建政策
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {[
-                { name: '差旅费报销政策', rules: 9, status: 'active' },
-                { name: '技术费用报销政策', rules: 3, status: 'active' },
-                { name: '业务费用报销政策', rules: 3, status: 'active' },
-              ].map((policy) => (
-                <div
-                  key={policy.name}
-                  className="flex items-center justify-between p-4 border rounded-lg"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium">{policy.name}</p>
-                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs">
-                        启用中
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-500">{policy.rules} 条规则</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm">编辑</Button>
-                    <Button variant="ghost" size="sm">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-                      </svg>
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="bg-blue-50 border-blue-200">
-            <CardContent className="p-6">
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <h4 className="font-semibold text-blue-900 mb-1">通过对话创建政策</h4>
-                  <p className="text-sm text-blue-700 mb-3">
-                    试试说："创建一个差旅政策，机票最高2000元，一线城市酒店800元/晚"
-                  </p>
-                  <Button size="sm" className="bg-blue-600 hover:bg-blue-700">
-                    开始对话
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Skills */}
-      {activeTab === 'skills' && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Skills 插件</CardTitle>
-                <CardDescription>扩展报销系统的能力</CardDescription>
-              </div>
-              <Button>
-                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                创建 Skill
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {[
-                {
-                  name: '里程补贴计算',
-                  description: '根据行驶里程自动计算补贴金额',
-                  category: 'calculation',
-                  isBuiltIn: true,
-                  isActive: true,
-                },
-                {
-                  name: '重复报销检测',
-                  description: '检测是否存在重复的报销项目',
-                  category: 'validation',
-                  isBuiltIn: true,
-                  isActive: true,
-                },
-                {
-                  name: '智能费用分类',
-                  description: '使用 AI 自动识别费用类别',
-                  category: 'ai_enhancement',
-                  isBuiltIn: true,
-                  isActive: true,
-                },
-                {
-                  name: 'ERP 同步',
-                  description: '将报销数据同步到 ERP 系统',
-                  category: 'integration',
-                  isBuiltIn: false,
-                  isActive: false,
-                },
-              ].map((skill) => (
-                <div
-                  key={skill.name}
-                  className="flex items-center justify-between p-4 border rounded-lg"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                      <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                      </svg>
+                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
+                  <h4 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827', marginBottom: '1rem' }}>
+                    💳 银行账户（用于报销打款）
+                  </h4>
+                  <div style={{ display: 'grid', gap: '1rem' }}>
+                    <div>
+                      <label style={labelStyle}>开户银行</label>
+                      <input
+                        type="text"
+                        value={profile.bankName}
+                        onChange={(e) => setProfile({ ...profile, bankName: e.target.value })}
+                        placeholder="例如：中国工商银行"
+                        style={inputStyle}
+                      />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{skill.name}</p>
-                        {skill.isBuiltIn && (
-                          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
-                            内置
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-500">{skill.description}</p>
+                      <label style={labelStyle}>银行账号</label>
+                      <input
+                        type="text"
+                        value={profile.bankAccount}
+                        onChange={(e) => setProfile({ ...profile, bankAccount: e.target.value })}
+                        placeholder="例如：6222021234567890123"
+                        style={inputStyle}
+                      />
                     </div>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
+                </div>
+
+                <button
+                  onClick={handleSaveProfile}
+                  disabled={saving}
+                  style={{
+                    marginTop: '1rem',
+                    padding: '0.625rem 1.25rem',
+                    backgroundColor: saving ? '#9ca3af' : '#2563eb',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '0.5rem',
+                    fontWeight: 500,
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {saving ? '保存中...' : '保存更改'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Company Tab */}
+      {activeTab === 'company' && (
+        <div style={{ maxWidth: '600px' }}>
+          <div style={cardStyle}>
+            <div style={{ padding: '1.25rem', borderBottom: '1px solid #e5e7eb' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>公司设置</h3>
+              <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                管理公司的基本信息和报销规则
+              </p>
+            </div>
+            <div style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'grid', gap: '1rem' }}>
+                <div>
+                  <label style={labelStyle}>公司名称</label>
+                  <input
+                    type="text"
+                    value={company.name}
+                    onChange={(e) => setCompany({ ...company, name: e.target.value })}
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label style={labelStyle}>记账本位币</label>
+                  <select
+                    value={company.currency}
+                    onChange={(e) => setCompany({ ...company, currency: e.target.value })}
+                    style={inputStyle}
+                  >
+                    <option value="CNY">人民币 (CNY)</option>
+                    <option value="USD">美元 (USD)</option>
+                    <option value="EUR">欧元 (EUR)</option>
+                    <option value="JPY">日元 (JPY)</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>自动审批金额上限</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <input
-                      type="checkbox"
-                      className="sr-only peer"
-                      defaultChecked={skill.isActive}
+                      type="number"
+                      value={company.autoApproveLimit}
+                      onChange={(e) => setCompany({ ...company, autoApproveLimit: parseInt(e.target.value) || 0 })}
+                      style={{ ...inputStyle, width: '120px' }}
                     />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Integrations */}
-      {activeTab === 'integrations' && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>已集成服务</CardTitle>
-              <CardDescription>管理第三方服务的连接</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {[
-                {
-                  name: 'FluxPay',
-                  description: '自动打款服务',
-                  status: 'connected',
-                  icon: '💳',
-                },
-                {
-                  name: 'Gmail',
-                  description: '邮件收集和票据提取',
-                  status: 'connected',
-                  icon: '📧',
-                },
-                {
-                  name: 'Google Calendar',
-                  description: '日历行程同步',
-                  status: 'disconnected',
-                  icon: '📅',
-                },
-                {
-                  name: 'Slack',
-                  description: '通知和提醒',
-                  status: 'disconnected',
-                  icon: '💬',
-                },
-              ].map((integration) => (
-                <div
-                  key={integration.name}
-                  className="flex items-center justify-between p-4 border rounded-lg"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-xl">
-                      {integration.icon}
-                    </div>
-                    <div>
-                      <p className="font-medium">{integration.name}</p>
-                      <p className="text-sm text-gray-500">{integration.description}</p>
-                    </div>
+                    <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>元以下自动批准</span>
                   </div>
-                  <Button
-                    variant={integration.status === 'connected' ? 'outline' : 'default'}
-                    size="sm"
-                  >
-                    {integration.status === 'connected' ? '已连接' : '连接'}
-                  </Button>
+                  <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.25rem' }}>
+                    设为 0 表示关闭自动审批
+                  </p>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
+
+                <button
+                  onClick={handleSaveCompany}
+                  disabled={saving}
+                  style={{
+                    marginTop: '1rem',
+                    padding: '0.625rem 1.25rem',
+                    backgroundColor: saving ? '#9ca3af' : '#2563eb',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '0.5rem',
+                    fontWeight: 500,
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {saving ? '保存中...' : '保存更改'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Team */}
+      {/* Team Tab */}
       {activeTab === 'team' && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>团队成员</CardTitle>
-                <CardDescription>管理团队成员和权限</CardDescription>
+        <div>
+          {/* Invite Button */}
+          <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => setShowInviteModal(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.625rem 1rem',
+                backgroundColor: '#2563eb',
+                color: 'white',
+                border: 'none',
+                borderRadius: '0.5rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              ➕ 邀请成员
+            </button>
+          </div>
+
+          {/* Pending Invites */}
+          {pendingInvites.length > 0 && (
+            <div style={{ ...cardStyle, marginBottom: '1rem' }}>
+              <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e5e7eb', backgroundColor: '#fef3c7' }}>
+                <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#92400e' }}>
+                  ⏳ 待接受邀请 ({pendingInvites.length})
+                </h3>
               </div>
-              <Button>邀请成员</Button>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {[
-                  { name: '张三', email: 'zhangsan@example.com', role: 'admin', department: '技术部' },
-                  { name: '李四', email: 'lisi@example.com', role: 'manager', department: '技术部' },
-                  { name: '王五', email: 'wangwu@example.com', role: 'finance', department: '财务部' },
-                  { name: '赵六', email: 'zhaoliu@example.com', role: 'employee', department: '市场部' },
-                ].map((member) => (
+              <div>
+                {pendingInvites.map((invite) => (
                   <div
-                    key={member.email}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                    key={invite.email}
+                    style={{
+                      padding: '0.875rem 1.25rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      borderBottom: '1px solid #f3f4f6',
+                    }}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
-                        <span className="text-white font-medium">{member.name[0]}</span>
-                      </div>
-                      <div>
-                        <p className="font-medium">{member.name}</p>
-                        <p className="text-sm text-gray-500">{member.email}</p>
-                      </div>
+                    <div>
+                      <p style={{ fontWeight: 500, color: '#111827' }}>{invite.email}</p>
+                      <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                        邀请于 {invite.sentAt} · {roleLabels[invite.role]}
+                      </p>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <span className="text-sm text-gray-500">{member.department}</span>
-                      <select className="h-8 rounded-md border border-input bg-transparent px-2 text-sm">
-                        <option value="employee" selected={member.role === 'employee'}>员工</option>
-                        <option value="manager" selected={member.role === 'manager'}>经理</option>
-                        <option value="finance" selected={member.role === 'finance'}>财务</option>
-                        <option value="admin" selected={member.role === 'admin'}>管理员</option>
-                      </select>
-                    </div>
+                    <button
+                      style={{
+                        padding: '0.375rem 0.75rem',
+                        backgroundColor: 'white',
+                        color: '#dc2626',
+                        border: '1px solid #fecaca',
+                        borderRadius: '0.375rem',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      取消邀请
+                    </button>
                   </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          )}
+
+          {/* Team Members */}
+          <div style={cardStyle}>
+            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e5e7eb' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>
+                团队成员 ({members.length})
+              </h3>
+            </div>
+            <div>
+              {members.map((member) => (
+                <div
+                  key={member.id}
+                  style={{
+                    padding: '1rem 1.25rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    borderBottom: '1px solid #f3f4f6',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      backgroundColor: '#2563eb',
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}>
+                      <span style={{ color: 'white', fontWeight: 600 }}>{member.name[0]}</span>
+                    </div>
+                    <div>
+                      <p style={{ fontWeight: 500, color: '#111827' }}>{member.name}</p>
+                      <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>{member.email}</p>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <span style={{
+                      padding: '0.25rem 0.75rem',
+                      backgroundColor: '#f3f4f6',
+                      borderRadius: '9999px',
+                      fontSize: '0.75rem',
+                      color: '#4b5563',
+                    }}>
+                      {member.department}
+                    </span>
+                    <select
+                      defaultValue={member.role}
+                      style={{
+                        padding: '0.375rem 0.5rem',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '0.375rem',
+                        fontSize: '0.875rem',
+                        backgroundColor: 'white',
+                      }}
+                    >
+                      <option value="employee">员工</option>
+                      <option value="manager">经理</option>
+                      <option value="finance">财务</option>
+                      <option value="admin">管理员</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Policies Tab */}
+      {activeTab === 'policies' && (
+        <div>
+          <div style={cardStyle}>
+            <div style={{
+              padding: '1rem 1.25rem',
+              borderBottom: '1px solid #e5e7eb',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div>
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>报销政策</h3>
+                <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>定义费用限额和审批规则</p>
+              </div>
+              <button
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#2563eb',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '0.5rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                ➕ 新建政策
+              </button>
+            </div>
+            <div>
+              {[
+                { name: '差旅费报销政策', rules: 5, active: true },
+                { name: '日常办公费用政策', rules: 3, active: true },
+                { name: '客户招待费用政策', rules: 4, active: false },
+              ].map((policy, index) => (
+                <div
+                  key={index}
+                  style={{
+                    padding: '1rem 1.25rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    borderBottom: '1px solid #f3f4f6',
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <p style={{ fontWeight: 500, color: '#111827' }}>{policy.name}</p>
+                      <span style={{
+                        padding: '0.125rem 0.5rem',
+                        backgroundColor: policy.active ? '#dcfce7' : '#f3f4f6',
+                        color: policy.active ? '#166534' : '#6b7280',
+                        borderRadius: '9999px',
+                        fontSize: '0.75rem',
+                      }}>
+                        {policy.active ? '启用' : '停用'}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>{policy.rules} 条规则</p>
+                  </div>
+                  <button
+                    style={{
+                      padding: '0.375rem 0.75rem',
+                      backgroundColor: 'white',
+                      color: '#2563eb',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: '0.375rem',
+                      fontSize: '0.875rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    编辑
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Invite Modal */}
+      {showInviteModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100,
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '0.75rem',
+            padding: '1.5rem',
+            width: '100%',
+            maxWidth: '400px',
+            margin: '1rem',
+          }}>
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '1rem' }}>
+              邀请团队成员
+            </h3>
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={labelStyle}>邮箱地址</label>
+              <input
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="colleague@company.com"
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={labelStyle}>角色</label>
+              <select
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="employee">员工 - 可以提交报销</option>
+                <option value="manager">经理 - 可以审批下属报销</option>
+                <option value="finance">财务 - 可以处理打款</option>
+                <option value="admin">管理员 - 所有权限</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowInviteModal(false)}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: 'white',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '0.5rem',
+                  cursor: 'pointer',
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleInvite}
+                disabled={saving || !inviteEmail}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: saving || !inviteEmail ? '#9ca3af' : '#2563eb',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '0.5rem',
+                  cursor: saving || !inviteEmail ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {saving ? '发送中...' : '发送邀请'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

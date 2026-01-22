@@ -8,25 +8,39 @@ import { DrizzleAdapter } from '@auth/drizzle-adapter';
 import Credentials from 'next-auth/providers/credentials';
 import Google from 'next-auth/providers/google';
 import bcrypt from 'bcryptjs';
-import { db } from '@/lib/db';
+import { getDb } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: DrizzleAdapter(db),
+// 检查是否在构建时 - 检查多个条件
+const isBuilding = process.env.NODE_ENV === 'production' &&
+  typeof window === 'undefined' &&
+  !process.env.VERCEL_ENV;
+
+// 创建 NextAuth 配置
+const authConfig = {
+  // 只在有数据库连接时使用 adapter
+  ...(process.env.POSTGRES_URL || process.env.DATABASE_URL
+    ? { adapter: DrizzleAdapter(getDb()) }
+    : {}),
   session: {
-    strategy: 'jwt',
+    strategy: 'jwt' as const,
   },
   pages: {
     signIn: '/login',
     error: '/login',
   },
+  secret: process.env.AUTH_SECRET || 'development-secret-change-in-production',
   providers: [
-    // Google OAuth
-    Google({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    }),
+    // Google OAuth - 仅在有配置时启用
+    ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+      ? [
+          Google({
+            clientId: process.env.GOOGLE_CLIENT_ID,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+          }),
+        ]
+      : []),
 
     // 邮箱密码登录
     Credentials({
@@ -43,55 +57,69 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const email = credentials.email as string;
         const password = credentials.password as string;
 
-        // 查找用户
-        const user = await db.query.users.findFirst({
-          where: eq(users.email, email),
-        });
+        try {
+          // 查找用户
+          const db = getDb();
+          const user = await db.query.users.findFirst({
+            where: eq(users.email, email),
+          });
 
-        if (!user || !user.passwordHash) {
+          if (!user || !user.passwordHash) {
+            return null;
+          }
+
+          // 验证密码
+          const isValid = await bcrypt.compare(password, user.passwordHash);
+          if (!isValid) {
+            return null;
+          }
+
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            image: user.avatar,
+          };
+        } catch (error) {
+          console.error('Auth error:', error);
           return null;
         }
-
-        // 验证密码
-        const isValid = await bcrypt.compare(password, user.passwordHash);
-        if (!isValid) {
-          return null;
-        }
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          image: user.avatar,
-        };
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user }: { token: any; user: any }) {
       if (user) {
         token.id = user.id;
       }
       return token;
     },
-    async session({ session, token }) {
+    async session({ session, token }: { session: any; token: any }) {
       if (session.user && token.id) {
         session.user.id = token.id as string;
 
-        // 获取用户详细信息
-        const dbUser = await db.query.users.findFirst({
-          where: eq(users.id, token.id as string),
-        });
+        try {
+          // 获取用户详细信息
+          const db = getDb();
+          const dbUser = await db.query.users.findFirst({
+            where: eq(users.id, token.id as string),
+          });
 
-        if (dbUser) {
-          session.user.role = dbUser.role;
-          session.user.tenantId = dbUser.tenantId ?? undefined;
+          if (dbUser) {
+            session.user.role = dbUser.role;
+            session.user.tenantId = dbUser.tenantId ?? undefined;
+          }
+        } catch (error) {
+          console.error('Session callback error:', error);
         }
       }
       return session;
     },
   },
-});
+  trustHost: true,
+};
+
+export const { handlers, signIn, signOut, auth } = NextAuth(authConfig);
 
 // 扩展 Session 类型
 declare module 'next-auth' {

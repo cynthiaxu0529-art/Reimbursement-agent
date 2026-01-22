@@ -1,8 +1,5 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
-
-const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'Reimbursement Portal - 智能报销系统',
@@ -16,7 +13,15 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body className={inter.className}>{children}</body>
+      <body style={{
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        margin: 0,
+        padding: 0,
+        minHeight: '100vh',
+        backgroundColor: '#f9fafb'
+      }}>
+        {children}
+      </body>
     </html>
   );
 }
