@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createPaymentService } from '@/lib/mcp/fluxpay-client';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * 创建付款
  */

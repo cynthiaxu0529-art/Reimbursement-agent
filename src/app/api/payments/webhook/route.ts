@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * FluxPay Webhook 处理器
  * 接收支付状态更新通知

@@ -4,14 +4,20 @@ import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
+// 强制动态渲染，避免构建时预渲染
+export const dynamic = 'force-dynamic';
+
+type RouteParams = { params: Promise<{ id: string }> };
+
 /**
  * GET /api/reimbursements/[id] - 获取报销详情
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: RouteParams
 ) {
   try {
+    const { id } = await params;
     const session = await auth();
     if (!session?.user) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -19,7 +25,7 @@ export async function GET(
 
     const reimbursement = await db.query.reimbursements.findFirst({
       where: and(
-        eq(reimbursements.id, params.id),
+        eq(reimbursements.id, id),
         eq(reimbursements.userId, session.user.id)
       ),
       with: {
@@ -51,9 +57,10 @@ export async function GET(
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: RouteParams
 ) {
   try {
+    const { id } = await params;
     const session = await auth();
     if (!session?.user) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -62,7 +69,7 @@ export async function PUT(
     // 检查报销单是否存在且属于当前用户
     const existing = await db.query.reimbursements.findFirst({
       where: and(
-        eq(reimbursements.id, params.id),
+        eq(reimbursements.id, id),
         eq(reimbursements.userId, session.user.id)
       ),
     });
@@ -100,18 +107,18 @@ export async function PUT(
         submittedAt: newStatus === 'pending' ? new Date() : existing.submittedAt,
         updatedAt: new Date(),
       })
-      .where(eq(reimbursements.id, params.id))
+      .where(eq(reimbursements.id, id))
       .returning();
 
     // 如果有新的费用明细，删除旧的并创建新的
     if (items && items.length > 0) {
       await db
         .delete(reimbursementItems)
-        .where(eq(reimbursementItems.reimbursementId, params.id));
+        .where(eq(reimbursementItems.reimbursementId, id));
 
       await db.insert(reimbursementItems).values(
         items.map((item: any) => ({
-          reimbursementId: params.id,
+          reimbursementId: id,
           category: item.category,
           description: item.description || '',
           amount: parseFloat(item.amount) || 0,
@@ -143,9 +150,10 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: RouteParams
 ) {
   try {
+    const { id } = await params;
     const session = await auth();
     if (!session?.user) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -154,7 +162,7 @@ export async function DELETE(
     // 检查报销单是否存在且属于当前用户
     const existing = await db.query.reimbursements.findFirst({
       where: and(
-        eq(reimbursements.id, params.id),
+        eq(reimbursements.id, id),
         eq(reimbursements.userId, session.user.id)
       ),
     });
@@ -174,12 +182,12 @@ export async function DELETE(
     // 删除费用明细
     await db
       .delete(reimbursementItems)
-      .where(eq(reimbursementItems.reimbursementId, params.id));
+      .where(eq(reimbursementItems.reimbursementId, id));
 
     // 删除报销单
     await db
       .delete(reimbursements)
-      .where(eq(reimbursements.id, params.id));
+      .where(eq(reimbursements.id, id));
 
     return NextResponse.json({
       success: true,
