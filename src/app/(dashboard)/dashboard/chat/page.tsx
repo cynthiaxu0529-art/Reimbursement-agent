@@ -17,8 +17,44 @@ interface Message {
     type: string;
     label: string;
     href?: string;
+    data?: any;
   }[];
+  ocrResult?: OCRResult;
 }
+
+interface OCRResult {
+  type: string;
+  vendor?: string;
+  amount?: number;
+  currency?: string;
+  date?: string;
+  invoiceNumber?: string;
+  category?: string;
+  confidence: number;
+  rawText?: string;
+}
+
+const receiptTypeLabels: Record<string, string> = {
+  'vat_invoice': '增值税普通发票',
+  'vat_special': '增值税专用发票',
+  'flight_itinerary': '机票行程单',
+  'train_ticket': '火车票',
+  'hotel_receipt': '酒店发票',
+  'taxi_receipt': '出租车发票',
+  'ride_hailing': '网约车发票',
+  'restaurant': '餐饮发票',
+  'general_receipt': '通用收据',
+  'unknown': '未知类型',
+};
+
+const categoryLabels: Record<string, string> = {
+  'flight': '机票',
+  'train': '火车票',
+  'hotel': '酒店住宿',
+  'meal': '餐饮',
+  'taxi': '交通',
+  'other': '其他',
+};
 
 const samplePrompts = [
   { text: '帮我创建一笔报销', icon: '📝' },
@@ -47,6 +83,7 @@ export default function ChatPage() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [lastOCRResult, setLastOCRResult] = useState<OCRResult | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -70,6 +107,61 @@ export default function ChatPage() {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  // 将文件转换为 base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const result = reader.result as string;
+        // 移除 data:image/xxx;base64, 前缀
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  // 调用 OCR API
+  const callOCRAPI = async (file: File): Promise<OCRResult> => {
+    try {
+      const base64 = await fileToBase64(file);
+      const mimeType = file.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+
+      const response = await fetch('/api/ocr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          imageBase64: base64,
+          mimeType: mimeType,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        return {
+          type: result.data.type || 'unknown',
+          vendor: result.data.vendor,
+          amount: result.data.amount,
+          currency: result.data.currency || 'CNY',
+          date: result.data.date ? new Date(result.data.date).toLocaleDateString('zh-CN') : undefined,
+          invoiceNumber: result.data.invoiceNumber,
+          category: result.data.category,
+          confidence: result.data.confidence || 0,
+          rawText: result.data.rawText,
+        };
+      } else {
+        throw new Error(result.error || 'OCR 识别失败');
+      }
+    } catch (error) {
+      console.error('OCR error:', error);
+      throw error;
+    }
+  };
+
   const sendMessage = async (text?: string) => {
     const messageText = text || input;
     if ((!messageText.trim() && uploadedFiles.length === 0) || isLoading) return;
@@ -89,26 +181,49 @@ export default function ChatPage() {
 
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
-    const hadFiles = uploadedFiles.length > 0;
+    const filesToProcess = [...uploadedFiles];
     setUploadedFiles([]);
     setIsLoading(true);
 
-    // 模拟 AI 响应
-    setTimeout(() => {
+    try {
       let response: Message;
 
-      if (hadFiles) {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: '我已收到你上传的票据，正在识别中...\n\n**识别结果：**\n\n已识别到以下信息，请确认：\n\n• 类型：增值税普通发票\n• 金额：待识别\n• 日期：待识别\n• 商家：待识别\n\n你想用这张票据创建报销单吗？',
-          timestamp: new Date(),
-          actions: [
-            { type: 'create', label: '创建报销单', href: '/dashboard/reimbursements/new' },
-            { type: 'upload_more', label: '继续上传' },
-            { type: 'cancel', label: '取消' },
-          ],
-        };
+      if (filesToProcess.length > 0) {
+        // 处理上传的文件 - 调用真正的 OCR API
+        const file = filesToProcess[0]; // 先处理第一个文件
+
+        try {
+          const ocrResult = await callOCRAPI(file);
+          setLastOCRResult(ocrResult);
+
+          const typeLabel = receiptTypeLabels[ocrResult.type] || ocrResult.type;
+          const categoryLabel = ocrResult.category ? (categoryLabels[ocrResult.category] || ocrResult.category) : '待分类';
+          const confidencePercent = Math.round(ocrResult.confidence * 100);
+
+          response = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: `我已识别到你上传的票据！\n\n**识别结果：**\n\n• **类型**：${typeLabel}\n• **商家**：${ocrResult.vendor || '未识别'}\n• **金额**：${ocrResult.amount ? `¥${ocrResult.amount.toLocaleString()}` : '未识别'}\n• **日期**：${ocrResult.date || '未识别'}\n• **发票号**：${ocrResult.invoiceNumber || '未识别'}\n• **费用类别**：${categoryLabel}\n• **识别置信度**：${confidencePercent}%\n\n确认信息无误后，你可以创建报销单。`,
+            timestamp: new Date(),
+            ocrResult: ocrResult,
+            actions: [
+              { type: 'create_with_data', label: '创建报销单', href: '/dashboard/reimbursements/new', data: ocrResult },
+              { type: 'upload_more', label: '继续上传' },
+              { type: 'cancel', label: '取消' },
+            ],
+          };
+        } catch (error) {
+          response = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: `抱歉，票据识别遇到问题。\n\n**错误信息**：${error instanceof Error ? error.message : '未知错误'}\n\n可能的原因：\n• 图片不够清晰\n• 票据格式不支持\n• 服务暂时不可用\n\n请尝试重新上传更清晰的图片，或手动创建报销单。`,
+            timestamp: new Date(),
+            actions: [
+              { type: 'upload_more', label: '重新上传' },
+              { type: 'manual', label: '手动填写', href: '/dashboard/reimbursements/new' },
+            ],
+          };
+        }
       } else if (messageText.includes('创建') || messageText.includes('报销')) {
         response = {
           id: (Date.now() + 1).toString(),
@@ -160,8 +275,9 @@ export default function ChatPage() {
       }
 
       setMessages((prev) => [...prev, response]);
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -171,8 +287,13 @@ export default function ChatPage() {
     }
   };
 
-  const handleActionClick = (action: { type: string; label: string; href?: string }) => {
+  const handleActionClick = (action: { type: string; label: string; href?: string; data?: any }) => {
     if (action.href) {
+      // 如果有 OCR 数据，将其存储到 sessionStorage 供报销页面使用
+      if (action.data || lastOCRResult) {
+        const dataToStore = action.data || lastOCRResult;
+        sessionStorage.setItem('ocrData', JSON.stringify(dataToStore));
+      }
       router.push(action.href);
     } else if (action.type === 'upload' || action.type === 'upload_more') {
       fileInputRef.current?.click();
@@ -272,9 +393,9 @@ export default function ChatPage() {
                       onClick={() => handleActionClick(action)}
                       style={{
                         padding: '0.375rem 0.75rem',
-                        backgroundColor: action.type === 'create' || action.type === 'manual' ? '#2563eb' : '#eff6ff',
-                        color: action.type === 'create' || action.type === 'manual' ? 'white' : '#2563eb',
-                        border: action.type === 'create' || action.type === 'manual' ? 'none' : '1px solid #bfdbfe',
+                        backgroundColor: action.type === 'create' || action.type === 'manual' || action.type === 'create_with_data' ? '#2563eb' : '#eff6ff',
+                        color: action.type === 'create' || action.type === 'manual' || action.type === 'create_with_data' ? 'white' : '#2563eb',
+                        border: action.type === 'create' || action.type === 'manual' || action.type === 'create_with_data' ? 'none' : '1px solid #bfdbfe',
                         borderRadius: '0.5rem',
                         fontSize: '0.875rem',
                         cursor: 'pointer',
@@ -330,7 +451,7 @@ export default function ChatPage() {
               gap: '0.5rem'
             }}>
               <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>
-                处理中...
+                正在识别票据，请稍候...
               </span>
             </div>
           </div>
