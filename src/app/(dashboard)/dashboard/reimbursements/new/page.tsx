@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -17,6 +17,19 @@ const expenseCategories = [
   { value: 'other', label: '其他', icon: '📦' },
 ];
 
+// 票据类型到费用类别的映射
+const receiptTypeToCategory: Record<string, string> = {
+  'flight_itinerary': 'flight',
+  'train_ticket': 'train',
+  'hotel_receipt': 'hotel',
+  'taxi_receipt': 'taxi',
+  'ride_hailing': 'taxi',
+  'restaurant': 'meal',
+  'vat_invoice': 'other',
+  'vat_special': 'other',
+  'general_receipt': 'other',
+};
+
 interface UploadedFile {
   file: File;
   preview: string;
@@ -31,6 +44,7 @@ interface ExpenseItem {
   date: string;
   location?: string;
   files: UploadedFile[];
+  isRecognizing?: boolean;
 }
 
 export default function NewReimbursementPage() {
@@ -51,6 +65,144 @@ export default function NewReimbursementPage() {
   ]);
 
   const fileInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
+
+  // 从 sessionStorage 读取 OCR 数据并预填表单
+  useEffect(() => {
+    const ocrDataStr = sessionStorage.getItem('ocrData');
+    if (ocrDataStr) {
+      try {
+        const ocrData = JSON.parse(ocrDataStr);
+        sessionStorage.removeItem('ocrData'); // 使用后清除
+
+        // 根据 OCR 数据设置标题
+        const typeLabels: Record<string, string> = {
+          'train_ticket': '火车票报销',
+          'flight_itinerary': '机票报销',
+          'hotel_receipt': '酒店报销',
+          'taxi_receipt': '交通报销',
+          'ride_hailing': '交通报销',
+          'restaurant': '餐饮报销',
+          'meal': '餐饮报销',
+        };
+        const suggestedTitle = typeLabels[ocrData.type] || typeLabels[ocrData.category] || '费用报销';
+        setTitle(ocrData.vendor ? `${ocrData.vendor} - ${suggestedTitle}` : suggestedTitle);
+
+        // 填充第一个费用项
+        const category = ocrData.category || receiptTypeToCategory[ocrData.type] || 'other';
+        const date = ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0];
+
+        setItems([{
+          id: '1',
+          category: category,
+          description: ocrData.vendor || '',
+          amount: ocrData.amount ? ocrData.amount.toString() : '',
+          currency: ocrData.currency || 'CNY',
+          date: date,
+          location: '',
+          files: [],
+        }]);
+      } catch (e) {
+        console.error('Failed to parse OCR data:', e);
+      }
+    }
+  }, []);
+
+  // 格式化日期为 input[type=date] 需要的格式
+  function formatDateForInput(dateStr: string): string {
+    try {
+      // 尝试解析各种日期格式
+      const date = new Date(dateStr);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+      // 如果是 2025/12/23 格式
+      const parts = dateStr.split('/');
+      if (parts.length === 3) {
+        return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+      }
+      return new Date().toISOString().split('T')[0];
+    } catch {
+      return new Date().toISOString().split('T')[0];
+    }
+  }
+
+  // 将文件转换为 base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  // 调用 OCR API 识别票据
+  const recognizeReceipt = async (file: File, itemId: string) => {
+    // 标记正在识别
+    setItems(prev => prev.map(item =>
+      item.id === itemId ? { ...item, isRecognizing: true } : item
+    ));
+
+    try {
+      const base64 = await fileToBase64(file);
+      const mimeType = file.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+
+      const response = await fetch('/api/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64, mimeType }),
+      });
+
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        const ocrData = result.data;
+        const category = ocrData.category || receiptTypeToCategory[ocrData.type] || '';
+        const date = ocrData.date ? formatDateForInput(new Date(ocrData.date).toLocaleDateString('zh-CN')) : '';
+
+        // 更新表单字段
+        setItems(prev => prev.map(item => {
+          if (item.id !== itemId) return item;
+          return {
+            ...item,
+            category: category || item.category,
+            description: ocrData.vendor || item.description,
+            amount: ocrData.amount ? ocrData.amount.toString() : item.amount,
+            currency: ocrData.currency || item.currency,
+            date: date || item.date,
+            isRecognizing: false,
+          };
+        }));
+
+        // 如果标题为空，自动设置
+        if (!title && ocrData.vendor) {
+          const typeLabels: Record<string, string> = {
+            'train_ticket': '火车票报销',
+            'flight_itinerary': '机票报销',
+            'hotel_receipt': '酒店报销',
+            'taxi_receipt': '交通报销',
+            'restaurant': '餐饮报销',
+          };
+          const suggestedTitle = typeLabels[ocrData.type] || '费用报销';
+          setTitle(`${ocrData.vendor} - ${suggestedTitle}`);
+        }
+      } else {
+        // 识别失败，取消识别状态
+        setItems(prev => prev.map(item =>
+          item.id === itemId ? { ...item, isRecognizing: false } : item
+        ));
+      }
+    } catch (error) {
+      console.error('OCR error:', error);
+      setItems(prev => prev.map(item =>
+        item.id === itemId ? { ...item, isRecognizing: false } : item
+      ));
+    }
+  };
 
   const addItem = () => {
     setItems([
@@ -81,8 +233,8 @@ export default function NewReimbursementPage() {
     );
   };
 
-  const handleFileSelect = (itemId: string, files: FileList | null) => {
-    if (!files) return;
+  const handleFileSelect = async (itemId: string, files: FileList | null) => {
+    if (!files || files.length === 0) return;
 
     const newFiles: UploadedFile[] = Array.from(files).map(file => ({
       file,
@@ -93,13 +245,19 @@ export default function NewReimbursementPage() {
     if (item) {
       updateItem(itemId, 'files', [...item.files, ...newFiles]);
     }
+
+    // 自动识别第一个上传的图片文件
+    const imageFile = Array.from(files).find(f => f.type.startsWith('image/'));
+    if (imageFile) {
+      await recognizeReceipt(imageFile, itemId);
+    }
   };
 
-  const handleDrop = (e: React.DragEvent, itemId: string) => {
+  const handleDrop = async (e: React.DragEvent, itemId: string) => {
     e.preventDefault();
     e.stopPropagation();
     const files = e.dataTransfer.files;
-    handleFileSelect(itemId, files);
+    await handleFileSelect(itemId, files);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -171,7 +329,7 @@ export default function NewReimbursementPage() {
         <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', marginBottom: '0.25rem' }}>
           新建报销
         </h2>
-        <p style={{ color: '#6b7280' }}>填写报销信息并上传票据</p>
+        <p style={{ color: '#6b7280' }}>填写报销信息并上传票据（上传后自动识别）</p>
       </div>
 
       {/* Basic Info Card */}
@@ -270,7 +428,20 @@ export default function NewReimbursementPage() {
                 justifyContent: 'space-between',
                 marginBottom: '1rem'
               }}>
-                <span style={{ fontWeight: 600, color: '#111827' }}>费用 #{index + 1}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontWeight: 600, color: '#111827' }}>费用 #{index + 1}</span>
+                  {item.isRecognizing && (
+                    <span style={{
+                      fontSize: '0.75rem',
+                      color: '#2563eb',
+                      backgroundColor: '#eff6ff',
+                      padding: '0.125rem 0.5rem',
+                      borderRadius: '9999px'
+                    }}>
+                      识别中...
+                    </span>
+                  )}
+                </div>
                 {items.length > 1 && (
                   <button
                     onClick={() => removeItem(item.id)}
@@ -288,6 +459,90 @@ export default function NewReimbursementPage() {
                   >
                     <span>🗑️</span> 删除
                   </button>
+                )}
+              </div>
+
+              {/* Receipt Upload - Move to top */}
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={labelStyle}>上传票据（自动识别）</label>
+                <input
+                  type="file"
+                  ref={el => { fileInputRefs.current[item.id] = el; }}
+                  onChange={(e) => handleFileSelect(item.id, e.target.files)}
+                  accept="image/*,.pdf"
+                  multiple
+                  style={{ display: 'none' }}
+                />
+                <div
+                  onClick={() => fileInputRefs.current[item.id]?.click()}
+                  onDrop={(e) => handleDrop(e, item.id)}
+                  onDragOver={handleDragOver}
+                  onDragEnter={handleDragOver}
+                  style={{
+                    border: '2px dashed #2563eb',
+                    borderRadius: '0.5rem',
+                    padding: '1rem',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    backgroundColor: '#eff6ff',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>📤</div>
+                  <p style={{ fontSize: '0.875rem', color: '#2563eb', marginBottom: '0.125rem', fontWeight: 500 }}>
+                    点击或拖拽上传票据，自动识别填充
+                  </p>
+                  <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                    支持 JPG, PNG, PDF 格式
+                  </p>
+                </div>
+
+                {/* Uploaded Files Preview */}
+                {item.files.length > 0 && (
+                  <div style={{ marginTop: '0.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    {item.files.map((uploadedFile, fileIndex) => (
+                      <div
+                        key={fileIndex}
+                        style={{
+                          position: 'relative',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          padding: '0.375rem 0.5rem',
+                          backgroundColor: 'white',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '0.375rem'
+                        }}
+                      >
+                        {uploadedFile.preview ? (
+                          <img
+                            src={uploadedFile.preview}
+                            alt="预览"
+                            style={{ width: '24px', height: '24px', objectFit: 'cover', borderRadius: '0.25rem' }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: '1rem' }}>📄</span>
+                        )}
+                        <span style={{ fontSize: '0.75rem', color: '#374151', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {uploadedFile.file.name}
+                        </span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeFile(item.id, fileIndex); }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#dc2626',
+                            cursor: 'pointer',
+                            padding: '0',
+                            fontSize: '0.875rem',
+                            lineHeight: 1
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
 
@@ -363,8 +618,7 @@ export default function NewReimbursementPage() {
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: '1fr 1fr',
-                gap: '1rem',
-                marginBottom: '1rem'
+                gap: '1rem'
               }}>
                 <div>
                   <label style={labelStyle}>费用说明 *</label>
@@ -387,90 +641,6 @@ export default function NewReimbursementPage() {
                     style={inputStyle}
                   />
                 </div>
-              </div>
-
-              {/* Receipt Upload */}
-              <div>
-                <label style={labelStyle}>上传票据</label>
-                <input
-                  type="file"
-                  ref={el => { fileInputRefs.current[item.id] = el; }}
-                  onChange={(e) => handleFileSelect(item.id, e.target.files)}
-                  accept="image/*,.pdf"
-                  multiple
-                  style={{ display: 'none' }}
-                />
-                <div
-                  onClick={() => fileInputRefs.current[item.id]?.click()}
-                  onDrop={(e) => handleDrop(e, item.id)}
-                  onDragOver={handleDragOver}
-                  onDragEnter={handleDragOver}
-                  style={{
-                    border: '2px dashed #2563eb',
-                    borderRadius: '0.5rem',
-                    padding: '1.5rem',
-                    textAlign: 'center',
-                    cursor: 'pointer',
-                    backgroundColor: '#eff6ff',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📤</div>
-                  <p style={{ fontSize: '0.875rem', color: '#2563eb', marginBottom: '0.25rem', fontWeight: 500 }}>
-                    点击选择或拖拽文件到此处
-                  </p>
-                  <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                    支持 JPG, PNG, PDF 格式
-                  </p>
-                </div>
-
-                {/* Uploaded Files Preview */}
-                {item.files.length > 0 && (
-                  <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    {item.files.map((uploadedFile, fileIndex) => (
-                      <div
-                        key={fileIndex}
-                        style={{
-                          position: 'relative',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.5rem',
-                          padding: '0.5rem 0.75rem',
-                          backgroundColor: 'white',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '0.5rem'
-                        }}
-                      >
-                        {uploadedFile.preview ? (
-                          <img
-                            src={uploadedFile.preview}
-                            alt="预览"
-                            style={{ width: '32px', height: '32px', objectFit: 'cover', borderRadius: '0.25rem' }}
-                          />
-                        ) : (
-                          <span style={{ fontSize: '1.25rem' }}>📄</span>
-                        )}
-                        <span style={{ fontSize: '0.75rem', color: '#374151', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {uploadedFile.file.name}
-                        </span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); removeFile(item.id, fileIndex); }}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: '#dc2626',
-                            cursor: 'pointer',
-                            padding: '0.125rem',
-                            fontSize: '1rem',
-                            lineHeight: 1
-                          }}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           ))}
