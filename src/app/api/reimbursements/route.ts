@@ -76,21 +76,13 @@ export async function POST(request: NextRequest) {
       0
     );
 
-    // 检查用户是否有租户
-    if (!session.user.tenantId) {
-      return NextResponse.json(
-        { error: '请先创建或加入公司' },
-        { status: 400 }
-      );
-    }
-
     // 创建报销单
     const [reimbursement] = await db
       .insert(reimbursements)
       .values({
-        tenantId: session.user.tenantId,
+        tenantId: session.user.tenantId || null,
         userId: session.user.id,
-        tripId: tripId || undefined,
+        tripId: tripId || null,
         title,
         description,
         totalAmount,
@@ -99,7 +91,7 @@ export async function POST(request: NextRequest) {
         status: submitStatus === 'pending' ? 'pending' : 'draft',
         autoCollected: false,
         sourceType: 'manual',
-        submittedAt: submitStatus === 'pending' ? new Date() : undefined,
+        submittedAt: submitStatus === 'pending' ? new Date() : null,
       })
       .returning();
 

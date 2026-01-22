@@ -85,7 +85,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         if (dbUser) {
           session.user.role = dbUser.role;
-          session.user.tenantId = dbUser.tenantId ?? undefined;
+          session.user.tenantId = dbUser.tenantId;
         }
       }
       return session;
