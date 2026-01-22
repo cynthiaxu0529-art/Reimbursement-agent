@@ -70,6 +70,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 检查用户是否有公司
+    if (!session.user.tenantId) {
+      return NextResponse.json(
+        { error: '请先创建或加入公司' },
+        { status: 400 }
+      );
+    }
+
     // 计算总金额
     const totalAmount = items.reduce(
       (sum: number, item: any) => sum + (parseFloat(item.amount) || 0),
@@ -80,9 +88,9 @@ export async function POST(request: NextRequest) {
     const [reimbursement] = await db
       .insert(reimbursements)
       .values({
-        tenantId: session.user.tenantId || null,
+        tenantId: session.user.tenantId,
         userId: session.user.id,
-        tripId: tripId || null,
+        tripId: tripId || undefined,
         title,
         description,
         totalAmount,
@@ -91,7 +99,7 @@ export async function POST(request: NextRequest) {
         status: submitStatus === 'pending' ? 'pending' : 'draft',
         autoCollected: false,
         sourceType: 'manual',
-        submittedAt: submitStatus === 'pending' ? new Date() : null,
+        submittedAt: submitStatus === 'pending' ? new Date() : undefined,
       })
       .returning();
 

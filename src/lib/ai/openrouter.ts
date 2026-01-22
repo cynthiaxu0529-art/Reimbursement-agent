@@ -20,10 +20,16 @@ const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4
 // ============================================================================
 
 export class OpenRouterClient {
-  private client: OpenAI;
+  private client: OpenAI | null = null;
   private model: string;
 
   constructor(model?: string) {
+    this.model = model || DEFAULT_MODEL;
+  }
+
+  private getClient(): OpenAI {
+    if (this.client) return this.client;
+
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
       throw new Error('OPENROUTER_API_KEY environment variable is required');
@@ -38,14 +44,14 @@ export class OpenRouterClient {
       },
     });
 
-    this.model = model || DEFAULT_MODEL;
+    return this.client;
   }
 
   /**
    * 发送文本消息
    */
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<string> {
-    const response = await this.client.chat.completions.create({
+    const response = await this.getClient().chat.completions.create({
       model: options?.model || this.model,
       messages: messages.map((m) => ({
         role: m.role,
@@ -85,7 +91,7 @@ export class OpenRouterClient {
       content: m.content,
     }));
 
-    const response = await this.client.chat.completions.create({
+    const response = await this.getClient().chat.completions.create({
       model: options?.model || this.model,
       messages: openAIMessages,
       tools: openAITools,
@@ -117,7 +123,7 @@ export class OpenRouterClient {
   ): Promise<string> {
     const imageContent = this.buildImageContent(imageData);
 
-    const response = await this.client.chat.completions.create({
+    const response = await this.getClient().chat.completions.create({
       model: options?.model || this.model,
       messages: [
         {
