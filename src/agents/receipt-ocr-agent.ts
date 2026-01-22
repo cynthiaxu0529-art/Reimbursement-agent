@@ -22,6 +22,8 @@ export interface OCRRequest {
   mimeType?: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
 }
 
+type MediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+
 export interface ParsedReceipt {
   type: ReceiptType;
   vendor?: string;
@@ -70,7 +72,7 @@ export class ReceiptOCRAgent {
    * 识别票据
    */
   async recognize(request: OCRRequest): Promise<ParsedReceipt> {
-    const imageContent = this.buildImageContent(request);
+    const imageContent = await this.buildImageContent(request);
 
     const response = await this.client.messages.create({
       model: 'claude-sonnet-4-20250514',
@@ -118,16 +120,20 @@ export class ReceiptOCRAgent {
 
   /**
    * 构建图片内容
+   * 如果提供 URL，先下载并转换为 base64
    */
-  private buildImageContent(
+  private async buildImageContent(
     request: OCRRequest
-  ): Anthropic.ImageBlockParam {
+  ): Promise<Anthropic.ImageBlockParam> {
     if (request.imageUrl) {
+      // 下载图片并转换为 base64
+      const { base64, mimeType } = await this.downloadImageAsBase64(request.imageUrl);
       return {
         type: 'image',
         source: {
-          type: 'url',
-          url: request.imageUrl,
+          type: 'base64',
+          media_type: mimeType,
+          data: base64,
         },
       };
     }
@@ -144,6 +150,37 @@ export class ReceiptOCRAgent {
     }
 
     throw new Error('Either imageUrl or imageBase64 is required');
+  }
+
+  /**
+   * 下载图片并转换为 base64
+   */
+  private async downloadImageAsBase64(
+    url: string
+  ): Promise<{ base64: string; mimeType: MediaType }> {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to download image: ${response.status}`);
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const mimeType = this.normalizeMimeType(contentType);
+
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+
+    return { base64, mimeType };
+  }
+
+  /**
+   * 标准化 MIME 类型
+   */
+  private normalizeMimeType(contentType: string): MediaType {
+    const type = contentType.split(';')[0].trim().toLowerCase();
+    if (type === 'image/png') return 'image/png';
+    if (type === 'image/webp') return 'image/webp';
+    if (type === 'image/gif') return 'image/gif';
+    return 'image/jpeg';
   }
 
   /**
