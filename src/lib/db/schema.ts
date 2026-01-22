@@ -72,16 +72,17 @@ export const tenants = pgTable('tenants', {
 });
 
 /**
- * 用户表
+ * 用户表 (兼容 NextAuth)
  */
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
-  tenantId: uuid('tenant_id')
-    .notNull()
-    .references(() => tenants.id),
+  tenantId: uuid('tenant_id').references(() => tenants.id),
   email: text('email').notNull().unique(),
+  emailVerified: timestamp('email_verified', { mode: 'date' }),
   name: text('name').notNull(),
   avatar: text('avatar'),
+  image: text('image'), // NextAuth 使用的头像字段
+  passwordHash: text('password_hash'), // 密码登录
   role: userRoleEnum('role').notNull().default('employee'),
   department: text('department'),
   managerId: uuid('manager_id'),
@@ -89,6 +90,47 @@ export const users = pgTable('users', {
   preferences: jsonb('preferences').default({}),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * NextAuth - 账号表 (OAuth 登录)
+ */
+export const accounts = pgTable('accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  type: text('type').notNull(),
+  provider: text('provider').notNull(),
+  providerAccountId: text('provider_account_id').notNull(),
+  refresh_token: text('refresh_token'),
+  access_token: text('access_token'),
+  expires_at: integer('expires_at'),
+  token_type: text('token_type'),
+  scope: text('scope'),
+  id_token: text('id_token'),
+  session_state: text('session_state'),
+});
+
+/**
+ * NextAuth - 会话表
+ */
+export const sessions = pgTable('sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionToken: text('session_token').notNull().unique(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  expires: timestamp('expires', { mode: 'date' }).notNull(),
+});
+
+/**
+ * NextAuth - 验证令牌表
+ */
+export const verificationTokens = pgTable('verification_tokens', {
+  identifier: text('identifier').notNull(),
+  token: text('token').notNull().unique(),
+  expires: timestamp('expires', { mode: 'date' }).notNull(),
 });
 
 /**
