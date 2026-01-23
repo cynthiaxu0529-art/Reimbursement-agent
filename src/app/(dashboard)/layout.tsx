@@ -21,7 +21,16 @@ const approverNavigation = [
   { name: '设置', href: '/dashboard/settings', icon: '⚙️' },
 ];
 
-type UserRole = 'employee' | 'approver';
+// 管理员导航
+const adminNavigation = [
+  { name: '仪表盘', href: '/dashboard', icon: '📊' },
+  { name: '待审批', href: '/dashboard/approvals', icon: '✅' },
+  { name: '审批历史', href: '/dashboard/approvals/history', icon: '📋' },
+  { name: '团队管理', href: '/dashboard/team', icon: '👥' },
+  { name: '设置', href: '/dashboard/settings', icon: '⚙️' },
+];
+
+type UserRole = 'employee' | 'approver' | 'admin';
 
 export default function DashboardLayout({
   children,
@@ -35,7 +44,7 @@ export default function DashboardLayout({
   // 从 localStorage 读取角色
   useEffect(() => {
     const savedRole = localStorage.getItem('userRole') as UserRole;
-    if (savedRole && (savedRole === 'employee' || savedRole === 'approver')) {
+    if (savedRole && (savedRole === 'employee' || savedRole === 'approver' || savedRole === 'admin')) {
       setRole(savedRole);
     }
   }, []);
@@ -47,9 +56,9 @@ export default function DashboardLayout({
     setShowRoleMenu(false);
   };
 
-  const navigation = role === 'employee' ? employeeNavigation : approverNavigation;
-  const roleLabel = role === 'employee' ? '员工' : '审批人';
-  const roleColor = role === 'employee' ? '#2563eb' : '#7c3aed';
+  const navigation = role === 'employee' ? employeeNavigation : role === 'approver' ? approverNavigation : adminNavigation;
+  const roleLabel = role === 'employee' ? '员工' : role === 'approver' ? '审批人' : '管理员';
+  const roleColor = role === 'employee' ? '#2563eb' : role === 'approver' ? '#7c3aed' : '#dc2626';
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
@@ -129,13 +138,13 @@ export default function DashboardLayout({
                   border: '1px solid #e5e7eb',
                   borderRadius: '0.5rem',
                   boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                  zIndex: 50,
+                  zIndex: 100,
                   overflow: 'hidden'
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
-                  onClick={(e) => { e.stopPropagation(); switchRole('employee'); }}
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('employee'); }}
                   style={{
                     width: '100%',
                     display: 'flex',
@@ -162,7 +171,7 @@ export default function DashboardLayout({
                   {role === 'employee' && <span style={{ marginLeft: 'auto', color: '#2563eb' }}>✓</span>}
                 </button>
                 <button
-                  onClick={(e) => { e.stopPropagation(); switchRole('approver'); }}
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('approver'); }}
                   style={{
                     width: '100%',
                     display: 'flex',
@@ -189,6 +198,34 @@ export default function DashboardLayout({
                   </div>
                   {role === 'approver' && <span style={{ marginLeft: 'auto', color: '#7c3aed' }}>✓</span>}
                 </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('admin'); }}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.625rem 0.875rem',
+                    backgroundColor: role === 'admin' ? '#fef2f2' : 'white',
+                    border: 'none',
+                    borderTop: '1px solid #e5e7eb',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    textAlign: 'left'
+                  }}
+                >
+                  <span style={{
+                    width: '8px',
+                    height: '8px',
+                    backgroundColor: '#dc2626',
+                    borderRadius: '50%'
+                  }} />
+                  <div>
+                    <div style={{ fontWeight: 500, color: '#374151' }}>管理员</div>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>管理公司设置和团队</div>
+                  </div>
+                  {role === 'admin' && <span style={{ marginLeft: 'auto', color: '#dc2626' }}>✓</span>}
+                </button>
               </div>
             )}
           </div>
@@ -213,7 +250,7 @@ export default function DashboardLayout({
                   textDecoration: 'none',
                   fontSize: '0.875rem',
                   fontWeight: 500,
-                  backgroundColor: isActive ? (role === 'employee' ? '#eff6ff' : '#f3e8ff') : 'transparent',
+                  backgroundColor: isActive ? (role === 'employee' ? '#eff6ff' : role === 'approver' ? '#f3e8ff' : '#fef2f2') : 'transparent',
                   color: isActive ? roleColor : '#4b5563'
                 }}
               >
@@ -302,7 +339,7 @@ export default function DashboardLayout({
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 15
+            zIndex: 40
           }}
           onClick={() => setShowRoleMenu(false)}
         />
