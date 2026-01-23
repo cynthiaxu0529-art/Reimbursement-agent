@@ -431,7 +431,7 @@ export default function EditReimbursementPage() {
               {/* Table Header */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: '1.2fr 1.2fr 1fr 0.8fr 1fr 0.9fr 1fr 40px',
+                gridTemplateColumns: '1.2fr 1.5fr 1fr 1.3fr 1fr 1fr 40px',
                 gap: '8px',
                 padding: '10px 12px',
                 backgroundColor: '#f9fafb',
@@ -443,9 +443,8 @@ export default function EditReimbursementPage() {
                 <div>供应商</div>
                 <div>描述</div>
                 <div>类别</div>
-                <div>币种</div>
                 <div>金额</div>
-                <div>折算USD</div>
+                <div style={{ color: '#0369a1' }}>折算<br/>USD</div>
                 <div>日期</div>
                 <div></div>
               </div>
@@ -456,7 +455,7 @@ export default function EditReimbursementPage() {
                   key={item.id}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '1.2fr 1.2fr 1fr 0.8fr 1fr 0.9fr 1fr 40px',
+                    gridTemplateColumns: '1.2fr 1.5fr 1fr 1.3fr 1fr 1fr 40px',
                     gap: '8px',
                     padding: '10px 12px',
                     borderBottom: index < lineItems.length - 1 ? '1px solid #e5e7eb' : 'none',
@@ -508,47 +507,56 @@ export default function EditReimbursementPage() {
                       </option>
                     ))}
                   </select>
-                  <select
-                    value={item.currency}
-                    onChange={(e) => updateLineItemWithExchange(item.id, 'currency', e.target.value)}
-                    style={{
-                      padding: '8px 6px',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '6px',
-                      fontSize: '13px',
-                      backgroundColor: 'white',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {currencies.map((curr) => (
-                      <option key={curr.code} value={curr.code}>
-                        {curr.symbol} {curr.code}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    placeholder="0.00"
-                    value={item.amount}
-                    onChange={(e) => updateLineItemWithExchange(item.id, 'amount', e.target.value)}
-                    style={{
-                      padding: '8px 10px',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '6px',
-                      fontSize: '13px',
-                      backgroundColor: 'white',
-                      minWidth: 0,
-                    }}
-                  />
+                  {/* 金额：币种+金额组合 */}
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <select
+                      value={item.currency}
+                      onChange={(e) => updateLineItemWithExchange(item.id, 'currency', e.target.value)}
+                      style={{
+                        padding: '8px 4px',
+                        border: '1px solid #e5e7eb',
+                        borderRight: 'none',
+                        borderRadius: '6px 0 0 6px',
+                        fontSize: '12px',
+                        backgroundColor: '#f9fafb',
+                        cursor: 'pointer',
+                        color: '#6b7280',
+                        minWidth: '70px',
+                      }}
+                    >
+                      {currencies.map((curr) => (
+                        <option key={curr.code} value={curr.code}>
+                          {curr.symbol} {curr.code}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      placeholder="0.00"
+                      value={item.amount}
+                      onChange={(e) => updateLineItemWithExchange(item.id, 'amount', e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: '8px 10px',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '0 6px 6px 0',
+                        fontSize: '13px',
+                        backgroundColor: 'white',
+                        minWidth: 0,
+                      }}
+                    />
+                  </div>
+                  {/* 折算USD */}
                   <div style={{
                     display: 'flex',
                     alignItems: 'center',
-                    padding: '8px 10px',
+                    justifyContent: 'center',
+                    padding: '8px 6px',
                     backgroundColor: '#f0f9ff',
                     borderRadius: '6px',
                     fontSize: '13px',
                     color: '#0369a1',
-                    fontWeight: 500,
+                    fontWeight: 600,
                   }}>
                     {item.amountInUSD !== undefined ? (
                       <span title={`汇率: ${item.exchangeRate?.toFixed(4) || '-'}`}>
