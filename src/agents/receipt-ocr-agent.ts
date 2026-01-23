@@ -34,6 +34,12 @@ export interface ParsedReceipt {
   category?: ExpenseCategoryType;
   confidence: number;
   rawText: string;
+  // 火车票/机票专用字段
+  departure?: string;      // 出发地
+  destination?: string;    // 目的地
+  trainNumber?: string;    // 车次号
+  flightNumber?: string;   // 航班号
+  seatClass?: string;      // 座位等级
 }
 
 export type ReceiptType =
@@ -170,6 +176,12 @@ export class ReceiptOCRAgent {
         category: this.inferCategory(parsed),
         confidence: parsed.confidence || 0.8,
         rawText: parsed.rawText || text,
+        // 火车票/机票专用字段
+        departure: parsed.departure,
+        destination: parsed.destination,
+        trainNumber: parsed.trainNumber,
+        flightNumber: parsed.flightNumber,
+        seatClass: parsed.seatClass,
       };
     } catch {
       // 如果 JSON 解析失败，返回低置信度结果
@@ -301,12 +313,17 @@ const OCR_PROMPT = `请仔细分析这张票据/发票图片，提取以下信�
 
 {
   "type": "票据类型（vat_invoice/vat_special/flight_itinerary/train_ticket/hotel_receipt/taxi_receipt/ride_hailing/restaurant/general_receipt）",
-  "vendor": "商家/开票单位名称",
+  "vendor": "商家/开票单位名称（火车票填写'中国铁路'，机票填写航空公司名称）",
   "amount": 金额数字（不含货币符号）,
   "currency": "货币类型（CNY/USD/EUR等）",
   "date": "日期（YYYY-MM-DD格式）",
   "invoiceNumber": "发票号码",
   "taxNumber": "纳税人识别号",
+  "departure": "出发地/始发站（仅火车票和机票需要填写，如：北京、上海虹桥）",
+  "destination": "目的地/终点站（仅火车票和机票需要填写，如：上海、北京首都）",
+  "trainNumber": "火车车次号（仅火车票需要填写，如：G1234）",
+  "flightNumber": "航班号（仅机票需要填写，如：CA1234）",
+  "seatClass": "座位等级（火车：二等座/一等座/商务座；飞机：经济舱/公务舱/头等舱）",
   "items": [
     {
       "name": "项目名称",
@@ -323,8 +340,8 @@ const OCR_PROMPT = `请仔细分析这张票据/发票图片，提取以下信�
 1. 如果某个字段无法识别，使用 null
 2. 金额应该是数字类型，不要包含货币符号
 3. 日期使用 YYYY-MM-DD 格式
-4. 对于机票行程单，注意提取航班号、起降时间、票价等信息
-5. 对于火车票，注意提取车次、座位、票价等信息
+4. 对于机票行程单，务必提取：航班号、出发地、目的地、舱位等级、票价
+5. 对于火车票，务必提取：车次、出发站、到达站、座位等级、票价
 6. 置信度根据图片清晰度和识别准确性估算
 
 请用 JSON 代码块返回结果：

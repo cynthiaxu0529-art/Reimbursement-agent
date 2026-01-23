@@ -45,6 +45,12 @@ interface ExpenseItem {
   location?: string;
   files: UploadedFile[];
   isRecognizing?: boolean;
+  // 火车票/机票专用字段
+  departure?: string;
+  destination?: string;
+  trainNumber?: string;
+  flightNumber?: string;
+  seatClass?: string;
 }
 
 export default function NewReimbursementPage() {
@@ -100,6 +106,12 @@ export default function NewReimbursementPage() {
           date: date,
           location: '',
           files: [],
+          // 火车票/机票专用字段
+          departure: ocrData.departure || '',
+          destination: ocrData.destination || '',
+          trainNumber: ocrData.trainNumber || '',
+          flightNumber: ocrData.flightNumber || '',
+          seatClass: ocrData.seatClass || '',
         }]);
       } catch (e) {
         console.error('Failed to parse OCR data:', e);
@@ -175,6 +187,12 @@ export default function NewReimbursementPage() {
             currency: ocrData.currency || item.currency,
             date: date || item.date,
             isRecognizing: false,
+            // 火车票/机票专用字段
+            departure: ocrData.departure || item.departure,
+            destination: ocrData.destination || item.destination,
+            trainNumber: ocrData.trainNumber || item.trainNumber,
+            flightNumber: ocrData.flightNumber || item.flightNumber,
+            seatClass: ocrData.seatClass || item.seatClass,
           };
         }));
 
@@ -280,11 +298,48 @@ export default function NewReimbursementPage() {
 
   const handleSubmit = async (isDraft: boolean) => {
     setIsSubmitting(true);
-    // TODO: 调用 API 保存
-    console.log({ title, tripId, items, isDraft });
-    setTimeout(() => {
-      router.push('/dashboard/reimbursements');
-    }, 500);
+    try {
+      // 构建费用明细，包含出发地/目的地信息
+      const itemsData = items.map(item => {
+        // 对于火车票/机票，将出发地-目的地加入描述
+        let description = item.description;
+        if ((item.category === 'train' || item.category === 'flight') && item.departure && item.destination) {
+          description = `${item.departure} → ${item.destination}${item.trainNumber ? ` (${item.trainNumber})` : ''}${item.flightNumber ? ` (${item.flightNumber})` : ''}${item.seatClass ? ` ${item.seatClass}` : ''}`;
+        }
+        return {
+          category: item.category,
+          description: description,
+          amount: item.amount,
+          currency: item.currency,
+          date: item.date,
+          location: item.location,
+          vendor: item.description, // 原始的商家/承运人信息
+        };
+      });
+
+      const response = await fetch('/api/reimbursements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          tripId: tripId || undefined,
+          items: itemsData,
+          status: isDraft ? 'draft' : 'pending',
+        }),
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        router.push('/dashboard/reimbursements');
+      } else {
+        alert(result.error || '提交失败，请重试');
+        setIsSubmitting(false);
+      }
+    } catch (error) {
+      console.error('Submit error:', error);
+      alert('提交失败，请重试');
+      setIsSubmitting(false);
+    }
   };
 
   const inputStyle = {
@@ -614,10 +669,53 @@ export default function NewReimbursementPage() {
                 </div>
               </div>
 
-              {/* Row 2: Description, Location */}
+              {/* Row 2: Departure/Destination for Train/Flight */}
+              {(item.category === 'train' || item.category === 'flight') && (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: '1rem',
+                  marginBottom: '1rem'
+                }}>
+                  <div>
+                    <label style={labelStyle}>出发地 *</label>
+                    <input
+                      type="text"
+                      placeholder={item.category === 'train' ? '例如：北京南站' : '例如：北京首都'}
+                      value={item.departure || ''}
+                      onChange={(e) => updateItem(item.id, 'departure', e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={labelStyle}>目的地 *</label>
+                    <input
+                      type="text"
+                      placeholder={item.category === 'train' ? '例如：上海虹桥站' : '例如：上海浦东'}
+                      value={item.destination || ''}
+                      onChange={(e) => updateItem(item.id, 'destination', e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={labelStyle}>{item.category === 'train' ? '车次号' : '航班号'}</label>
+                    <input
+                      type="text"
+                      placeholder={item.category === 'train' ? '例如：G1234' : '例如：CA1234'}
+                      value={item.category === 'train' ? (item.trainNumber || '') : (item.flightNumber || '')}
+                      onChange={(e) => updateItem(item.id, item.category === 'train' ? 'trainNumber' : 'flightNumber', e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Row 3: Description, Location/Seat Class */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
+                gridTemplateColumns: (item.category === 'train' || item.category === 'flight') ? 'repeat(3, 1fr)' : '1fr 1fr',
                 gap: '1rem'
               }}>
                 <div>
@@ -630,6 +728,37 @@ export default function NewReimbursementPage() {
                     style={inputStyle}
                   />
                 </div>
+
+                {(item.category === 'train' || item.category === 'flight') && (
+                  <div>
+                    <label style={labelStyle}>座位等级</label>
+                    <select
+                      value={item.seatClass || ''}
+                      onChange={(e) => updateItem(item.id, 'seatClass', e.target.value)}
+                      style={selectStyle}
+                    >
+                      <option value="">选择座位等级</option>
+                      {item.category === 'train' ? (
+                        <>
+                          <option value="二等座">二等座</option>
+                          <option value="一等座">一等座</option>
+                          <option value="商务座">商务座</option>
+                          <option value="硬座">硬座</option>
+                          <option value="软座">软座</option>
+                          <option value="硬卧">硬卧</option>
+                          <option value="软卧">软卧</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="经济舱">经济舱</option>
+                          <option value="超级经济舱">超级经济舱</option>
+                          <option value="公务舱">公务舱</option>
+                          <option value="头等舱">头等舱</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label style={labelStyle}>消费地点（可选）</label>
