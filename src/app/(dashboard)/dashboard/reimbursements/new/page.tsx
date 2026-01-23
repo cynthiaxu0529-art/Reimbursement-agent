@@ -201,6 +201,72 @@ export default function NewReimbursementPage() {
     setItemsAutoFilled(true);
   };
 
+  // 批量处理多个 OCR 结果
+  const applyMultipleOcrData = (ocrDataList: any[]) => {
+    if (ocrDataList.length === 0) return;
+
+    // 设置第一个结果的商户和日期
+    const firstData = ocrDataList[0];
+    if (firstData.vendor) {
+      setMerchant(firstData.vendor);
+      setMerchantAutoFilled(true);
+    }
+    if (firstData.date) {
+      const formattedDate = formatDateForInput(firstData.date);
+      setExpenseDate(formattedDate);
+      setDateAutoFilled(true);
+    }
+
+    // 创建所有新的费用明细项
+    const newItems: LineItem[] = ocrDataList.map((ocrData, index) => {
+      const category = ocrData.category || receiptTypeToCategory[ocrData.type] || 'other';
+
+      let itemDescription = ocrData.vendor || '';
+      if ((category === 'train' || category === 'flight') && ocrData.departure && ocrData.destination) {
+        itemDescription = `${ocrData.departure} → ${ocrData.destination}`;
+        if (ocrData.trainNumber) itemDescription += ` (${ocrData.trainNumber})`;
+        if (ocrData.flightNumber) itemDescription += ` (${ocrData.flightNumber})`;
+        if (ocrData.seatClass) itemDescription += ` ${ocrData.seatClass}`;
+      }
+
+      return {
+        id: Date.now().toString() + index + Math.random().toString(36).substr(2, 9),
+        description: itemDescription,
+        category: category,
+        amount: ocrData.amount ? ocrData.amount.toString() : '',
+        currency: ocrData.currency || 'CNY',
+        date: ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0],
+        departure: ocrData.departure || '',
+        destination: ocrData.destination || '',
+        trainNumber: ocrData.trainNumber || '',
+        flightNumber: ocrData.flightNumber || '',
+        seatClass: ocrData.seatClass || '',
+      };
+    });
+
+    // 一次性更新所有费用明细
+    setLineItems(prevItems => {
+      const isFirstEmpty = prevItems.length === 1 &&
+        !prevItems[0].description &&
+        !prevItems[0].amount &&
+        !prevItems[0].category;
+
+      const finalItems = isFirstEmpty ? newItems : [...prevItems, ...newItems];
+
+      // 自动更新报销说明
+      const newDesc = generateDescription(finalItems);
+      if (newDesc) {
+        setDescription(newDesc);
+        setDescAutoFilled(true);
+      }
+
+      return finalItems;
+    });
+
+    setItemsAutoFilled(true);
+    setHasRecognizedItems(true);
+  };
+
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -254,13 +320,32 @@ export default function NewReimbursementPage() {
     if (imageFiles.length > 0) {
       setIsRecognizing(true);
 
-      // 依次识别每张图片
-      for (let i = 0; i < imageFiles.length; i++) {
-        const isFirstRecognition = !hasRecognizedItems && i === 0;
-        await recognizeReceipt(imageFiles[i], isFirstRecognition);
-        if (isFirstRecognition) {
-          setHasRecognizedItems(true);
+      // 收集所有 OCR 结果
+      const ocrResults: any[] = [];
+
+      for (const imageFile of imageFiles) {
+        try {
+          const base64 = await fileToBase64(imageFile);
+          const mimeType = imageFile.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+
+          const response = await fetch('/api/ocr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64: base64, mimeType }),
+          });
+
+          const result = await response.json();
+          if (result.success && result.data) {
+            ocrResults.push(result.data);
+          }
+        } catch (error) {
+          console.error('OCR error:', error);
         }
+      }
+
+      // 批量添加所有识别结果
+      if (ocrResults.length > 0) {
+        applyMultipleOcrData(ocrResults);
       }
 
       setIsRecognizing(false);
