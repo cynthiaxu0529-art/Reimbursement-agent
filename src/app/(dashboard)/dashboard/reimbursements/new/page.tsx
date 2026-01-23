@@ -41,6 +41,7 @@ interface LineItem {
   amount: string;
   currency: string;
   date: string;
+  vendor?: string;
   departure?: string;
   destination?: string;
   trainNumber?: string;
@@ -57,10 +58,6 @@ export default function NewReimbursementPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form fields - AI auto-filled indicators
-  const [merchant, setMerchant] = useState('');
-  const [merchantAutoFilled, setMerchantAutoFilled] = useState(false);
-  const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0]);
-  const [dateAutoFilled, setDateAutoFilled] = useState(false);
   const [description, setDescription] = useState('');
   const [descAutoFilled, setDescAutoFilled] = useState(false);
 
@@ -73,6 +70,7 @@ export default function NewReimbursementPage() {
       amount: '',
       currency: 'CNY',
       date: new Date().toISOString().split('T')[0],
+      vendor: '',
     },
   ]);
   const [itemsAutoFilled, setItemsAutoFilled] = useState(false);
@@ -142,19 +140,6 @@ export default function NewReimbursementPage() {
   const applyOcrData = (ocrData: any, isFirstItem: boolean = false) => {
     const category = ocrData.category || receiptTypeToCategory[ocrData.type] || 'other';
 
-    // 只在第一次识别时设置顶部的商户和日期字段
-    if (isFirstItem) {
-      if (ocrData.vendor) {
-        setMerchant(ocrData.vendor);
-        setMerchantAutoFilled(true);
-      }
-      if (ocrData.date) {
-        const formattedDate = formatDateForInput(ocrData.date);
-        setExpenseDate(formattedDate);
-        setDateAutoFilled(true);
-      }
-    }
-
     // 生成描述（用于新建行项目）
     let itemDescription = ocrData.vendor || '';
     if ((category === 'train' || category === 'flight') && ocrData.departure && ocrData.destination) {
@@ -164,7 +149,7 @@ export default function NewReimbursementPage() {
       if (ocrData.seatClass) itemDescription += ` ${ocrData.seatClass}`;
     }
 
-    // 创建新的费用明细项
+    // 创建新的费用明细项（包含供应商）
     const newItem: LineItem = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
       description: itemDescription,
@@ -172,6 +157,7 @@ export default function NewReimbursementPage() {
       amount: ocrData.amount ? ocrData.amount.toString() : '',
       currency: ocrData.currency || 'CNY',
       date: ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0],
+      vendor: ocrData.vendor || '',
       departure: ocrData.departure || '',
       destination: ocrData.destination || '',
       trainNumber: ocrData.trainNumber || '',
@@ -205,19 +191,7 @@ export default function NewReimbursementPage() {
   const applyMultipleOcrData = (ocrDataList: any[]) => {
     if (ocrDataList.length === 0) return;
 
-    // 设置第一个结果的商户和日期
-    const firstData = ocrDataList[0];
-    if (firstData.vendor) {
-      setMerchant(firstData.vendor);
-      setMerchantAutoFilled(true);
-    }
-    if (firstData.date) {
-      const formattedDate = formatDateForInput(firstData.date);
-      setExpenseDate(formattedDate);
-      setDateAutoFilled(true);
-    }
-
-    // 创建所有新的费用明细项
+    // 创建所有新的费用明细项（每项包含各自的供应商）
     const newItems: LineItem[] = ocrDataList.map((ocrData, index) => {
       const category = ocrData.category || receiptTypeToCategory[ocrData.type] || 'other';
 
@@ -236,6 +210,7 @@ export default function NewReimbursementPage() {
         amount: ocrData.amount ? ocrData.amount.toString() : '',
         currency: ocrData.currency || 'CNY',
         date: ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0],
+        vendor: ocrData.vendor || '',
         departure: ocrData.departure || '',
         destination: ocrData.destination || '',
         trainNumber: ocrData.trainNumber || '',
@@ -377,6 +352,7 @@ export default function NewReimbursementPage() {
         amount: '',
         currency: 'CNY',
         date: new Date().toISOString().split('T')[0],
+        vendor: '',
       },
     ]);
   };
@@ -421,7 +397,7 @@ export default function NewReimbursementPage() {
           amount: item.amount,
           currency: item.currency,
           date: item.date,
-          vendor: item.description,
+          vendor: item.vendor || '',
         };
       });
 
@@ -692,69 +668,10 @@ export default function NewReimbursementPage() {
             }}>
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>费用详情</h3>
-                {(merchantAutoFilled || dateAutoFilled || itemsAutoFilled) && <AutoFilledBadge />}
+                {itemsAutoFilled && <AutoFilledBadge />}
               </div>
             </div>
             <div style={{ padding: '20px' }}>
-              {/* Merchant and Date Row */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-                <div>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    fontSize: '13px',
-                    fontWeight: 500,
-                    color: '#374151',
-                    marginBottom: '6px',
-                  }}>
-                    商户/供应商
-                    {merchantAutoFilled && <VerifiedBadge />}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="商户名称"
-                    value={merchant}
-                    onChange={(e) => { setMerchant(e.target.value); setMerchantAutoFilled(false); }}
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      border: merchantAutoFilled ? '1px solid #86efac' : '1px solid #d1d5db',
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                      backgroundColor: merchantAutoFilled ? '#f0fdf4' : 'white',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    fontSize: '13px',
-                    fontWeight: 500,
-                    color: '#374151',
-                    marginBottom: '6px',
-                  }}>
-                    日期
-                    {dateAutoFilled && <VerifiedBadge />}
-                  </label>
-                  <input
-                    type="date"
-                    value={expenseDate}
-                    onChange={(e) => { setExpenseDate(e.target.value); setDateAutoFilled(false); }}
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      border: dateAutoFilled ? '1px solid #86efac' : '1px solid #d1d5db',
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                      backgroundColor: dateAutoFilled ? '#f0fdf4' : 'white',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-              </div>
-
               {/* General Description */}
               <div style={{ marginBottom: '20px' }}>
                 <label style={{
@@ -832,7 +749,7 @@ export default function NewReimbursementPage() {
                   {/* Table Header */}
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: '2fr 1.5fr 1fr 1fr 40px',
+                    gridTemplateColumns: '1.5fr 1.5fr 1fr 1fr 1fr 40px',
                     gap: '8px',
                     padding: '10px 12px',
                     backgroundColor: '#f9fafb',
@@ -841,6 +758,7 @@ export default function NewReimbursementPage() {
                     fontWeight: 500,
                     color: '#6b7280',
                   }}>
+                    <div>供应商</div>
                     <div>描述</div>
                     <div>类别</div>
                     <div>金额</div>
@@ -853,12 +771,25 @@ export default function NewReimbursementPage() {
                     <div key={item.id}>
                       <div style={{
                         display: 'grid',
-                        gridTemplateColumns: '2fr 1.5fr 1fr 1fr 40px',
+                        gridTemplateColumns: '1.5fr 1.5fr 1fr 1fr 1fr 40px',
                         gap: '8px',
                         padding: '10px 12px',
                         borderBottom: index < lineItems.length - 1 ? '1px solid #e5e7eb' : 'none',
                         backgroundColor: itemsAutoFilled ? '#f0fdf4' : 'white',
                       }}>
+                        <input
+                          type="text"
+                          placeholder="供应商名称"
+                          value={item.vendor || ''}
+                          onChange={(e) => updateLineItem(item.id, 'vendor', e.target.value)}
+                          style={{
+                            padding: '8px 10px',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            backgroundColor: 'white',
+                          }}
+                        />
                         <input
                           type="text"
                           placeholder="费用描述"
