@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { title, description, tripId, items, status: submitStatus } = body;
+    const { title, description, tripId, items, status: submitStatus, totalAmountInBaseCurrency } = body;
 
     if (!title || !items || items.length === 0) {
       return NextResponse.json(
@@ -99,9 +99,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 计算总金额
+    // 计算原币总金额
     const totalAmount = items.reduce(
       (sum: number, item: any) => sum + (parseFloat(item.amount) || 0),
+      0
+    );
+
+    // 计算美元总金额（如果前端未提供则使用原币金额）
+    const usdTotal = totalAmountInBaseCurrency || items.reduce(
+      (sum: number, item: any) => sum + (item.amountInBaseCurrency || parseFloat(item.amount) || 0),
       0
     );
 
@@ -115,8 +121,8 @@ export async function POST(request: NextRequest) {
         title,
         description,
         totalAmount,
-        totalAmountInBaseCurrency: totalAmount, // TODO: 货币转换
-        baseCurrency: 'CNY',
+        totalAmountInBaseCurrency: usdTotal,
+        baseCurrency: 'USD',
         status: submitStatus === 'pending' ? 'pending' : 'draft',
         autoCollected: false,
         sourceType: 'manual',
@@ -133,7 +139,7 @@ export async function POST(request: NextRequest) {
           description: item.description || '',
           amount: parseFloat(item.amount) || 0,
           currency: item.currency || 'CNY',
-          amountInBaseCurrency: parseFloat(item.amount) || 0,
+          amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
           date: new Date(item.date),
           location: item.location || null,
           vendor: item.vendor || null,

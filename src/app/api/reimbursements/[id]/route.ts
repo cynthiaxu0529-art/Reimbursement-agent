@@ -89,7 +89,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { title, description, items, status: newStatus } = body;
+    const { title, description, items, status: newStatus, totalAmountInBaseCurrency } = body;
 
     // 验证状态转换
     const allowedTransitions: Record<string, string[]> = {
@@ -113,11 +113,17 @@ export async function PUT(
       );
     }
 
-    // 计算总金额
+    // 计算原币总金额
     const totalAmount = items?.reduce(
       (sum: number, item: any) => sum + (parseFloat(item.amount) || 0),
       0
     ) || existing.totalAmount;
+
+    // 计算美元总金额
+    const usdTotal = totalAmountInBaseCurrency || items?.reduce(
+      (sum: number, item: any) => sum + (item.amountInBaseCurrency || parseFloat(item.amount) || 0),
+      0
+    ) || existing.totalAmountInBaseCurrency;
 
     // 确定新状态
     let finalStatus = existing.status;
@@ -139,7 +145,8 @@ export async function PUT(
         title: title || existing.title,
         description: description ?? existing.description,
         totalAmount,
-        totalAmountInBaseCurrency: totalAmount,
+        totalAmountInBaseCurrency: usdTotal,
+        baseCurrency: 'USD',
         status: finalStatus,
         submittedAt: submittedAt,
         updatedAt: new Date(),
@@ -160,7 +167,7 @@ export async function PUT(
           description: item.description || '',
           amount: parseFloat(item.amount) || 0,
           currency: item.currency || 'CNY',
-          amountInBaseCurrency: parseFloat(item.amount) || 0,
+          amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
           date: new Date(item.date),
           location: item.location || null,
           vendor: item.vendor || null,

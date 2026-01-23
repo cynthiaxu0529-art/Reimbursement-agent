@@ -47,7 +47,19 @@ interface LineItem {
   trainNumber?: string;
   flightNumber?: string;
   seatClass?: string;
+  exchangeRate?: number;
+  amountInUSD?: number;
 }
+
+// 支持的币种
+const currencies = [
+  { code: 'CNY', symbol: '¥', name: '人民币' },
+  { code: 'USD', symbol: '$', name: '美元' },
+  { code: 'EUR', symbol: '€', name: '欧元' },
+  { code: 'GBP', symbol: '£', name: '英镑' },
+  { code: 'JPY', symbol: '¥', name: '日元' },
+  { code: 'HKD', symbol: 'HK$', name: '港币' },
+];
 
 export default function NewReimbursementPage() {
   const router = useRouter();
@@ -71,9 +83,70 @@ export default function NewReimbursementPage() {
       currency: 'CNY',
       date: new Date().toISOString().split('T')[0],
       vendor: '',
+      exchangeRate: undefined,
+      amountInUSD: undefined,
     },
   ]);
   const [itemsAutoFilled, setItemsAutoFilled] = useState(false);
+
+  // 汇率缓存
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({
+    USD: 1,
+    CNY: 0.14,  // 默认汇率，会被实时更新
+    EUR: 1.08,
+    GBP: 1.27,
+    JPY: 0.0067,
+    HKD: 0.13,
+  });
+
+  // 获取实时汇率
+  const fetchExchangeRate = async (fromCurrency: string): Promise<number> => {
+    if (fromCurrency === 'USD') return 1;
+
+    // 如果缓存中有，直接返回
+    if (exchangeRates[fromCurrency]) {
+      return exchangeRates[fromCurrency];
+    }
+
+    try {
+      // 使用免费汇率 API
+      const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${fromCurrency}`);
+      if (response.ok) {
+        const data = await response.json();
+        const rate = data.rates?.USD || exchangeRates[fromCurrency] || 1;
+        setExchangeRates(prev => ({ ...prev, [fromCurrency]: rate }));
+        return rate;
+      }
+    } catch (error) {
+      console.error('Failed to fetch exchange rate:', error);
+    }
+
+    return exchangeRates[fromCurrency] || 1;
+  };
+
+  // 更新费用明细并计算汇率
+  const updateLineItemWithExchange = async (id: string, field: keyof LineItem, value: string) => {
+    const item = lineItems.find(i => i.id === id);
+    if (!item) return;
+
+    const updatedItem = { ...item, [field]: value };
+
+    // 如果金额或币种变化，重新计算美元金额
+    if (field === 'amount' || field === 'currency') {
+      const amount = parseFloat(field === 'amount' ? value : item.amount) || 0;
+      const currency = field === 'currency' ? value : item.currency;
+
+      if (amount > 0 && currency) {
+        const rate = await fetchExchangeRate(currency);
+        updatedItem.exchangeRate = rate;
+        updatedItem.amountInUSD = parseFloat((amount * rate).toFixed(2));
+      }
+    }
+
+    setLineItems(prevItems =>
+      prevItems.map(i => i.id === id ? updatedItem : i)
+    );
+  };
 
   // 从 sessionStorage 读取 OCR 数据并预填表单
   useEffect(() => {
@@ -188,11 +261,14 @@ export default function NewReimbursementPage() {
   };
 
   // 批量处理多个 OCR 结果
-  const applyMultipleOcrData = (ocrDataList: any[]) => {
+  const applyMultipleOcrData = async (ocrDataList: any[]) => {
     if (ocrDataList.length === 0) return;
 
     // 创建所有新的费用明细项（每项包含各自的供应商）
-    const newItems: LineItem[] = ocrDataList.map((ocrData, index) => {
+    const newItems: LineItem[] = [];
+
+    for (let index = 0; index < ocrDataList.length; index++) {
+      const ocrData = ocrDataList[index];
       const category = ocrData.category || receiptTypeToCategory[ocrData.type] || 'other';
 
       let itemDescription = ocrData.vendor || '';
@@ -203,12 +279,16 @@ export default function NewReimbursementPage() {
         if (ocrData.seatClass) itemDescription += ` ${ocrData.seatClass}`;
       }
 
-      return {
+      const currency = ocrData.currency || 'CNY';
+      const amount = ocrData.amount ? parseFloat(ocrData.amount) : 0;
+      const rate = await fetchExchangeRate(currency);
+
+      newItems.push({
         id: Date.now().toString() + index + Math.random().toString(36).substr(2, 9),
         description: itemDescription,
         category: category,
         amount: ocrData.amount ? ocrData.amount.toString() : '',
-        currency: ocrData.currency || 'CNY',
+        currency: currency,
         date: ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0],
         vendor: ocrData.vendor || '',
         departure: ocrData.departure || '',
@@ -216,8 +296,10 @@ export default function NewReimbursementPage() {
         trainNumber: ocrData.trainNumber || '',
         flightNumber: ocrData.flightNumber || '',
         seatClass: ocrData.seatClass || '',
-      };
-    });
+        exchangeRate: rate,
+        amountInUSD: amount > 0 ? parseFloat((amount * rate).toFixed(2)) : undefined,
+      });
+    }
 
     // 一次性更新所有费用明细
     setLineItems(prevItems => {
@@ -374,6 +456,12 @@ export default function NewReimbursementPage() {
     0
   );
 
+  // 计算美元总额
+  const totalAmountUSD = lineItems.reduce(
+    (sum, item) => sum + (item.amountInUSD || 0),
+    0
+  );
+
   const handleSubmit = async (isDraft: boolean) => {
     if (!description) {
       alert('请填写报销说明');
@@ -398,6 +486,8 @@ export default function NewReimbursementPage() {
           currency: item.currency,
           date: item.date,
           vendor: item.vendor || '',
+          exchangeRate: item.exchangeRate || 1,
+          amountInBaseCurrency: item.amountInUSD || parseFloat(item.amount) || 0,
         };
       });
 
@@ -408,6 +498,7 @@ export default function NewReimbursementPage() {
           title: description,
           items: itemsData,
           status: isDraft ? 'draft' : 'pending',
+          totalAmountInBaseCurrency: totalAmountUSD,
         }),
       });
 
@@ -749,7 +840,7 @@ export default function NewReimbursementPage() {
                   {/* Table Header */}
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: '1.5fr 1.5fr 1fr 1fr 1fr 40px',
+                    gridTemplateColumns: '1.2fr 1.2fr 1fr 0.8fr 1fr 0.9fr 1fr 40px',
                     gap: '8px',
                     padding: '10px 12px',
                     backgroundColor: '#f9fafb',
@@ -761,7 +852,9 @@ export default function NewReimbursementPage() {
                     <div>供应商</div>
                     <div>描述</div>
                     <div>类别</div>
+                    <div>币种</div>
                     <div>金额</div>
+                    <div>折算USD</div>
                     <div>日期</div>
                     <div></div>
                   </div>
@@ -771,7 +864,7 @@ export default function NewReimbursementPage() {
                     <div key={item.id}>
                       <div style={{
                         display: 'grid',
-                        gridTemplateColumns: '1.5fr 1.5fr 1fr 1fr 1fr 40px',
+                        gridTemplateColumns: '1.2fr 1.2fr 1fr 0.8fr 1fr 0.9fr 1fr 40px',
                         gap: '8px',
                         padding: '10px 12px',
                         borderBottom: index < lineItems.length - 1 ? '1px solid #e5e7eb' : 'none',
@@ -822,33 +915,55 @@ export default function NewReimbursementPage() {
                             </option>
                           ))}
                         </select>
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          <span style={{
+                        <select
+                          value={item.currency}
+                          onChange={(e) => updateLineItemWithExchange(item.id, 'currency', e.target.value)}
+                          style={{
                             padding: '8px 6px',
-                            backgroundColor: '#f3f4f6',
                             border: '1px solid #e5e7eb',
-                            borderRight: 'none',
-                            borderRadius: '6px 0 0 6px',
+                            borderRadius: '6px',
                             fontSize: '13px',
-                            color: '#6b7280',
-                          }}>
-                            ¥
-                          </span>
-                          <input
-                            type="number"
-                            placeholder="0.00"
-                            value={item.amount}
-                            onChange={(e) => updateLineItem(item.id, 'amount', e.target.value)}
-                            style={{
-                              flex: 1,
-                              padding: '8px 10px',
-                              border: '1px solid #e5e7eb',
-                              borderRadius: '0 6px 6px 0',
-                              fontSize: '13px',
-                              backgroundColor: 'white',
-                              minWidth: 0,
-                            }}
-                          />
+                            backgroundColor: 'white',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {currencies.map((curr) => (
+                            <option key={curr.code} value={curr.code}>
+                              {curr.symbol} {curr.code}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          placeholder="0.00"
+                          value={item.amount}
+                          onChange={(e) => updateLineItemWithExchange(item.id, 'amount', e.target.value)}
+                          style={{
+                            padding: '8px 10px',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            backgroundColor: 'white',
+                            minWidth: 0,
+                          }}
+                        />
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '8px 10px',
+                          backgroundColor: '#f0f9ff',
+                          borderRadius: '6px',
+                          fontSize: '13px',
+                          color: '#0369a1',
+                          fontWeight: 500,
+                        }}>
+                          {item.amountInUSD !== undefined ? (
+                            <span title={`汇率: ${item.exchangeRate?.toFixed(4) || '-'}`}>
+                              ${item.amountInUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#9ca3af' }}>-</span>
+                          )}
                         </div>
                         <input
                           type="date"
@@ -969,11 +1084,21 @@ export default function NewReimbursementPage() {
                 paddingTop: '16px',
                 borderTop: '1px solid #e5e7eb',
               }}>
-                <div>
-                  <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '2px' }}>费用合计</p>
-                  <p style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>
-                    ¥{totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                  </p>
+                <div style={{ display: 'flex', gap: '32px', alignItems: 'flex-end' }}>
+                  <div>
+                    <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '2px' }}>原币合计</p>
+                    <p style={{ fontSize: '20px', fontWeight: 600, color: '#6b7280' }}>
+                      ¥{totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: '12px', color: '#0369a1', marginBottom: '2px' }}>
+                      折算美元 (记账本位币)
+                    </p>
+                    <p style={{ fontSize: '24px', fontWeight: 700, color: '#0369a1' }}>
+                      ${totalAmountUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <button
