@@ -1,14 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 
 interface ReimbursementItem {
   id: string;
   category: string;
   description: string;
   amount: number;
+  currency: string;
+  date: string;
 }
 
 interface Reimbursement {
@@ -25,38 +25,46 @@ interface Reimbursement {
   };
 }
 
-const categoryIcons: Record<string, string> = {
-  flight: '✈️',
-  train: '🚄',
-  hotel: '🏨',
-  meal: '🍽️',
-  taxi: '🚕',
-  other: '📦',
+const categoryLabels: Record<string, { label: string; icon: string }> = {
+  flight: { label: '机票', icon: '✈️' },
+  train: { label: '火车票', icon: '🚄' },
+  hotel: { label: '酒店住宿', icon: '🏨' },
+  meal: { label: '餐饮', icon: '🍽️' },
+  taxi: { label: '交通', icon: '🚕' },
+  office_supplies: { label: '办公用品', icon: '📎' },
+  ai_token: { label: 'AI 服务', icon: '🤖' },
+  cloud_resource: { label: '云资源', icon: '☁️' },
+  client_entertainment: { label: '客户招待', icon: '🤝' },
+  other: { label: '其他', icon: '📦' },
+};
+
+const statusLabels: Record<string, { label: string; color: string; bgColor: string }> = {
+  pending: { label: '待审批', color: '#d97706', bgColor: '#fef3c7' },
+  approved: { label: '已批准', color: '#16a34a', bgColor: '#dcfce7' },
+  rejected: { label: '已拒绝', color: '#dc2626', bgColor: '#fee2e2' },
 };
 
 export default function ApprovalsPage() {
-  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
   const [pendingApprovals, setPendingApprovals] = useState<Reimbursement[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<Reimbursement[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailData, setDetailData] = useState<Reimbursement | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [comment, setComment] = useState('');
-  const [showApproveModal, setShowApproveModal] = useState<string | null>(null);
-  const [showRejectModal, setShowRejectModal] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
 
   // 获取待审批列表
   useEffect(() => {
     const fetchApprovals = async () => {
       try {
-        // 获取所有待审批的报销（以审批人身份）
         const pendingResponse = await fetch('/api/reimbursements?status=pending&role=approver');
         const pendingResult = await pendingResponse.json();
         if (pendingResult.success) {
           setPendingApprovals(pendingResult.data || []);
         }
 
-        // 获取审批历史（已批准或已拒绝的）
         const historyResponse = await fetch('/api/reimbursements?status=approved,rejected&role=approver');
         const historyResult = await historyResponse.json();
         if (historyResult.success) {
@@ -72,24 +80,52 @@ export default function ApprovalsPage() {
     fetchApprovals();
   }, []);
 
-  const handleApprove = async (id: string) => {
+  // 获取详情
+  useEffect(() => {
+    if (!selectedId) {
+      setDetailData(null);
+      return;
+    }
+
+    const fetchDetail = async () => {
+      setDetailLoading(true);
+      try {
+        const response = await fetch(`/api/reimbursements/${selectedId}`);
+        const result = await response.json();
+        if (result.success) {
+          setDetailData(result.data);
+        } else {
+          setDetailData(null);
+        }
+      } catch (error) {
+        console.error('Failed to fetch detail:', error);
+        setDetailData(null);
+      } finally {
+        setDetailLoading(false);
+      }
+    };
+
+    fetchDetail();
+  }, [selectedId]);
+
+  const handleApprove = async () => {
+    if (!selectedId) return;
     setProcessing(true);
     try {
-      const response = await fetch(`/api/reimbursements/${id}`, {
+      const response = await fetch(`/api/reimbursements/${selectedId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'approved', comment }),
       });
       const result = await response.json();
       if (result.success) {
-        // 从待审批列表中移除
-        const approved = pendingApprovals.find(a => a.id === id);
+        const approved = pendingApprovals.find(a => a.id === selectedId);
         if (approved) {
           approved.status = 'approved';
           setApprovalHistory([approved, ...approvalHistory]);
         }
-        setPendingApprovals(pendingApprovals.filter(a => a.id !== id));
-        setShowApproveModal(null);
+        setPendingApprovals(pendingApprovals.filter(a => a.id !== selectedId));
+        setSelectedId(null);
         setComment('');
       } else {
         alert(result.error || '操作失败');
@@ -102,24 +138,24 @@ export default function ApprovalsPage() {
     }
   };
 
-  const handleReject = async (id: string) => {
+  const handleReject = async () => {
+    if (!selectedId || !comment) return;
     setProcessing(true);
     try {
-      const response = await fetch(`/api/reimbursements/${id}`, {
+      const response = await fetch(`/api/reimbursements/${selectedId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'rejected', rejectReason: comment }),
       });
       const result = await response.json();
       if (result.success) {
-        // 从待审批列表中移除
-        const rejected = pendingApprovals.find(a => a.id === id);
+        const rejected = pendingApprovals.find(a => a.id === selectedId);
         if (rejected) {
           rejected.status = 'rejected';
           setApprovalHistory([rejected, ...approvalHistory]);
         }
-        setPendingApprovals(pendingApprovals.filter(a => a.id !== id));
-        setShowRejectModal(null);
+        setPendingApprovals(pendingApprovals.filter(a => a.id !== selectedId));
+        setSelectedId(null);
         setComment('');
       } else {
         alert(result.error || '操作失败');
@@ -132,531 +168,554 @@ export default function ApprovalsPage() {
     }
   };
 
-  // 统计
   const stats = {
     pending: pendingApprovals.length,
     approved: approvalHistory.filter(a => a.status === 'approved').length,
     pendingAmount: pendingApprovals.reduce((sum, a) => sum + a.totalAmount, 0),
   };
 
-  const selectedApproval = showApproveModal
-    ? pendingApprovals.find(a => a.id === showApproveModal)
-    : showRejectModal
-    ? pendingApprovals.find(a => a.id === showRejectModal)
-    : null;
+  const formatDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+  };
+
+  const formatFullDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+  };
+
+  const currentList = activeTab === 'pending' ? pendingApprovals : approvalHistory;
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', marginBottom: '0.25rem' }}>
-          审批管理
-        </h2>
-        <p style={{ color: '#6b7280' }}>审核团队成员的报销申请</p>
-      </div>
-
-      {/* Stats */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: '1rem',
-        marginBottom: '1.5rem'
-      }}>
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          padding: '1.25rem',
-          border: '1px solid #e5e7eb'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>待审批</p>
-              <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#d97706' }}>{stats.pending}</p>
-            </div>
-            <div style={{
-              width: '48px',
-              height: '48px',
-              backgroundColor: '#fef3c7',
-              borderRadius: '0.75rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '1.5rem'
-            }}>
-              ⏳
-            </div>
-          </div>
+    <div style={{ display: 'flex', gap: '24px', height: 'calc(100vh - 140px)' }}>
+      {/* Main Content */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        {/* Header */}
+        <div style={{ marginBottom: '20px' }}>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', marginBottom: '4px' }}>
+            审批管理
+          </h1>
+          <p style={{ color: '#6b7280', fontSize: '14px' }}>审核团队成员的报销申请</p>
         </div>
 
+        {/* Stats */}
         <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          padding: '1.25rem',
-          border: '1px solid #e5e7eb'
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: '16px',
+          marginBottom: '20px'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>已审批</p>
-              <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#16a34a' }}>{stats.approved}</p>
-            </div>
-            <div style={{
-              width: '48px',
-              height: '48px',
-              backgroundColor: '#dcfce7',
-              borderRadius: '0.75rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '1.5rem'
-            }}>
-              ✅
-            </div>
-          </div>
-        </div>
-
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          padding: '1.25rem',
-          border: '1px solid #e5e7eb'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>待审批金额</p>
-              <p style={{ fontSize: '1.75rem', fontWeight: 700, color: '#2563eb' }}>
-                ¥{stats.pendingAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-              </p>
-            </div>
-            <div style={{
-              width: '48px',
-              height: '48px',
-              backgroundColor: '#dbeafe',
-              borderRadius: '0.75rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '1.5rem'
-            }}>
-              💰
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div style={{
-        display: 'flex',
-        gap: '0.5rem',
-        marginBottom: '1rem',
-        borderBottom: '1px solid #e5e7eb',
-        paddingBottom: '0.5rem'
-      }}>
-        <button
-          onClick={() => setActiveTab('pending')}
-          style={{
-            padding: '0.5rem 1rem',
-            backgroundColor: activeTab === 'pending' ? '#f3e8ff' : 'transparent',
-            color: activeTab === 'pending' ? '#7c3aed' : '#6b7280',
-            border: 'none',
-            borderRadius: '0.5rem',
-            fontWeight: 500,
-            cursor: 'pointer'
-          }}
-        >
-          待审批 ({stats.pending})
-        </button>
-        <button
-          onClick={() => setActiveTab('history')}
-          style={{
-            padding: '0.5rem 1rem',
-            backgroundColor: activeTab === 'history' ? '#f3e8ff' : 'transparent',
-            color: activeTab === 'history' ? '#7c3aed' : '#6b7280',
-            border: 'none',
-            borderRadius: '0.5rem',
-            fontWeight: 500,
-            cursor: 'pointer'
-          }}
-        >
-          审批历史
-        </button>
-      </div>
-
-      {/* Content */}
-      {loading ? (
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          border: '1px solid #e5e7eb',
-          padding: '3rem',
-          textAlign: 'center'
-        }}>
-          <p style={{ color: '#6b7280' }}>加载中...</p>
-        </div>
-      ) : (
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden'
-        }}>
-          {activeTab === 'pending' ? (
-            pendingApprovals.length > 0 ? (
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            padding: '16px',
+            border: '1px solid #e5e7eb'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                {pendingApprovals.map((approval, index) => (
-                  <div
-                    key={approval.id}
-                    style={{
-                      padding: '1.25rem',
-                      borderBottom: index < pendingApprovals.length - 1 ? '1px solid #e5e7eb' : 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                      <div style={{
-                        width: '44px',
-                        height: '44px',
-                        backgroundColor: '#f3f4f6',
-                        borderRadius: '0.5rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '1.25rem'
-                      }}>
-                        {approval.items?.[0]?.category
-                          ? (categoryIcons[approval.items[0].category] || '📄')
-                          : '📄'}
-                      </div>
-                      <div>
-                        <Link
-                          href={`/dashboard/reimbursements/${approval.id}`}
-                          style={{
-                            fontSize: '1rem',
-                            fontWeight: 600,
-                            color: '#111827',
-                            textDecoration: 'none',
-                            marginBottom: '0.25rem',
-                            display: 'block'
-                          }}
-                        >
-                          {approval.title}
-                        </Link>
-                        <p style={{ fontSize: '0.8125rem', color: '#6b7280' }}>
-                          {approval.submitter?.name || '用户'} ·
-                          {new Date(approval.createdAt).toLocaleDateString('zh-CN')} ·
-                          {approval.items?.length || 0} 项费用
-                        </p>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                      <span style={{ fontSize: '1.125rem', fontWeight: 700, color: '#111827' }}>
-                        ¥{approval.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                      </span>
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button
-                          onClick={() => setShowRejectModal(approval.id)}
-                          style={{
-                            padding: '0.375rem 0.75rem',
-                            backgroundColor: 'white',
-                            color: '#dc2626',
-                            border: '1px solid #dc2626',
-                            borderRadius: '0.375rem',
-                            fontSize: '0.8125rem',
-                            fontWeight: 500,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          拒绝
-                        </button>
-                        <button
-                          onClick={() => setShowApproveModal(approval.id)}
-                          style={{
-                            padding: '0.375rem 0.75rem',
-                            background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '0.375rem',
-                            fontSize: '0.8125rem',
-                            fontWeight: 500,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          批准
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>待审批</p>
+                <p style={{ fontSize: '24px', fontWeight: 700, color: '#d97706' }}>{stats.pending}</p>
               </div>
-            ) : (
-              <div style={{ padding: '3rem', textAlign: 'center' }}>
+              <div style={{
+                width: '44px',
+                height: '44px',
+                backgroundColor: '#fef3c7',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '20px'
+              }}>
+                ⏳
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            padding: '16px',
+            border: '1px solid #e5e7eb'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>已审批</p>
+                <p style={{ fontSize: '24px', fontWeight: 700, color: '#16a34a' }}>{stats.approved}</p>
+              </div>
+              <div style={{
+                width: '44px',
+                height: '44px',
+                backgroundColor: '#dcfce7',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '20px'
+              }}>
+                ✅
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            padding: '16px',
+            border: '1px solid #e5e7eb'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>待审批金额</p>
+                <p style={{ fontSize: '24px', fontWeight: 700, color: '#2563eb' }}>
+                  ¥{stats.pendingAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div style={{
+                width: '44px',
+                height: '44px',
+                backgroundColor: '#dbeafe',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '20px'
+              }}>
+                💰
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{
+          display: 'flex',
+          gap: '8px',
+          marginBottom: '16px',
+        }}>
+          <button
+            onClick={() => { setActiveTab('pending'); setSelectedId(null); }}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: activeTab === 'pending' ? '#7c3aed' : 'white',
+              color: activeTab === 'pending' ? 'white' : '#6b7280',
+              border: activeTab === 'pending' ? 'none' : '1px solid #e5e7eb',
+              borderRadius: '8px',
+              fontWeight: 500,
+              cursor: 'pointer',
+              fontSize: '14px',
+            }}
+          >
+            待审批 ({stats.pending})
+          </button>
+          <button
+            onClick={() => { setActiveTab('history'); setSelectedId(null); }}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: activeTab === 'history' ? '#7c3aed' : 'white',
+              color: activeTab === 'history' ? 'white' : '#6b7280',
+              border: activeTab === 'history' ? 'none' : '1px solid #e5e7eb',
+              borderRadius: '8px',
+              fontWeight: 500,
+              cursor: 'pointer',
+              fontSize: '14px',
+            }}
+          >
+            审批历史
+          </button>
+        </div>
+
+        {/* Table */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          border: '1px solid #e5e7eb',
+          overflow: 'hidden',
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+          {/* Table Header */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
+            gap: '12px',
+            padding: '12px 16px',
+            backgroundColor: '#f9fafb',
+            borderBottom: '1px solid #e5e7eb',
+            fontSize: '12px',
+            fontWeight: 600,
+            color: '#6b7280',
+            textTransform: 'uppercase',
+          }}>
+            <div>报销说明</div>
+            <div>申请人</div>
+            <div>提交日期</div>
+            <div>状态</div>
+            <div style={{ textAlign: 'right' }}>金额</div>
+          </div>
+
+          {/* Table Body */}
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            {loading && (
+              <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+                加载中...
+              </div>
+            )}
+
+            {!loading && currentList.length === 0 && (
+              <div style={{ padding: '60px 20px', textAlign: 'center' }}>
                 <div style={{
-                  width: '80px',
-                  height: '80px',
+                  width: '64px',
+                  height: '64px',
                   backgroundColor: '#f3f4f6',
                   borderRadius: '50%',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  margin: '0 auto 1rem',
-                  fontSize: '2rem'
+                  margin: '0 auto 16px',
+                  fontSize: '24px'
                 }}>
-                  ✅
+                  {activeTab === 'pending' ? '✅' : '📋'}
                 </div>
-                <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.5rem' }}>
-                  没有待审批的报销
+                <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+                  {activeTab === 'pending' ? '没有待审批的报销' : '暂无审批记录'}
                 </h3>
-                <p style={{ color: '#6b7280' }}>
-                  当团队成员提交报销申请后，将会在这里显示
+                <p style={{ color: '#6b7280', fontSize: '14px' }}>
+                  {activeTab === 'pending'
+                    ? '当团队成员提交报销申请后，将会在这里显示'
+                    : '审批过的报销申请将会显示在这里'}
                 </p>
               </div>
-            )
-          ) : (
-            approvalHistory.length > 0 ? (
-              <div>
-                {approvalHistory.map((approval, index) => (
-                  <div
-                    key={approval.id}
-                    style={{
-                      padding: '1.25rem',
-                      borderBottom: index < approvalHistory.length - 1 ? '1px solid #e5e7eb' : 'none',
+            )}
+
+            {!loading && currentList.map((item) => {
+              const mainCategory = item.items?.[0]?.category || 'other';
+              const categoryInfo = categoryLabels[mainCategory] || categoryLabels.other;
+              const statusInfo = statusLabels[item.status] || statusLabels.pending;
+              const isSelected = selectedId === item.id;
+
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => setSelectedId(item.id)}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
+                    gap: '12px',
+                    padding: '14px 16px',
+                    borderBottom: '1px solid #e5e7eb',
+                    cursor: 'pointer',
+                    backgroundColor: isSelected ? '#f3e8ff' : 'white',
+                    transition: 'background-color 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected) e.currentTarget.style.backgroundColor = '#f9fafb';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelected) e.currentTarget.style.backgroundColor = 'white';
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                      width: '36px',
+                      height: '36px',
+                      backgroundColor: isSelected ? '#e9d5ff' : '#f3f4f6',
+                      borderRadius: '8px',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'space-between'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                      <div style={{
-                        width: '44px',
-                        height: '44px',
-                        backgroundColor: '#f3f4f6',
-                        borderRadius: '0.5rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '1.25rem'
-                      }}>
-                        {approval.items?.[0]?.category
-                          ? (categoryIcons[approval.items[0].category] || '📄')
-                          : '📄'}
-                      </div>
-                      <div>
-                        <Link
-                          href={`/dashboard/reimbursements/${approval.id}`}
-                          style={{
-                            fontSize: '1rem',
-                            fontWeight: 600,
-                            color: '#111827',
-                            textDecoration: 'none',
-                            marginBottom: '0.25rem',
-                            display: 'block'
-                          }}
-                        >
-                          {approval.title}
-                        </Link>
-                        <p style={{ fontSize: '0.8125rem', color: '#6b7280' }}>
-                          {approval.submitter?.name || '用户'} ·
-                          {new Date(approval.createdAt).toLocaleDateString('zh-CN')}
-                        </p>
-                      </div>
+                      justifyContent: 'center',
+                      fontSize: '16px',
+                    }}>
+                      {categoryInfo.icon}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                      <span style={{
-                        fontSize: '0.75rem',
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{
+                        fontSize: '14px',
                         fontWeight: 500,
-                        padding: '0.25rem 0.625rem',
-                        borderRadius: '9999px',
-                        backgroundColor: approval.status === 'approved' ? '#dcfce7' : '#fee2e2',
-                        color: approval.status === 'approved' ? '#16a34a' : '#dc2626'
+                        color: '#111827',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
                       }}>
-                        {approval.status === 'approved' ? '已批准' : '已拒绝'}
-                      </span>
-                      <span style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>
-                        ¥{approval.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                      </span>
+                        {item.title}
+                      </p>
+                      <p style={{ fontSize: '12px', color: '#6b7280' }}>
+                        {item.items?.length || 0} 项费用
+                      </p>
                     </div>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div style={{ padding: '3rem', textAlign: 'center' }}>
-                <div style={{
-                  width: '80px',
-                  height: '80px',
-                  backgroundColor: '#f3f4f6',
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  margin: '0 auto 1rem',
-                  fontSize: '2rem'
-                }}>
-                  📋
+                  <div style={{ display: 'flex', alignItems: 'center', fontSize: '13px', color: '#374151' }}>
+                    {item.submitter?.name || '用户'}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', fontSize: '13px', color: '#6b7280' }}>
+                    {formatDate(item.submittedAt || item.createdAt)}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <span style={{
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      padding: '4px 10px',
+                      borderRadius: '9999px',
+                      backgroundColor: statusInfo.bgColor,
+                      color: statusInfo.color,
+                    }}>
+                      {statusInfo.label}
+                    </span>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'flex-end',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: '#111827',
+                  }}>
+                    ¥{item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                  </div>
                 </div>
-                <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.5rem' }}>
-                  暂无审批记录
-                </h3>
-                <p style={{ color: '#6b7280' }}>
-                  审批过的报销申请将会显示在这里
-                </p>
-              </div>
-            )
-          )}
-        </div>
-      )}
-
-      {/* Approve Modal */}
-      {showApproveModal && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 50
-        }}>
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '0.75rem',
-            padding: '1.5rem',
-            width: '100%',
-            maxWidth: '400px'
-          }}>
-            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-              确认批准
-            </h3>
-            <p style={{ color: '#6b7280', marginBottom: '1rem' }}>
-              确定要批准 "{selectedApproval?.title}" 吗？
-              金额: ¥{selectedApproval?.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-            </p>
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.375rem' }}>
-                审批意见（可选）
-              </label>
-              <textarea
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder="输入审批意见..."
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '0.5rem',
-                  fontSize: '0.875rem',
-                  minHeight: '80px',
-                  resize: 'vertical',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => { setShowApproveModal(null); setComment(''); }}
-                disabled={processing}
-                style={{
-                  padding: '0.5rem 1rem',
-                  backgroundColor: 'white',
-                  color: '#6b7280',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '0.5rem',
-                  cursor: processing ? 'not-allowed' : 'pointer'
-                }}
-              >
-                取消
-              </button>
-              <button
-                onClick={() => handleApprove(showApproveModal)}
-                disabled={processing}
-                style={{
-                  padding: '0.5rem 1rem',
-                  background: processing ? '#9ca3af' : 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.5rem',
-                  fontWeight: 500,
-                  cursor: processing ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {processing ? '处理中...' : '确认批准'}
-              </button>
-            </div>
+              );
+            })}
           </div>
         </div>
-      )}
+      </div>
 
-      {/* Reject Modal */}
-      {showRejectModal && (
+      {/* Detail Panel */}
+      {selectedId && (
         <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
+          width: '400px',
+          flexShrink: 0,
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          border: '1px solid #e5e7eb',
+          overflow: 'hidden',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 50
+          flexDirection: 'column',
         }}>
+          {/* Panel Header */}
           <div style={{
-            backgroundColor: 'white',
-            borderRadius: '0.75rem',
-            padding: '1.5rem',
-            width: '100%',
-            maxWidth: '400px'
+            padding: '16px 20px',
+            borderBottom: '1px solid #e5e7eb',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: '#f9fafb',
           }}>
-            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-              拒绝报销
-            </h3>
-            <p style={{ color: '#6b7280', marginBottom: '1rem' }}>
-              拒绝 "{selectedApproval?.title}"，请填写拒绝原因
-            </p>
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="例如：发票信息不完整，请补充..."
+            <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>报销详情</h3>
+            <button
+              onClick={() => setSelectedId(null)}
               style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: '1px solid #d1d5db',
-                borderRadius: '0.5rem',
-                fontSize: '0.875rem',
-                minHeight: '100px',
-                resize: 'vertical',
-                boxSizing: 'border-box',
-                marginBottom: '1rem'
+                background: 'none',
+                border: 'none',
+                color: '#6b7280',
+                cursor: 'pointer',
+                fontSize: '18px',
+                padding: '4px',
               }}
-            />
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => { setShowRejectModal(null); setComment(''); }}
-                disabled={processing}
-                style={{
-                  padding: '0.5rem 1rem',
-                  backgroundColor: 'white',
-                  color: '#6b7280',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '0.5rem',
-                  cursor: processing ? 'not-allowed' : 'pointer'
-                }}
-              >
-                取消
-              </button>
-              <button
-                onClick={() => handleReject(showRejectModal)}
-                disabled={!comment || processing}
-                style={{
-                  padding: '0.5rem 1rem',
-                  backgroundColor: (!comment || processing) ? '#9ca3af' : '#dc2626',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.5rem',
-                  fontWeight: 500,
-                  cursor: (!comment || processing) ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {processing ? '处理中...' : '确认拒绝'}
-              </button>
-            </div>
+            >
+              ×
+            </button>
+          </div>
+
+          {/* Panel Content */}
+          <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
+            {detailLoading && (
+              <div style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>
+                加载中...
+              </div>
+            )}
+
+            {!detailLoading && !detailData && (
+              <div style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>
+                无法加载详情
+              </div>
+            )}
+
+            {!detailLoading && detailData && (
+              <>
+                {/* Title & Status */}
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#111827', flex: 1 }}>
+                      {detailData.title}
+                    </h2>
+                    <span style={{
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      padding: '4px 10px',
+                      borderRadius: '9999px',
+                      backgroundColor: statusLabels[detailData.status]?.bgColor || '#f3f4f6',
+                      color: statusLabels[detailData.status]?.color || '#6b7280',
+                      flexShrink: 0,
+                      marginLeft: '12px',
+                    }}>
+                      {statusLabels[detailData.status]?.label || detailData.status}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '13px', color: '#6b7280' }}>
+                    {detailData.submitter?.name || '用户'} · 提交于 {formatFullDate(detailData.submittedAt || detailData.createdAt)}
+                  </p>
+                </div>
+
+                {/* Amount */}
+                <div style={{
+                  backgroundColor: '#f9fafb',
+                  borderRadius: '8px',
+                  padding: '16px',
+                  marginBottom: '20px',
+                }}>
+                  <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>报销金额</p>
+                  <p style={{ fontSize: '28px', fontWeight: 700, color: '#111827' }}>
+                    ¥{detailData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+
+                {/* Line Items */}
+                <div style={{ marginBottom: '20px' }}>
+                  <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '12px' }}>
+                    费用明细 ({detailData.items?.length || 0})
+                  </h4>
+                  <div style={{
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    overflow: 'hidden',
+                  }}>
+                    {detailData.items?.map((item, index) => {
+                      const catInfo = categoryLabels[item.category] || categoryLabels.other;
+                      return (
+                        <div
+                          key={item.id}
+                          style={{
+                            padding: '12px',
+                            borderBottom: index < (detailData.items?.length || 0) - 1 ? '1px solid #e5e7eb' : 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px',
+                          }}
+                        >
+                          <div style={{
+                            width: '32px',
+                            height: '32px',
+                            backgroundColor: '#f3f4f6',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '14px',
+                          }}>
+                            {catInfo.icon}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{
+                              fontSize: '13px',
+                              fontWeight: 500,
+                              color: '#111827',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}>
+                              {item.description || catInfo.label}
+                            </p>
+                            <p style={{ fontSize: '11px', color: '#6b7280' }}>
+                              {catInfo.label} · {formatDate(item.date)}
+                            </p>
+                          </div>
+                          <div style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>
+                            ¥{item.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Actions for pending */}
+                {detailData.status === 'pending' && (
+                  <div>
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '6px', color: '#374151' }}>
+                        审批意见
+                      </label>
+                      <textarea
+                        value={comment}
+                        onChange={(e) => setComment(e.target.value)}
+                        placeholder="输入审批意见（拒绝时必填）..."
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          fontSize: '14px',
+                          minHeight: '80px',
+                          resize: 'vertical',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      <button
+                        onClick={handleReject}
+                        disabled={!comment || processing}
+                        style={{
+                          flex: 1,
+                          padding: '10px 16px',
+                          backgroundColor: (!comment || processing) ? '#f3f4f6' : 'white',
+                          color: (!comment || processing) ? '#9ca3af' : '#dc2626',
+                          border: (!comment || processing) ? '1px solid #e5e7eb' : '1px solid #dc2626',
+                          borderRadius: '8px',
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          cursor: (!comment || processing) ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {processing ? '处理中...' : '拒绝'}
+                      </button>
+                      <button
+                        onClick={handleApprove}
+                        disabled={processing}
+                        style={{
+                          flex: 1,
+                          padding: '10px 16px',
+                          background: processing ? '#9ca3af' : 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          cursor: processing ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {processing ? '处理中...' : '批准'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Status indicator for history */}
+                {detailData.status === 'approved' && (
+                  <div style={{
+                    padding: '12px',
+                    backgroundColor: '#dcfce7',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                  }}>
+                    <p style={{ fontSize: '13px', color: '#166534', fontWeight: 500 }}>
+                      ✓ 已批准
+                    </p>
+                  </div>
+                )}
+
+                {detailData.status === 'rejected' && (
+                  <div style={{
+                    padding: '12px',
+                    backgroundColor: '#fee2e2',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                  }}>
+                    <p style={{ fontSize: '13px', color: '#dc2626', fontWeight: 500 }}>
+                      ✗ 已拒绝
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}
