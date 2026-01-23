@@ -18,7 +18,7 @@ export default function SettingsPage() {
     name: '',
     email: '',
     department: '',
-    role: 'employee',
+    roles: [] as string[],
   });
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -45,15 +45,21 @@ export default function SettingsPage() {
     departments: ['技术部', '产品部', '运营部', '财务部', '人力资源部', '市场部'],
   });
 
-  // Mock team members
-  const [members] = useState([
-    { id: '1', name: '张三', email: 'zhangsan@example.com', role: 'admin', department: '技术部', status: 'active' },
-    { id: '2', name: '李四', email: 'lisi@example.com', role: 'manager', department: '产品部', status: 'active' },
+  // Example team members (示例数据)
+  const [members, setMembers] = useState([
+    { id: 'example-1', name: '示例员工A', email: 'example_a@demo.com', roles: ['admin'], department: '技术部', status: 'active', isExample: true },
+    { id: 'example-2', name: '示例员工B', email: 'example_b@demo.com', roles: ['approver'], department: '产品部', status: 'active', isExample: true },
   ]);
 
-  const [pendingInvites] = useState([
-    { email: 'newuser@example.com', role: 'employee', sentAt: '2024-01-20' },
-  ]);
+  // 待接受邀请列表
+  const [pendingInvites, setPendingInvites] = useState<Array<{
+    id: string;
+    name: string;
+    email: string;
+    roles: string[];
+    department: string;
+    sentAt: string;
+  }>>([]);
 
   // 从 localStorage 读取角色
   useEffect(() => {
@@ -173,13 +179,34 @@ export default function SettingsPage() {
   };
 
   const handleInvite = async () => {
-    if (!inviteData.email || !inviteData.name) return;
+    if (!inviteData.email || !inviteData.name || inviteData.roles.length === 0) return;
     setSaving(true);
     // TODO: Call API to send invite
     await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // 添加到待接受邀请列表
+    const newInvite = {
+      id: `invite-${Date.now()}`,
+      name: inviteData.name,
+      email: inviteData.email,
+      roles: inviteData.roles,
+      department: inviteData.department,
+      sentAt: new Date().toISOString().split('T')[0],
+    };
+    setPendingInvites([...pendingInvites, newInvite]);
+
     showMessage(`邀请已发送至 ${inviteData.email}`);
     setShowInviteModal(false);
-    setInviteData({ name: '', email: '', department: '', role: 'employee' });
+    setInviteData({ name: '', email: '', department: '', roles: [] });
+    setSaving(false);
+  };
+
+  const handleCancelInvite = async (inviteId: string) => {
+    setSaving(true);
+    // TODO: Call API to cancel invite
+    await new Promise(resolve => setTimeout(resolve, 500));
+    setPendingInvites(pendingInvites.filter(inv => inv.id !== inviteId));
+    showMessage('邀请已取消');
     setSaving(false);
   };
 
@@ -644,7 +671,7 @@ export default function SettingsPage() {
               <div>
                 {pendingInvites.map((invite) => (
                   <div
-                    key={invite.email}
+                    key={invite.id}
                     style={{
                       padding: '0.875rem 1.25rem',
                       display: 'flex',
@@ -654,12 +681,17 @@ export default function SettingsPage() {
                     }}
                   >
                     <div>
-                      <p style={{ fontWeight: 500, color: '#111827' }}>{invite.email}</p>
+                      <p style={{ fontWeight: 500, color: '#111827' }}>{invite.name}</p>
                       <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                        邀请于 {invite.sentAt} · {roleLabels[invite.role]}
+                        {invite.email} · {invite.department || '未分配部门'}
+                      </p>
+                      <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                        邀请于 {invite.sentAt} · {invite.roles.map(r => roleLabels[r]).join(', ')}
                       </p>
                     </div>
                     <button
+                      onClick={() => handleCancelInvite(invite.id)}
+                      disabled={saving}
                       style={{
                         padding: '0.375rem 0.75rem',
                         backgroundColor: 'white',
@@ -667,7 +699,8 @@ export default function SettingsPage() {
                         border: '1px solid #fecaca',
                         borderRadius: '0.375rem',
                         fontSize: '0.75rem',
-                        cursor: 'pointer',
+                        cursor: saving ? 'not-allowed' : 'pointer',
+                        opacity: saving ? 0.5 : 1,
                       }}
                     >
                       取消邀请
@@ -680,10 +713,13 @@ export default function SettingsPage() {
 
           {/* Team Members */}
           <div style={cardStyle}>
-            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e5e7eb' }}>
+            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>
                 团队成员 ({members.length})
               </h3>
+              <span style={{ fontSize: '0.75rem', color: '#9ca3af', fontStyle: 'italic' }}>
+                以下为示例数据
+              </span>
             </div>
             <div>
               {members.map((member) => (
@@ -695,13 +731,14 @@ export default function SettingsPage() {
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     borderBottom: '1px solid #f3f4f6',
+                    backgroundColor: member.isExample ? '#fafafa' : 'white',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <div style={{
                       width: '40px',
                       height: '40px',
-                      backgroundColor: '#2563eb',
+                      backgroundColor: member.isExample ? '#9ca3af' : '#2563eb',
                       borderRadius: '50%',
                       display: 'flex',
                       alignItems: 'center',
@@ -710,11 +747,24 @@ export default function SettingsPage() {
                       <span style={{ color: 'white', fontWeight: 600 }}>{member.name[0]}</span>
                     </div>
                     <div>
-                      <p style={{ fontWeight: 500, color: '#111827' }}>{member.name}</p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <p style={{ fontWeight: 500, color: '#111827' }}>{member.name}</p>
+                        {member.isExample && (
+                          <span style={{
+                            padding: '0.125rem 0.5rem',
+                            backgroundColor: '#f3f4f6',
+                            borderRadius: '9999px',
+                            fontSize: '0.625rem',
+                            color: '#6b7280',
+                          }}>
+                            示例
+                          </span>
+                        )}
+                      </div>
                       <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>{member.email}</p>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <span style={{
                       padding: '0.25rem 0.75rem',
                       backgroundColor: '#f3f4f6',
@@ -724,21 +774,23 @@ export default function SettingsPage() {
                     }}>
                       {member.department}
                     </span>
-                    <select
-                      defaultValue={member.role}
-                      style={{
-                        padding: '0.375rem 0.5rem',
-                        border: '1px solid #d1d5db',
-                        borderRadius: '0.375rem',
-                        fontSize: '0.875rem',
-                        backgroundColor: 'white',
-                      }}
-                    >
-                      <option value="employee">员工</option>
-                      <option value="manager">经理</option>
-                      <option value="finance">财务</option>
-                      <option value="admin">管理员</option>
-                    </select>
+                    <div style={{ display: 'flex', gap: '0.25rem' }}>
+                      {member.roles.map((role) => (
+                        <span
+                          key={role}
+                          style={{
+                            padding: '0.25rem 0.5rem',
+                            backgroundColor: role === 'admin' ? '#fef2f2' : role === 'approver' ? '#f3e8ff' : role === 'finance' ? '#ecfdf5' : '#eff6ff',
+                            color: role === 'admin' ? '#dc2626' : role === 'approver' ? '#7c3aed' : role === 'finance' ? '#059669' : '#2563eb',
+                            borderRadius: '0.375rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 500,
+                          }}
+                        >
+                          {roleLabels[role]}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -895,17 +947,51 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label style={labelStyle}>角色权限</label>
-                <select
-                  value={inviteData.role}
-                  onChange={(e) => setInviteData({ ...inviteData, role: e.target.value })}
-                  style={inputStyle}
-                >
-                  <option value="employee">员工 - 可以提交报销</option>
-                  <option value="approver">审批人 - 可以审批下属报销</option>
-                  <option value="finance">财务 - 可以处理打款</option>
-                  <option value="admin">管理员 - 所有权限</option>
-                </select>
+                <label style={labelStyle}>
+                  角色权限 <span style={{ color: '#dc2626' }}>*</span>
+                  <span style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 400, marginLeft: '0.5rem' }}>
+                    (可多选)
+                  </span>
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  {[
+                    { value: 'employee', label: '员工', desc: '提交报销' },
+                    { value: 'approver', label: '审批人', desc: '审批报销' },
+                    { value: 'finance', label: '财务', desc: '处理打款' },
+                    { value: 'admin', label: '管理员', desc: '所有权限' },
+                  ].map((roleOption) => (
+                    <label
+                      key={roleOption.value}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '0.5rem',
+                        padding: '0.75rem',
+                        border: inviteData.roles.includes(roleOption.value) ? '2px solid #2563eb' : '1px solid #d1d5db',
+                        borderRadius: '0.5rem',
+                        cursor: 'pointer',
+                        backgroundColor: inviteData.roles.includes(roleOption.value) ? '#eff6ff' : 'white',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={inviteData.roles.includes(roleOption.value)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setInviteData({ ...inviteData, roles: [...inviteData.roles, roleOption.value] });
+                          } else {
+                            setInviteData({ ...inviteData, roles: inviteData.roles.filter(r => r !== roleOption.value) });
+                          }
+                        }}
+                        style={{ marginTop: '0.125rem' }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: '0.875rem', color: '#111827' }}>{roleOption.label}</div>
+                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{roleOption.desc}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -929,7 +1015,7 @@ export default function SettingsPage() {
               <button
                 onClick={() => {
                   setShowInviteModal(false);
-                  setInviteData({ name: '', email: '', department: '', role: 'employee' });
+                  setInviteData({ name: '', email: '', department: '', roles: [] });
                 }}
                 style={{
                   padding: '0.5rem 1rem',
@@ -944,14 +1030,14 @@ export default function SettingsPage() {
               </button>
               <button
                 onClick={handleInvite}
-                disabled={saving || !inviteData.email || !inviteData.name}
+                disabled={saving || !inviteData.email || !inviteData.name || inviteData.roles.length === 0}
                 style={{
                   padding: '0.5rem 1rem',
-                  backgroundColor: saving || !inviteData.email || !inviteData.name ? '#9ca3af' : '#2563eb',
+                  backgroundColor: saving || !inviteData.email || !inviteData.name || inviteData.roles.length === 0 ? '#9ca3af' : '#2563eb',
                   color: 'white',
                   border: 'none',
                   borderRadius: '0.5rem',
-                  cursor: saving || !inviteData.email || !inviteData.name ? 'not-allowed' : 'pointer',
+                  cursor: saving || !inviteData.email || !inviteData.name || inviteData.roles.length === 0 ? 'not-allowed' : 'pointer',
                 }}
               >
                 {saving ? '发送中...' : '发送邀请链接'}
