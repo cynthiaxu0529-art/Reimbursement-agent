@@ -1,0 +1,521 @@
+'use client';
+
+import { useState, useRef, useEffect } from 'react';
+import { useRouter, useParams } from 'next/navigation';
+import Link from 'next/link';
+
+const expenseCategories = [
+  { value: 'flight', label: '机票', icon: '✈️' },
+  { value: 'train', label: '火车票', icon: '🚄' },
+  { value: 'hotel', label: '酒店住宿', icon: '🏨' },
+  { value: 'meal', label: '餐饮', icon: '🍽️' },
+  { value: 'taxi', label: '交通', icon: '🚕' },
+  { value: 'office_supplies', label: '办公用品', icon: '📎' },
+  { value: 'ai_token', label: 'AI 服务', icon: '🤖' },
+  { value: 'cloud_resource', label: '云资源', icon: '☁️' },
+  { value: 'client_entertainment', label: '客户招待', icon: '🤝' },
+  { value: 'other', label: '其他', icon: '📦' },
+];
+
+interface LineItem {
+  id: string;
+  description: string;
+  category: string;
+  amount: string;
+  currency: string;
+  date: string;
+  receiptUrl?: string;
+}
+
+export default function EditReimbursementPage() {
+  const router = useRouter();
+  const params = useParams();
+  const reimbursementId = params.id as string;
+
+  const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  // Form fields
+  const [description, setDescription] = useState('');
+  const [lineItems, setLineItems] = useState<LineItem[]>([]);
+
+  // 加载报销单数据
+  useEffect(() => {
+    const fetchReimbursement = async () => {
+      try {
+        const response = await fetch(`/api/reimbursements/${reimbursementId}`);
+        const result = await response.json();
+
+        if (result.success && result.data) {
+          const data = result.data;
+
+          // 检查是否可编辑（只有草稿状态可以编辑）
+          if (data.status !== 'draft') {
+            setError('只有草稿状态的报销单可以编辑');
+            setLoading(false);
+            return;
+          }
+
+          setDescription(data.title || '');
+
+          // 转换 items 数据
+          if (data.items && data.items.length > 0) {
+            setLineItems(data.items.map((item: any) => ({
+              id: item.id || Date.now().toString(),
+              description: item.description || '',
+              category: item.category || '',
+              amount: item.amount?.toString() || '',
+              currency: item.currency || 'CNY',
+              date: item.date ? new Date(item.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+              receiptUrl: item.receiptUrl || '',
+            })));
+          } else {
+            setLineItems([{
+              id: '1',
+              description: '',
+              category: '',
+              amount: '',
+              currency: 'CNY',
+              date: new Date().toISOString().split('T')[0],
+            }]);
+          }
+        } else {
+          setError(result.error || '加载失败');
+        }
+      } catch (err) {
+        console.error('Fetch error:', err);
+        setError('加载报销单失败');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (reimbursementId) {
+      fetchReimbursement();
+    }
+  }, [reimbursementId]);
+
+  const addLineItem = () => {
+    setLineItems([
+      ...lineItems,
+      {
+        id: Date.now().toString(),
+        description: '',
+        category: '',
+        amount: '',
+        currency: 'CNY',
+        date: new Date().toISOString().split('T')[0],
+      },
+    ]);
+  };
+
+  const removeLineItem = (id: string) => {
+    if (lineItems.length > 1) {
+      setLineItems(lineItems.filter(item => item.id !== id));
+    }
+  };
+
+  const updateLineItem = (id: string, field: keyof LineItem, value: string) => {
+    setLineItems(lineItems.map(item =>
+      item.id === id ? { ...item, [field]: value } : item
+    ));
+  };
+
+  const totalAmount = lineItems.reduce(
+    (sum, item) => sum + (parseFloat(item.amount) || 0),
+    0
+  );
+
+  const handleSubmit = async (isDraft: boolean) => {
+    if (!description) {
+      alert('请填写报销说明');
+      return;
+    }
+    if (lineItems.some(item => !item.amount || !item.category)) {
+      alert('请完善费用明细');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const itemsData = lineItems.map(item => ({
+        category: item.category,
+        description: item.description,
+        amount: item.amount,
+        currency: item.currency,
+        date: item.date,
+        receiptUrl: item.receiptUrl,
+      }));
+
+      const response = await fetch(`/api/reimbursements/${reimbursementId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: description,
+          items: itemsData,
+          status: isDraft ? 'draft' : 'pending',
+        }),
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        router.push('/dashboard/reimbursements');
+      } else {
+        alert(result.error || '保存失败，请重试');
+        setIsSubmitting(false);
+      }
+    } catch (error) {
+      console.error('Submit error:', error);
+      alert('保存失败，请重试');
+      setIsSubmitting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '40px 20px', textAlign: 'center' }}>
+        <div style={{
+          width: '48px',
+          height: '48px',
+          borderRadius: '50%',
+          border: '3px solid #e5e7eb',
+          borderTopColor: '#2563eb',
+          animation: 'spin 1s linear infinite',
+          margin: '0 auto 16px',
+        }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <p style={{ color: '#6b7280' }}>加载中...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ maxWidth: '600px', margin: '0 auto', padding: '40px 20px', textAlign: 'center' }}>
+        <div style={{
+          width: '64px',
+          height: '64px',
+          backgroundColor: '#fee2e2',
+          borderRadius: '50%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          margin: '0 auto 16px',
+          fontSize: '24px',
+        }}>
+          ⚠️
+        </div>
+        <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+          无法编辑
+        </h2>
+        <p style={{ color: '#6b7280', marginBottom: '20px' }}>{error}</p>
+        <Link
+          href="/dashboard/reimbursements"
+          style={{
+            display: 'inline-flex',
+            padding: '10px 20px',
+            backgroundColor: '#2563eb',
+            color: 'white',
+            borderRadius: '8px',
+            textDecoration: 'none',
+            fontSize: '14px',
+            fontWeight: 500,
+          }}
+        >
+          返回报销列表
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+      {/* Header */}
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+          <Link href="/dashboard/reimbursements" style={{ color: '#6b7280', textDecoration: 'none', fontSize: '14px' }}>
+            我的报销
+          </Link>
+          <span style={{ color: '#9ca3af' }}>/</span>
+          <span style={{ color: '#111827', fontSize: '14px' }}>编辑报销</span>
+        </div>
+        <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>编辑报销</h1>
+      </div>
+
+      {/* Main Form */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '12px',
+        border: '1px solid #e5e7eb',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          padding: '16px 20px',
+          borderBottom: '1px solid #e5e7eb',
+          backgroundColor: '#f9fafb',
+        }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>费用详情</h3>
+        </div>
+        <div style={{ padding: '20px' }}>
+          {/* General Description */}
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{
+              display: 'block',
+              fontSize: '13px',
+              fontWeight: 500,
+              color: '#374151',
+              marginBottom: '6px',
+            }}>
+              报销说明 *
+            </label>
+            <input
+              type="text"
+              placeholder="例如：上海出差-客户拜访"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          {/* Line Items Section */}
+          <div style={{ marginBottom: '20px' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '12px',
+            }}>
+              <label style={{
+                fontSize: '13px',
+                fontWeight: 500,
+                color: '#374151',
+              }}>
+                费用明细
+              </label>
+              <button
+                onClick={addLineItem}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '6px 12px',
+                  backgroundColor: 'white',
+                  color: '#2563eb',
+                  border: '1px solid #2563eb',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                + 添加明细
+              </button>
+            </div>
+
+            {/* Line Items Table */}
+            <div style={{
+              border: '1px solid #e5e7eb',
+              borderRadius: '8px',
+              overflow: 'hidden',
+            }}>
+              {/* Table Header */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '2fr 1.5fr 1fr 1fr 40px',
+                gap: '8px',
+                padding: '10px 12px',
+                backgroundColor: '#f9fafb',
+                borderBottom: '1px solid #e5e7eb',
+                fontSize: '12px',
+                fontWeight: 500,
+                color: '#6b7280',
+              }}>
+                <div>描述</div>
+                <div>类别</div>
+                <div>金额</div>
+                <div>日期</div>
+                <div></div>
+              </div>
+
+              {/* Line Items */}
+              {lineItems.map((item, index) => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '2fr 1.5fr 1fr 1fr 40px',
+                    gap: '8px',
+                    padding: '10px 12px',
+                    borderBottom: index < lineItems.length - 1 ? '1px solid #e5e7eb' : 'none',
+                    backgroundColor: 'white',
+                  }}
+                >
+                  <input
+                    type="text"
+                    placeholder="费用描述"
+                    value={item.description}
+                    onChange={(e) => updateLineItem(item.id, 'description', e.target.value)}
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      backgroundColor: 'white',
+                    }}
+                  />
+                  <select
+                    value={item.category}
+                    onChange={(e) => updateLineItem(item.id, 'category', e.target.value)}
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      backgroundColor: 'white',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="">选择类别</option>
+                    {expenseCategories.map((cat) => (
+                      <option key={cat.value} value={cat.value}>
+                        {cat.icon} {cat.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <span style={{
+                      padding: '8px 6px',
+                      backgroundColor: '#f3f4f6',
+                      border: '1px solid #e5e7eb',
+                      borderRight: 'none',
+                      borderRadius: '6px 0 0 6px',
+                      fontSize: '13px',
+                      color: '#6b7280',
+                    }}>
+                      ¥
+                    </span>
+                    <input
+                      type="number"
+                      placeholder="0.00"
+                      value={item.amount}
+                      onChange={(e) => updateLineItem(item.id, 'amount', e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: '8px 10px',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '0 6px 6px 0',
+                        fontSize: '13px',
+                        backgroundColor: 'white',
+                        minWidth: 0,
+                      }}
+                    />
+                  </div>
+                  <input
+                    type="date"
+                    value={item.date}
+                    onChange={(e) => updateLineItem(item.id, 'date', e.target.value)}
+                    style={{
+                      padding: '8px 6px',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      backgroundColor: 'white',
+                    }}
+                  />
+                  <button
+                    onClick={() => removeLineItem(item.id)}
+                    disabled={lineItems.length === 1}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: lineItems.length === 1 ? '#d1d5db' : '#dc2626',
+                      cursor: lineItems.length === 1 ? 'not-allowed' : 'pointer',
+                      padding: '4px',
+                      fontSize: '16px',
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Total and Actions */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingTop: '16px',
+            borderTop: '1px solid #e5e7eb',
+          }}>
+            <div>
+              <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '2px' }}>费用合计</p>
+              <p style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>
+                ¥{totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                onClick={() => router.push('/dashboard/reimbursements')}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: 'white',
+                  color: '#6b7280',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={() => handleSubmit(true)}
+                disabled={isSubmitting}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: 'white',
+                  color: '#2563eb',
+                  border: '1px solid #2563eb',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                  opacity: isSubmitting ? 0.6 : 1,
+                }}
+              >
+                保存草稿
+              </button>
+              <button
+                onClick={() => handleSubmit(false)}
+                disabled={isSubmitting || !description}
+                style={{
+                  padding: '10px 20px',
+                  background: isSubmitting || !description ? '#9ca3af' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  cursor: isSubmitting || !description ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {isSubmitting ? '保存中...' : '保存并提交审批'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
