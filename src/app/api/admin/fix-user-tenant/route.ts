@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { users, tenants } from '@/lib/db/schema';
+import { users, tenants, reimbursements, reimbursementItems, receipts } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
@@ -27,16 +27,32 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: '用户不存在' }, { status: 404 });
     }
 
-    // 删除用户
+    // 先删除用户的报销明细（通过报销单关联）
+    const userReimbursements = await db.query.reimbursements.findMany({
+      where: eq(reimbursements.userId, user.id),
+    });
+
+    for (const reimbursement of userReimbursements) {
+      // 删除报销明细
+      await db.delete(reimbursementItems).where(eq(reimbursementItems.reimbursementId, reimbursement.id));
+    }
+
+    // 删除用户的报销单
+    await db.delete(reimbursements).where(eq(reimbursements.userId, user.id));
+
+    // 删除用户的票据
+    await db.delete(receipts).where(eq(receipts.userId, user.id));
+
+    // 最后删除用户
     await db.delete(users).where(eq(users.email, email));
 
     return NextResponse.json({
       success: true,
-      message: `已删除用户 ${email}，现在可以重新通过邀请链接注册`
+      message: `已删除用户 ${email} 及其 ${userReimbursements.length} 条报销记录，现在可以重新通过邀请链接注册`
     });
   } catch (error) {
     console.error('Delete user error:', error);
-    return NextResponse.json({ error: '删除失败' }, { status: 500 });
+    return NextResponse.json({ error: '删除失败: ' + (error as Error).message }, { status: 500 });
   }
 }
 
