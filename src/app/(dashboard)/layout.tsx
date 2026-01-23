@@ -118,21 +118,24 @@ export default function DashboardLayout({
             </button>
 
             {showRoleMenu && (
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                right: 0,
-                marginTop: '0.25rem',
-                backgroundColor: 'white',
-                border: '1px solid #e5e7eb',
-                borderRadius: '0.5rem',
-                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                zIndex: 20,
-                overflow: 'hidden'
-              }}>
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  marginTop: '0.25rem',
+                  backgroundColor: 'white',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '0.5rem',
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                  zIndex: 50,
+                  overflow: 'hidden'
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
-                  onClick={() => switchRole('employee')}
+                  onClick={(e) => { e.stopPropagation(); switchRole('employee'); }}
                   style={{
                     width: '100%',
                     display: 'flex',
@@ -159,7 +162,7 @@ export default function DashboardLayout({
                   {role === 'employee' && <span style={{ marginLeft: 'auto', color: '#2563eb' }}>✓</span>}
                 </button>
                 <button
-                  onClick={() => switchRole('approver')}
+                  onClick={(e) => { e.stopPropagation(); switchRole('approver'); }}
                   style={{
                     width: '100%',
                     display: 'flex',
