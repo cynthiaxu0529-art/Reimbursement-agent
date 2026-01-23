@@ -97,7 +97,7 @@ export default function DashboardLayout({
         </div>
 
         {/* Role Switcher */}
-        <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
+        <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e5e7eb', position: 'relative', zIndex: 50 }}>
           <div style={{ position: 'relative' }}>
             <button
               onClick={() => setShowRoleMenu(!showRoleMenu)}
@@ -338,7 +338,10 @@ export default function DashboardLayout({
         <div
           style={{
             position: 'fixed',
-            inset: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: '240px',
             zIndex: 40
           }}
           onClick={() => setShowRoleMenu(false)}
