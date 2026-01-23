@@ -114,7 +114,7 @@ export async function PUT(
 
     // 确定新状态
     let finalStatus = existing.status;
-    let submittedAt = existing.submittedAt;
+    let submittedAt: Date | null = existing.submittedAt;
 
     if (newStatus === 'pending') {
       finalStatus = 'pending';
@@ -122,7 +122,7 @@ export async function PUT(
     } else if (newStatus === 'draft') {
       finalStatus = 'draft';
       // 撤回时清除提交时间
-      submittedAt = undefined;
+      submittedAt = null;
     }
 
     // 更新报销单
