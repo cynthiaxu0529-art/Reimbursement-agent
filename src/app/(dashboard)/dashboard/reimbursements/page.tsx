@@ -60,57 +60,148 @@ export default function ReimbursementsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailData, setDetailData] = useState<Reimbursement | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // 刷新列表
+  const refreshList = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (filter !== 'all') {
+        params.set('status', filter);
+      }
+      const response = await fetch(`/api/reimbursements?${params.toString()}`);
+      const result = await response.json();
+      if (result.success) {
+        setReimbursements(result.data || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch reimbursements:', error);
+    }
+  };
 
   // 从 API 获取报销列表
   useEffect(() => {
     const fetchReimbursements = async () => {
-      try {
-        const params = new URLSearchParams();
-        if (filter !== 'all') {
-          params.set('status', filter);
-        }
-        const response = await fetch(`/api/reimbursements?${params.toString()}`);
-        const result = await response.json();
-        if (result.success) {
-          setReimbursements(result.data || []);
-        }
-      } catch (error) {
-        console.error('Failed to fetch reimbursements:', error);
-      } finally {
-        setLoading(false);
-      }
+      setLoading(true);
+      await refreshList();
+      setLoading(false);
     };
 
     fetchReimbursements();
   }, [filter]);
 
-  // 获取详情
+  // 获取详情 - 优先使用列表数据
   useEffect(() => {
     if (!selectedId) {
       setDetailData(null);
       return;
     }
 
+    // 先从列表中获取基本数据
+    const listItem = reimbursements.find(r => r.id === selectedId);
+    if (listItem) {
+      setDetailData(listItem);
+    }
+
+    // 然后从 API 获取完整数据
     const fetchDetail = async () => {
       setDetailLoading(true);
       try {
         const response = await fetch(`/api/reimbursements/${selectedId}`);
         const result = await response.json();
-        if (result.success) {
+        if (result.success && result.data) {
           setDetailData(result.data);
-        } else {
-          setDetailData(null);
         }
+        // 如果 API 失败但列表有数据，保持列表数据
       } catch (error) {
         console.error('Failed to fetch detail:', error);
-        setDetailData(null);
+        // 保持列表数据作为 fallback
       } finally {
         setDetailLoading(false);
       }
     };
 
     fetchDetail();
-  }, [selectedId]);
+  }, [selectedId, reimbursements]);
+
+  // 删除草稿
+  const handleDelete = async () => {
+    if (!selectedId || !detailData || detailData.status !== 'draft') return;
+    if (!confirm('确定要删除这个草稿吗？')) return;
+
+    setActionLoading(true);
+    try {
+      const response = await fetch(`/api/reimbursements/${selectedId}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      if (result.success) {
+        setReimbursements(prev => prev.filter(r => r.id !== selectedId));
+        setSelectedId(null);
+        setDetailData(null);
+      } else {
+        alert(result.error || '删除失败');
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      alert('删除失败');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 提交审批
+  const handleSubmit = async () => {
+    if (!selectedId || !detailData || detailData.status !== 'draft') return;
+
+    setActionLoading(true);
+    try {
+      const response = await fetch(`/api/reimbursements/${selectedId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'pending' }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshList();
+        setDetailData(prev => prev ? { ...prev, status: 'pending' } : null);
+      } else {
+        alert(result.error || '提交失败');
+      }
+    } catch (error) {
+      console.error('Submit error:', error);
+      alert('提交失败');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 撤回申请
+  const handleWithdraw = async () => {
+    if (!selectedId || !detailData || detailData.status !== 'pending') return;
+    if (!confirm('确定要撤回这个报销申请吗？撤回后将变为草稿状态。')) return;
+
+    setActionLoading(true);
+    try {
+      const response = await fetch(`/api/reimbursements/${selectedId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'draft' }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshList();
+        setDetailData(prev => prev ? { ...prev, status: 'draft' } : null);
+      } else {
+        alert(result.error || '撤回失败');
+      }
+    } catch (error) {
+      console.error('Withdraw error:', error);
+      alert('撤回失败');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   // 过滤搜索
   const filteredReimbursements = reimbursements.filter(r =>
@@ -475,7 +566,7 @@ export default function ReimbursementsPage() {
 
           {/* Panel Content */}
           <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
-            {detailLoading && (
+            {detailLoading && !detailData && (
               <div style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>
                 加载中...
               </div>
@@ -487,7 +578,7 @@ export default function ReimbursementsPage() {
               </div>
             )}
 
-            {!detailLoading && detailData && (
+            {detailData && (
               <>
                 {/* Title & Status */}
                 <div style={{ marginBottom: '20px' }}>
@@ -509,7 +600,7 @@ export default function ReimbursementsPage() {
                     </span>
                   </div>
                   <p style={{ fontSize: '13px', color: '#6b7280' }}>
-                    提交于 {formatFullDate(detailData.submittedAt || detailData.createdAt)}
+                    {detailData.status === 'draft' ? '创建于' : '提交于'} {formatFullDate(detailData.submittedAt || detailData.createdAt)}
                   </p>
                 </div>
 
@@ -531,58 +622,64 @@ export default function ReimbursementsPage() {
                   <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '12px' }}>
                     费用明细 ({detailData.items?.length || 0})
                   </h4>
-                  <div style={{
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                    overflow: 'hidden',
-                  }}>
-                    {detailData.items?.map((item, index) => {
-                      const catInfo = categoryLabels[item.category] || categoryLabels.other;
-                      return (
-                        <div
-                          key={item.id}
-                          style={{
-                            padding: '12px',
-                            borderBottom: index < (detailData.items?.length || 0) - 1 ? '1px solid #e5e7eb' : 'none',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '12px',
-                          }}
-                        >
-                          <div style={{
-                            width: '32px',
-                            height: '32px',
-                            backgroundColor: '#f3f4f6',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '14px',
-                          }}>
-                            {catInfo.icon}
-                          </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{
-                              fontSize: '13px',
-                              fontWeight: 500,
-                              color: '#111827',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
+                  {detailData.items && detailData.items.length > 0 ? (
+                    <div style={{
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                    }}>
+                      {detailData.items.map((item, index) => {
+                        const catInfo = categoryLabels[item.category] || categoryLabels.other;
+                        return (
+                          <div
+                            key={item.id}
+                            style={{
+                              padding: '12px',
+                              borderBottom: index < (detailData.items?.length || 0) - 1 ? '1px solid #e5e7eb' : 'none',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '12px',
+                            }}
+                          >
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              backgroundColor: '#f3f4f6',
+                              borderRadius: '6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '14px',
                             }}>
-                              {item.description || catInfo.label}
-                            </p>
-                            <p style={{ fontSize: '11px', color: '#6b7280' }}>
-                              {catInfo.label} · {formatDate(item.date)}
-                            </p>
+                              {catInfo.icon}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{
+                                fontSize: '13px',
+                                fontWeight: 500,
+                                color: '#111827',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}>
+                                {item.description || catInfo.label}
+                              </p>
+                              <p style={{ fontSize: '11px', color: '#6b7280' }}>
+                                {catInfo.label} · {formatDate(item.date)}
+                              </p>
+                            </div>
+                            <div style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>
+                              ¥{item.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                            </div>
                           </div>
-                          <div style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>
-                            ¥{item.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: '13px', color: '#6b7280', textAlign: 'center', padding: '20px' }}>
+                      暂无明细
+                    </p>
+                  )}
                 </div>
 
                 {/* Reject Reason */}
@@ -603,61 +700,118 @@ export default function ReimbursementsPage() {
                 )}
 
                 {/* Actions */}
-                <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* Draft actions */}
                   {detailData.status === 'draft' && (
                     <>
-                      <Link
-                        href={`/dashboard/reimbursements/${detailData.id}/edit`}
+                      <div style={{ display: 'flex', gap: '12px' }}>
+                        <Link
+                          href={`/dashboard/reimbursements/${detailData.id}/edit`}
+                          style={{
+                            flex: 1,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: '10px 16px',
+                            backgroundColor: 'white',
+                            color: '#2563eb',
+                            border: '1px solid #2563eb',
+                            borderRadius: '8px',
+                            textDecoration: 'none',
+                            fontSize: '14px',
+                            fontWeight: 500,
+                          }}
+                        >
+                          编辑
+                        </Link>
+                        <button
+                          onClick={handleSubmit}
+                          disabled={actionLoading}
+                          style={{
+                            flex: 1,
+                            padding: '10px 16px',
+                            background: actionLoading ? '#9ca3af' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            fontSize: '14px',
+                            fontWeight: 500,
+                            cursor: actionLoading ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          {actionLoading ? '处理中...' : '提交审批'}
+                        </button>
+                      </div>
+                      <button
+                        onClick={handleDelete}
+                        disabled={actionLoading}
                         style={{
-                          flex: 1,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          width: '100%',
                           padding: '10px 16px',
                           backgroundColor: 'white',
-                          color: '#2563eb',
-                          border: '1px solid #2563eb',
-                          borderRadius: '8px',
-                          textDecoration: 'none',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                        }}
-                      >
-                        编辑
-                      </Link>
-                      <button
-                        style={{
-                          flex: 1,
-                          padding: '10px 16px',
-                          background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                          color: 'white',
-                          border: 'none',
+                          color: '#dc2626',
+                          border: '1px solid #dc2626',
                           borderRadius: '8px',
                           fontSize: '14px',
                           fontWeight: 500,
-                          cursor: 'pointer',
+                          cursor: actionLoading ? 'not-allowed' : 'pointer',
                         }}
                       >
-                        提交审批
+                        删除草稿
                       </button>
                     </>
                   )}
-                  {(detailData.status === 'pending' || detailData.status === 'under_review') && (
+
+                  {/* Pending actions */}
+                  {detailData.status === 'pending' && (
+                    <>
+                      <div style={{
+                        padding: '12px',
+                        backgroundColor: '#fef3c7',
+                        borderRadius: '8px',
+                        textAlign: 'center',
+                      }}>
+                        <p style={{ fontSize: '13px', color: '#92400e' }}>
+                          等待审批中...
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleWithdraw}
+                        disabled={actionLoading}
+                        style={{
+                          width: '100%',
+                          padding: '10px 16px',
+                          backgroundColor: 'white',
+                          color: '#d97706',
+                          border: '1px solid #d97706',
+                          borderRadius: '8px',
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          cursor: actionLoading ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {actionLoading ? '处理中...' : '撤回申请'}
+                      </button>
+                    </>
+                  )}
+
+                  {/* Under review */}
+                  {detailData.status === 'under_review' && (
                     <div style={{
-                      flex: 1,
                       padding: '12px',
-                      backgroundColor: '#fef3c7',
+                      backgroundColor: '#dbeafe',
                       borderRadius: '8px',
                       textAlign: 'center',
                     }}>
-                      <p style={{ fontSize: '13px', color: '#92400e' }}>
-                        等待审批中...
+                      <p style={{ fontSize: '13px', color: '#1e40af' }}>
+                        审核中，请等待...
                       </p>
                     </div>
                   )}
+
+                  {/* Approved */}
                   {detailData.status === 'approved' && (
                     <div style={{
-                      flex: 1,
                       padding: '12px',
                       backgroundColor: '#dcfce7',
                       borderRadius: '8px',
@@ -667,6 +821,28 @@ export default function ReimbursementsPage() {
                         已批准，等待付款
                       </p>
                     </div>
+                  )}
+
+                  {/* Rejected - can resubmit */}
+                  {detailData.status === 'rejected' && (
+                    <Link
+                      href={`/dashboard/reimbursements/new`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '10px 16px',
+                        backgroundColor: 'white',
+                        color: '#2563eb',
+                        border: '1px solid #2563eb',
+                        borderRadius: '8px',
+                        textDecoration: 'none',
+                        fontSize: '14px',
+                        fontWeight: 500,
+                      }}
+                    >
+                      重新提交
+                    </Link>
                   )}
                 </div>
               </>

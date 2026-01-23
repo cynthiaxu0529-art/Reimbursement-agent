@@ -81,22 +81,49 @@ export async function PUT(
       return NextResponse.json({ error: '报销单不存在' }, { status: 404 });
     }
 
-    // 只有草稿状态可以编辑
-    if (existing.status !== 'draft') {
+    const body = await request.json();
+    const { title, description, items, status: newStatus } = body;
+
+    // 验证状态转换
+    const allowedTransitions: Record<string, string[]> = {
+      draft: ['pending'],      // 草稿可以提交
+      pending: ['draft'],      // 待审批可以撤回
+    };
+
+    // 如果有状态变更请求
+    if (newStatus && newStatus !== existing.status) {
+      if (!allowedTransitions[existing.status]?.includes(newStatus)) {
+        return NextResponse.json(
+          { error: `无法从 ${existing.status} 状态转换为 ${newStatus}` },
+          { status: 400 }
+        );
+      }
+    } else if (existing.status !== 'draft') {
+      // 如果不是状态变更，只有草稿可以编辑内容
       return NextResponse.json(
         { error: '只有草稿状态的报销单可以编辑' },
         { status: 400 }
       );
     }
 
-    const body = await request.json();
-    const { title, description, items, status: newStatus } = body;
-
     // 计算总金额
     const totalAmount = items?.reduce(
       (sum: number, item: any) => sum + (parseFloat(item.amount) || 0),
       0
     ) || existing.totalAmount;
+
+    // 确定新状态
+    let finalStatus = existing.status;
+    let submittedAt: Date | null = existing.submittedAt;
+
+    if (newStatus === 'pending') {
+      finalStatus = 'pending';
+      submittedAt = new Date();
+    } else if (newStatus === 'draft') {
+      finalStatus = 'draft';
+      // 撤回时清除提交时间
+      submittedAt = null;
+    }
 
     // 更新报销单
     const [updated] = await db
@@ -106,8 +133,8 @@ export async function PUT(
         description: description ?? existing.description,
         totalAmount,
         totalAmountInBaseCurrency: totalAmount,
-        status: newStatus === 'pending' ? 'pending' : existing.status,
-        submittedAt: newStatus === 'pending' ? new Date() : existing.submittedAt,
+        status: finalStatus,
+        submittedAt: submittedAt,
         updatedAt: new Date(),
       })
       .where(eq(reimbursements.id, id))
