@@ -2,15 +2,26 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState, useEffect } from 'react';
 
-const navigation = [
+// 员工导航
+const employeeNavigation = [
   { name: '仪表盘', href: '/dashboard', icon: '📊' },
   { name: '我的报销', href: '/dashboard/reimbursements', icon: '📄' },
-  { name: '审批', href: '/dashboard/approvals', icon: '✅' },
   { name: '行程', href: '/dashboard/trips', icon: '✈️' },
   { name: 'AI 助手', href: '/dashboard/chat', icon: '💬' },
   { name: '设置', href: '/dashboard/settings', icon: '⚙️' },
 ];
+
+// 审批人导航
+const approverNavigation = [
+  { name: '仪表盘', href: '/dashboard', icon: '📊' },
+  { name: '待审批', href: '/dashboard/approvals', icon: '✅' },
+  { name: '审批历史', href: '/dashboard/approvals/history', icon: '📋' },
+  { name: '设置', href: '/dashboard/settings', icon: '⚙️' },
+];
+
+type UserRole = 'employee' | 'approver';
 
 export default function DashboardLayout({
   children,
@@ -18,6 +29,27 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const [role, setRole] = useState<UserRole>('employee');
+  const [showRoleMenu, setShowRoleMenu] = useState(false);
+
+  // 从 localStorage 读取角色
+  useEffect(() => {
+    const savedRole = localStorage.getItem('userRole') as UserRole;
+    if (savedRole && (savedRole === 'employee' || savedRole === 'approver')) {
+      setRole(savedRole);
+    }
+  }, []);
+
+  // 切换角色
+  const switchRole = (newRole: UserRole) => {
+    setRole(newRole);
+    localStorage.setItem('userRole', newRole);
+    setShowRoleMenu(false);
+  };
+
+  const navigation = role === 'employee' ? employeeNavigation : approverNavigation;
+  const roleLabel = role === 'employee' ? '员工' : '审批人';
+  const roleColor = role === 'employee' ? '#2563eb' : '#7c3aed';
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
@@ -55,10 +87,115 @@ export default function DashboardLayout({
           <span style={{ fontWeight: 600, fontSize: '1rem', color: '#111827' }}>报销助手</span>
         </div>
 
+        {/* Role Switcher */}
+        <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowRoleMenu(!showRoleMenu)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.625rem 0.875rem',
+                backgroundColor: '#f3f4f6',
+                border: 'none',
+                borderRadius: '0.5rem',
+                cursor: 'pointer',
+                fontSize: '0.875rem'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{
+                  width: '8px',
+                  height: '8px',
+                  backgroundColor: roleColor,
+                  borderRadius: '50%'
+                }} />
+                <span style={{ fontWeight: 500, color: '#374151' }}>当前角色: {roleLabel}</span>
+              </div>
+              <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>▼</span>
+            </button>
+
+            {showRoleMenu && (
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                marginTop: '0.25rem',
+                backgroundColor: 'white',
+                border: '1px solid #e5e7eb',
+                borderRadius: '0.5rem',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                zIndex: 20,
+                overflow: 'hidden'
+              }}>
+                <button
+                  onClick={() => switchRole('employee')}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.625rem 0.875rem',
+                    backgroundColor: role === 'employee' ? '#eff6ff' : 'white',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    textAlign: 'left'
+                  }}
+                >
+                  <span style={{
+                    width: '8px',
+                    height: '8px',
+                    backgroundColor: '#2563eb',
+                    borderRadius: '50%'
+                  }} />
+                  <div>
+                    <div style={{ fontWeight: 500, color: '#374151' }}>员工</div>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>提交和管理报销</div>
+                  </div>
+                  {role === 'employee' && <span style={{ marginLeft: 'auto', color: '#2563eb' }}>✓</span>}
+                </button>
+                <button
+                  onClick={() => switchRole('approver')}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.625rem 0.875rem',
+                    backgroundColor: role === 'approver' ? '#f3e8ff' : 'white',
+                    border: 'none',
+                    borderTop: '1px solid #e5e7eb',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    textAlign: 'left'
+                  }}
+                >
+                  <span style={{
+                    width: '8px',
+                    height: '8px',
+                    backgroundColor: '#7c3aed',
+                    borderRadius: '50%'
+                  }} />
+                  <div>
+                    <div style={{ fontWeight: 500, color: '#374151' }}>审批人</div>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>审批下属报销</div>
+                  </div>
+                  {role === 'approver' && <span style={{ marginLeft: 'auto', color: '#7c3aed' }}>✓</span>}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Navigation */}
         <nav style={{ padding: '1rem', flex: 1 }}>
           {navigation.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+            const isActive = pathname === item.href ||
+              (item.href !== '/dashboard' && pathname.startsWith(item.href));
             return (
               <Link
                 key={item.name}
@@ -73,8 +210,8 @@ export default function DashboardLayout({
                   textDecoration: 'none',
                   fontSize: '0.875rem',
                   fontWeight: 500,
-                  backgroundColor: isActive ? '#eff6ff' : 'transparent',
-                  color: isActive ? '#2563eb' : '#4b5563'
+                  backgroundColor: isActive ? (role === 'employee' ? '#eff6ff' : '#f3e8ff') : 'transparent',
+                  color: isActive ? roleColor : '#4b5563'
                 }}
               >
                 <span style={{ fontSize: '1.125rem' }}>{item.icon}</span>
@@ -95,7 +232,7 @@ export default function DashboardLayout({
           <div style={{
             width: '32px',
             height: '32px',
-            backgroundColor: '#2563eb',
+            backgroundColor: roleColor,
             borderRadius: '50%',
             display: 'flex',
             alignItems: 'center',
@@ -105,7 +242,7 @@ export default function DashboardLayout({
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: '0.875rem', fontWeight: 500, color: '#111827' }}>用户</div>
-            <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>user@example.com</div>
+            <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{roleLabel}模式</div>
           </div>
         </div>
       </aside>
@@ -125,26 +262,28 @@ export default function DashboardLayout({
           justifyContent: 'space-between'
         }}>
           <h1 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>
-            {navigation.find((n) => pathname.startsWith(n.href))?.name || '仪表盘'}
+            {navigation.find((n) => pathname === n.href || (n.href !== '/dashboard' && pathname.startsWith(n.href)))?.name || '仪表盘'}
           </h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <Link
-              href="/dashboard/reimbursements/new"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.5rem 1rem',
-                backgroundColor: '#2563eb',
-                color: 'white',
-                borderRadius: '0.5rem',
-                textDecoration: 'none',
-                fontSize: '0.875rem',
-                fontWeight: 500
-              }}
-            >
-              + 新建报销
-            </Link>
+            {role === 'employee' && (
+              <Link
+                href="/dashboard/reimbursements/new"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#2563eb',
+                  color: 'white',
+                  borderRadius: '0.5rem',
+                  textDecoration: 'none',
+                  fontSize: '0.875rem',
+                  fontWeight: 500
+                }}
+              >
+                + 新建报销
+              </Link>
+            )}
           </div>
         </header>
 
@@ -153,6 +292,18 @@ export default function DashboardLayout({
           {children}
         </main>
       </div>
+
+      {/* Click outside to close role menu */}
+      {showRoleMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 15
+          }}
+          onClick={() => setShowRoleMenu(false)}
+        />
+      )}
     </div>
   );
 }
