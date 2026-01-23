@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const tabs = [
   { id: 'profile', label: '👤 个人信息', icon: '👤' },
@@ -15,23 +15,25 @@ export default function SettingsPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('employee');
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
 
-  // Mock user data
+  // Profile data
   const [profile, setProfile] = useState({
-    name: '用户',
-    email: 'user@example.com',
+    name: '',
+    email: '',
     department: '',
     phone: '',
-    bankName: '',
-    bankAccount: '',
+    walletAddress: '',
   });
 
-  // Mock company data
+  // Company data
   const [company, setCompany] = useState({
-    name: '我的公司',
+    name: '',
     currency: 'CNY',
-    autoApproveLimit: 100,
+    autoApproveLimit: 0,
+    departments: ['技术部', '产品部', '运营部', '财务部', '人力资源部', '市场部'],
   });
 
   // Mock team members
@@ -44,22 +46,108 @@ export default function SettingsPage() {
     { email: 'newuser@example.com', role: 'employee', sentAt: '2024-01-20' },
   ]);
 
+  // 获取用户资料
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const response = await fetch('/api/settings/profile');
+        const result = await response.json();
+        if (result.success) {
+          setProfile({
+            name: result.data.name || '',
+            email: result.data.email || '',
+            department: result.data.department || '',
+            phone: result.data.phone || '',
+            walletAddress: result.data.walletAddress || '',
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch profile:', error);
+      }
+    };
+
+    const fetchCompany = async () => {
+      try {
+        const response = await fetch('/api/settings/company');
+        const result = await response.json();
+        if (result.success) {
+          setCompany({
+            name: result.data.name || '',
+            currency: result.data.currency || 'CNY',
+            autoApproveLimit: result.data.autoApproveLimit || 0,
+            departments: result.data.departments || [],
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch company:', error);
+      }
+    };
+
+    Promise.all([fetchProfile(), fetchCompany()]).finally(() => {
+      setLoading(false);
+    });
+  }, []);
+
+  const showMessage = (msg: string, isError = false) => {
+    if (isError) {
+      setError(msg);
+      setTimeout(() => setError(''), 3000);
+    } else {
+      setMessage(msg);
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
   const handleSaveProfile = async () => {
     setSaving(true);
-    // TODO: Call API to save profile
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setMessage('个人信息已保存');
-    setSaving(false);
-    setTimeout(() => setMessage(''), 3000);
+    try {
+      const response = await fetch('/api/settings/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: profile.name,
+          department: profile.department,
+          phone: profile.phone,
+          walletAddress: profile.walletAddress,
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        showMessage('个人信息已保存');
+      } else {
+        showMessage(result.error || '保存失败', true);
+      }
+    } catch (error) {
+      showMessage('保存失败', true);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSaveCompany = async () => {
     setSaving(true);
-    // TODO: Call API to save company settings
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setMessage('公司设置已保存');
-    setSaving(false);
-    setTimeout(() => setMessage(''), 3000);
+    try {
+      const response = await fetch('/api/settings/company', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: company.name,
+          currency: company.currency,
+          autoApproveLimit: company.autoApproveLimit,
+          departments: company.departments,
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        showMessage('公司设置已保存');
+      } else {
+        showMessage(result.error || '保存失败', true);
+      }
+    } catch (error) {
+      showMessage('保存失败', true);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleInvite = async () => {
@@ -67,11 +155,10 @@ export default function SettingsPage() {
     setSaving(true);
     // TODO: Call API to send invite
     await new Promise(resolve => setTimeout(resolve, 1000));
-    setMessage(`邀请已发送至 ${inviteEmail}`);
+    showMessage(`邀请已发送至 ${inviteEmail}`);
     setShowInviteModal(false);
     setInviteEmail('');
     setSaving(false);
-    setTimeout(() => setMessage(''), 3000);
   };
 
   const inputStyle = {
@@ -106,6 +193,14 @@ export default function SettingsPage() {
     employee: '员工',
   };
 
+  if (loading) {
+    return (
+      <div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>
+        加载中...
+      </div>
+    );
+  }
+
   return (
     <div>
       {/* Success Message */}
@@ -122,6 +217,23 @@ export default function SettingsPage() {
           zIndex: 50,
         }}>
           ✅ {message}
+        </div>
+      )}
+
+      {/* Error Message */}
+      {error && (
+        <div style={{
+          position: 'fixed',
+          top: '1rem',
+          right: '1rem',
+          backgroundColor: '#fee2e2',
+          color: '#dc2626',
+          padding: '0.75rem 1rem',
+          borderRadius: '0.5rem',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+          zIndex: 50,
+        }}>
+          ❌ {error}
         </div>
       )}
 
@@ -160,7 +272,7 @@ export default function SettingsPage() {
             <div style={{ padding: '1.25rem', borderBottom: '1px solid #e5e7eb' }}>
               <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>个人信息</h3>
               <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                更新您的个人资料和银行账户信息
+                更新您的个人资料和钱包地址
               </p>
             </div>
             <div style={{ padding: '1.25rem' }}>
@@ -185,13 +297,16 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label style={labelStyle}>部门</label>
-                  <input
-                    type="text"
+                  <select
                     value={profile.department}
                     onChange={(e) => setProfile({ ...profile, department: e.target.value })}
-                    placeholder="例如：技术部"
                     style={inputStyle}
-                  />
+                  >
+                    <option value="">请选择部门</option>
+                    {company.departments.map((dept) => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label style={labelStyle}>手机号</label>
@@ -206,28 +321,21 @@ export default function SettingsPage() {
 
                 <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
                   <h4 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827', marginBottom: '1rem' }}>
-                    💳 银行账户（用于报销打款）
+                    💰 钱包地址（用于报销打款）
                   </h4>
                   <div style={{ display: 'grid', gap: '1rem' }}>
                     <div>
-                      <label style={labelStyle}>开户银行</label>
+                      <label style={labelStyle}>钱包地址</label>
                       <input
                         type="text"
-                        value={profile.bankName}
-                        onChange={(e) => setProfile({ ...profile, bankName: e.target.value })}
-                        placeholder="例如：中国工商银行"
+                        value={profile.walletAddress}
+                        onChange={(e) => setProfile({ ...profile, walletAddress: e.target.value })}
+                        placeholder="例如：0x1234...abcd"
                         style={inputStyle}
                       />
-                    </div>
-                    <div>
-                      <label style={labelStyle}>银行账号</label>
-                      <input
-                        type="text"
-                        value={profile.bankAccount}
-                        onChange={(e) => setProfile({ ...profile, bankAccount: e.target.value })}
-                        placeholder="例如：6222021234567890123"
-                        style={inputStyle}
-                      />
+                      <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                        请填写您的加密货币钱包地址，用于接收报销款项
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -302,6 +410,69 @@ export default function SettingsPage() {
                   <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.25rem' }}>
                     设为 0 表示关闭自动审批
                   </p>
+                </div>
+
+                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
+                  <h4 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827', marginBottom: '0.5rem' }}>
+                    🏢 部门列表
+                  </h4>
+                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '1rem' }}>
+                    管理公司的部门结构，员工可以从中选择所属部门
+                  </p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    {company.departments.map((dept, index) => (
+                      <span
+                        key={index}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          padding: '0.25rem 0.75rem',
+                          backgroundColor: '#f3f4f6',
+                          borderRadius: '9999px',
+                          fontSize: '0.875rem',
+                          color: '#374151',
+                        }}
+                      >
+                        {dept}
+                        <button
+                          onClick={() => {
+                            const newDepts = company.departments.filter((_, i) => i !== index);
+                            setCompany({ ...company, departments: newDepts });
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#9ca3af',
+                            cursor: 'pointer',
+                            padding: '0',
+                            marginLeft: '0.25rem',
+                          }}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                    <button
+                      onClick={() => {
+                        const newDept = prompt('请输入新部门名称');
+                        if (newDept && !company.departments.includes(newDept)) {
+                          setCompany({ ...company, departments: [...company.departments, newDept] });
+                        }
+                      }}
+                      style={{
+                        padding: '0.25rem 0.75rem',
+                        backgroundColor: '#eff6ff',
+                        color: '#2563eb',
+                        border: '1px dashed #93c5fd',
+                        borderRadius: '9999px',
+                        fontSize: '0.875rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      + 添加部门
+                    </button>
+                  </div>
                 </div>
 
                 <button
