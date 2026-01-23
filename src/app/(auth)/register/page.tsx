@@ -1,11 +1,17 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
-export default function RegisterPage() {
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // 检查是否是邀请链接
+  const inviteToken = searchParams.get('invite');
+  const inviteEmail = searchParams.get('email');
+  const isInvited = !!inviteToken;
 
   const [formData, setFormData] = useState({
     name: '',
@@ -16,6 +22,13 @@ export default function RegisterPage() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // 如果是邀请链接，预填邮箱
+  useEffect(() => {
+    if (inviteEmail) {
+      setFormData(prev => ({ ...prev, email: decodeURIComponent(inviteEmail) }));
+    }
+  }, [inviteEmail]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -46,7 +59,8 @@ export default function RegisterPage() {
           name: formData.name,
           email: formData.email,
           password: formData.password,
-          companyName: formData.companyName || undefined,
+          companyName: isInvited ? undefined : (formData.companyName || undefined),
+          inviteToken: inviteToken || undefined,
         }),
       });
 
@@ -84,113 +98,133 @@ export default function RegisterPage() {
   };
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: '#f8fafc',
-      padding: '2rem 1rem'
-    }}>
-      <div style={{ width: '100%', maxWidth: '400px' }}>
-        {/* Logo */}
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <Link href="/" style={{ textDecoration: 'none' }}>
-            <div style={{
-              width: '48px',
-              height: '48px',
-              background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
-              borderRadius: '12px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '1rem'
-            }}>
-              <span style={{ color: 'white', fontWeight: 'bold', fontSize: '1.5rem' }}>R</span>
-            </div>
-          </Link>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', marginBottom: '0.5rem' }}>
-            创建账号
-          </h1>
-          <p style={{ color: '#6b7280' }}>
-            注册使用智能报销平台
+    <div style={{ width: '100%', maxWidth: '400px' }}>
+      {/* Logo */}
+      <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+        <Link href="/" style={{ textDecoration: 'none' }}>
+          <div style={{
+            width: '48px',
+            height: '48px',
+            background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
+            borderRadius: '12px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '1rem'
+          }}>
+            <span style={{ color: 'white', fontWeight: 'bold', fontSize: '1.5rem' }}>R</span>
+          </div>
+        </Link>
+        <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', marginBottom: '0.5rem' }}>
+          {isInvited ? '接受邀请' : '创建账号'}
+        </h1>
+        <p style={{ color: '#6b7280' }}>
+          {isInvited ? '完成注册加入团队' : '注册使用智能报销平台'}
+        </p>
+      </div>
+
+      {/* Invite Notice */}
+      {isInvited && (
+        <div style={{
+          backgroundColor: '#ecfdf5',
+          border: '1px solid #a7f3d0',
+          borderRadius: '0.75rem',
+          padding: '1rem',
+          marginBottom: '1.5rem',
+          textAlign: 'center'
+        }}>
+          <p style={{ color: '#065f46', fontSize: '0.875rem', margin: 0 }}>
+            您已被邀请加入团队，完成注册即可开始使用
           </p>
         </div>
+      )}
 
-        {/* Form Card */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '1rem',
-          padding: '2rem',
-          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-          border: '1px solid #e5e7eb'
-        }}>
-          <form onSubmit={handleSubmit}>
-            {error && (
-              <div style={{
-                backgroundColor: '#fef2f2',
-                color: '#dc2626',
-                padding: '0.75rem 1rem',
-                borderRadius: '0.5rem',
-                marginBottom: '1rem',
-                fontSize: '0.875rem'
-              }}>
-                {error}
-              </div>
+      {/* Form Card */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '1rem',
+        padding: '2rem',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+        border: '1px solid #e5e7eb'
+      }}>
+        <form onSubmit={handleSubmit}>
+          {error && (
+            <div style={{
+              backgroundColor: '#fef2f2',
+              color: '#dc2626',
+              padding: '0.75rem 1rem',
+              borderRadius: '0.5rem',
+              marginBottom: '1rem',
+              fontSize: '0.875rem'
+            }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={labelStyle}>姓名 *</label>
+            <input
+              name="name"
+              value={formData.name}
+              onChange={handleChange}
+              required
+              placeholder="张三"
+              style={inputStyle}
+            />
+          </div>
+
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={labelStyle}>邮箱 *</label>
+            <input
+              name="email"
+              type="email"
+              value={formData.email}
+              onChange={handleChange}
+              required
+              placeholder="your@email.com"
+              readOnly={isInvited}
+              style={{
+                ...inputStyle,
+                backgroundColor: isInvited ? '#f3f4f6' : 'white',
+                cursor: isInvited ? 'not-allowed' : 'text',
+              }}
+            />
+            {isInvited && (
+              <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                邀请邮箱不可修改
+              </p>
             )}
+          </div>
 
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={labelStyle}>姓名 *</label>
-              <input
-                name="name"
-                value={formData.name}
-                onChange={handleChange}
-                required
-                placeholder="张三"
-                style={inputStyle}
-              />
-            </div>
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={labelStyle}>密码 *</label>
+            <input
+              name="password"
+              type="password"
+              value={formData.password}
+              onChange={handleChange}
+              required
+              minLength={8}
+              placeholder="至少8个字符"
+              style={inputStyle}
+            />
+          </div>
 
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={labelStyle}>邮箱 *</label>
-              <input
-                name="email"
-                type="email"
-                value={formData.email}
-                onChange={handleChange}
-                required
-                placeholder="your@email.com"
-                style={inputStyle}
-              />
-            </div>
+          <div style={{ marginBottom: isInvited ? '1.5rem' : '1rem' }}>
+            <label style={labelStyle}>确认密码 *</label>
+            <input
+              name="confirmPassword"
+              type="password"
+              value={formData.confirmPassword}
+              onChange={handleChange}
+              required
+              placeholder="再次输入密码"
+              style={inputStyle}
+            />
+          </div>
 
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={labelStyle}>密码 *</label>
-              <input
-                name="password"
-                type="password"
-                value={formData.password}
-                onChange={handleChange}
-                required
-                minLength={8}
-                placeholder="至少8个字符"
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={labelStyle}>确认密码 *</label>
-              <input
-                name="confirmPassword"
-                type="password"
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                required
-                placeholder="再次输入密码"
-                style={inputStyle}
-              />
-            </div>
-
+          {/* 只有非邀请用户才显示创建公司选项 */}
+          {!isInvited && (
             <div style={{ marginBottom: '1.5rem' }}>
               <label style={labelStyle}>
                 公司名称 <span style={{ color: '#9ca3af' }}>(可选)</span>
@@ -206,35 +240,54 @@ export default function RegisterPage() {
                 填写后将创建新公司，您将成为管理员
               </p>
             </div>
+          )}
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              style={{
-                width: '100%',
-                padding: '0.75rem 1rem',
-                background: isLoading ? '#9ca3af' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '0.5rem',
-                fontSize: '1rem',
-                fontWeight: 600,
-                cursor: isLoading ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {isLoading ? '注册中...' : '注册'}
-            </button>
-          </form>
-        </div>
-
-        {/* Login Link */}
-        <p style={{ textAlign: 'center', marginTop: '1.5rem', color: '#6b7280' }}>
-          已有账号？{' '}
-          <Link href="/login" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>
-            立即登录
-          </Link>
-        </p>
+          <button
+            type="submit"
+            disabled={isLoading}
+            style={{
+              width: '100%',
+              padding: '0.75rem 1rem',
+              background: isLoading ? '#9ca3af' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '0.5rem',
+              fontSize: '1rem',
+              fontWeight: 600,
+              cursor: isLoading ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {isLoading ? '注册中...' : (isInvited ? '完成注册' : '注册')}
+          </button>
+        </form>
       </div>
+
+      {/* Login Link */}
+      <p style={{ textAlign: 'center', marginTop: '1.5rem', color: '#6b7280' }}>
+        已有账号？{' '}
+        <Link href="/login" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>
+          立即登录
+        </Link>
+      </p>
+    </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#f8fafc',
+      padding: '2rem 1rem'
+    }}>
+      <Suspense fallback={
+        <div style={{ textAlign: 'center', color: '#6b7280' }}>加载中...</div>
+      }>
+        <RegisterForm />
+      </Suspense>
     </div>
   );
 }
