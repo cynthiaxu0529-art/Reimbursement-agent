@@ -44,6 +44,7 @@ export default function TeamPage() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [messageType, setMessageType] = useState<'success' | 'error'>('success');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
   const [inviteData, setInviteData] = useState({
     name: '',
@@ -75,30 +76,56 @@ export default function TeamPage() {
     }
   }, []);
 
-  const showMessage = (msg: string) => {
+  const showMessage = (msg: string, type: 'success' | 'error' = 'success') => {
     setMessage(msg);
-    setTimeout(() => setMessage(''), 3000);
+    setMessageType(type);
+    setTimeout(() => setMessage(''), 5000);
   };
 
   const handleInvite = async () => {
     if (!inviteData.email || !inviteData.name || inviteData.roles.length === 0) return;
     setSaving(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
 
-    const newInvite: PendingInvite = {
-      id: `invite-${Date.now()}`,
-      name: inviteData.name,
-      email: inviteData.email,
-      roles: inviteData.roles,
-      department: inviteData.department,
-      sentAt: new Date().toISOString().split('T')[0],
-    };
-    setPendingInvites([...pendingInvites, newInvite]);
+    try {
+      // 调用邮件发送 API
+      const response = await fetch('/api/invites/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: inviteData.email,
+          name: inviteData.name,
+          department: inviteData.department,
+          roles: inviteData.roles,
+          companyName: '您的公司', // 可从设置中读取
+        }),
+      });
 
-    showMessage(`邀请已发送至 ${inviteData.email}`);
-    setShowInviteModal(false);
-    setInviteData({ name: '', email: '', department: '', roles: [] });
-    setSaving(false);
+      const result = await response.json();
+
+      if (result.success) {
+        // 添加到待处理邀请列表
+        const newInvite: PendingInvite = {
+          id: `invite-${Date.now()}`,
+          name: inviteData.name,
+          email: inviteData.email,
+          roles: inviteData.roles,
+          department: inviteData.department,
+          sentAt: new Date().toISOString().split('T')[0],
+        };
+        setPendingInvites([...pendingInvites, newInvite]);
+
+        showMessage(`邀请邮件已成功发送至 ${inviteData.email}`, 'success');
+        setShowInviteModal(false);
+        setInviteData({ name: '', email: '', department: '', roles: [] });
+      } else {
+        showMessage(result.error || '发送邀请失败，请重试', 'error');
+      }
+    } catch (error) {
+      console.error('Invite error:', error);
+      showMessage('网络错误，请检查网络连接后重试', 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCancelInvite = async (inviteId: string) => {
@@ -173,20 +200,21 @@ export default function TeamPage() {
 
   return (
     <div>
-      {/* Success Message */}
+      {/* Message Toast */}
       {message && (
         <div style={{
           position: 'fixed',
           top: '1rem',
           right: '1rem',
-          backgroundColor: '#dcfce7',
-          color: '#166534',
+          backgroundColor: messageType === 'success' ? '#dcfce7' : '#fee2e2',
+          color: messageType === 'success' ? '#166534' : '#dc2626',
           padding: '0.75rem 1rem',
           borderRadius: '0.5rem',
           boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
           zIndex: 50,
+          maxWidth: '360px',
         }}>
-          ✅ {message}
+          {messageType === 'success' ? '✅' : '❌'} {message}
         </div>
       )}
 
