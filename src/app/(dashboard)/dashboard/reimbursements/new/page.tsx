@@ -17,7 +17,6 @@ const expenseCategories = [
   { value: 'other', label: '其他', icon: '📦' },
 ];
 
-// 票据类型到费用类别的映射
 const receiptTypeToCategory: Record<string, string> = {
   'flight_itinerary': 'flight',
   'train_ticket': 'train',
@@ -35,17 +34,13 @@ interface UploadedFile {
   preview: string;
 }
 
-interface ExpenseItem {
+interface LineItem {
   id: string;
-  category: string;
   description: string;
+  category: string;
   amount: string;
   currency: string;
   date: string;
-  location?: string;
-  files: UploadedFile[];
-  isRecognizing?: boolean;
-  // 火车票/机票专用字段
   departure?: string;
   destination?: string;
   trainNumber?: string;
@@ -55,22 +50,32 @@ interface ExpenseItem {
 
 export default function NewReimbursementPage() {
   const router = useRouter();
-  const [title, setTitle] = useState('');
-  const [tripId, setTripId] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [isRecognizing, setIsRecognizing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [items, setItems] = useState<ExpenseItem[]>([
+
+  // Form fields - AI auto-filled indicators
+  const [merchant, setMerchant] = useState('');
+  const [merchantAutoFilled, setMerchantAutoFilled] = useState(false);
+  const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dateAutoFilled, setDateAutoFilled] = useState(false);
+  const [description, setDescription] = useState('');
+  const [descAutoFilled, setDescAutoFilled] = useState(false);
+
+  // Line items
+  const [lineItems, setLineItems] = useState<LineItem[]>([
     {
       id: '1',
-      category: '',
       description: '',
+      category: '',
       amount: '',
       currency: 'CNY',
       date: new Date().toISOString().split('T')[0],
-      files: [],
     },
   ]);
-
-  const fileInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
+  const [itemsAutoFilled, setItemsAutoFilled] = useState(false);
 
   // 从 sessionStorage 读取 OCR 数据并预填表单
   useEffect(() => {
@@ -78,56 +83,20 @@ export default function NewReimbursementPage() {
     if (ocrDataStr) {
       try {
         const ocrData = JSON.parse(ocrDataStr);
-        sessionStorage.removeItem('ocrData'); // 使用后清除
-
-        // 根据 OCR 数据设置标题
-        const typeLabels: Record<string, string> = {
-          'train_ticket': '火车票报销',
-          'flight_itinerary': '机票报销',
-          'hotel_receipt': '酒店报销',
-          'taxi_receipt': '交通报销',
-          'ride_hailing': '交通报销',
-          'restaurant': '餐饮报销',
-          'meal': '餐饮报销',
-        };
-        const suggestedTitle = typeLabels[ocrData.type] || typeLabels[ocrData.category] || '费用报销';
-        setTitle(ocrData.vendor ? `${ocrData.vendor} - ${suggestedTitle}` : suggestedTitle);
-
-        // 填充第一个费用项
-        const category = ocrData.category || receiptTypeToCategory[ocrData.type] || 'other';
-        const date = ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0];
-
-        setItems([{
-          id: '1',
-          category: category,
-          description: ocrData.vendor || '',
-          amount: ocrData.amount ? ocrData.amount.toString() : '',
-          currency: ocrData.currency || 'CNY',
-          date: date,
-          location: '',
-          files: [],
-          // 火车票/机票专用字段
-          departure: ocrData.departure || '',
-          destination: ocrData.destination || '',
-          trainNumber: ocrData.trainNumber || '',
-          flightNumber: ocrData.flightNumber || '',
-          seatClass: ocrData.seatClass || '',
-        }]);
+        sessionStorage.removeItem('ocrData');
+        applyOcrData(ocrData);
       } catch (e) {
         console.error('Failed to parse OCR data:', e);
       }
     }
   }, []);
 
-  // 格式化日期为 input[type=date] 需要的格式
   function formatDateForInput(dateStr: string): string {
     try {
-      // 尝试解析各种日期格式
       const date = new Date(dateStr);
       if (!isNaN(date.getTime())) {
         return date.toISOString().split('T')[0];
       }
-      // 如果是 2025/12/23 格式
       const parts = dateStr.split('/');
       if (parts.length === 3) {
         return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
@@ -138,7 +107,47 @@ export default function NewReimbursementPage() {
     }
   }
 
-  // 将文件转换为 base64
+  const applyOcrData = (ocrData: any) => {
+    if (ocrData.vendor) {
+      setMerchant(ocrData.vendor);
+      setMerchantAutoFilled(true);
+    }
+    if (ocrData.date) {
+      const formattedDate = formatDateForInput(ocrData.date);
+      setExpenseDate(formattedDate);
+      setDateAutoFilled(true);
+    }
+
+    const category = ocrData.category || receiptTypeToCategory[ocrData.type] || 'other';
+    const typeLabels: Record<string, string> = {
+      'train_ticket': '火车票报销',
+      'flight_itinerary': '机票报销',
+      'hotel_receipt': '酒店报销',
+      'taxi_receipt': '交通报销',
+      'restaurant': '餐饮报销',
+    };
+    const suggestedDesc = typeLabels[ocrData.type] || typeLabels[category] || '费用报销';
+    if (ocrData.vendor) {
+      setDescription(`${ocrData.vendor} - ${suggestedDesc}`);
+      setDescAutoFilled(true);
+    }
+
+    setLineItems([{
+      id: '1',
+      description: ocrData.vendor || '',
+      category: category,
+      amount: ocrData.amount ? ocrData.amount.toString() : '',
+      currency: ocrData.currency || 'CNY',
+      date: ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0],
+      departure: ocrData.departure || '',
+      destination: ocrData.destination || '',
+      trainNumber: ocrData.trainNumber || '',
+      flightNumber: ocrData.flightNumber || '',
+      seatClass: ocrData.seatClass || '',
+    }]);
+    setItemsAutoFilled(true);
+  };
+
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -152,13 +161,8 @@ export default function NewReimbursementPage() {
     });
   };
 
-  // 调用 OCR API 识别票据
-  const recognizeReceipt = async (file: File, itemId: string) => {
-    // 标记正在识别
-    setItems(prev => prev.map(item =>
-      item.id === itemId ? { ...item, isRecognizing: true } : item
-    ));
-
+  const recognizeReceipt = async (file: File) => {
+    setIsRecognizing(true);
     try {
       const base64 = await fileToBase64(file);
       const mimeType = file.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
@@ -172,86 +176,16 @@ export default function NewReimbursementPage() {
       const result = await response.json();
 
       if (result.success && result.data) {
-        const ocrData = result.data;
-        const category = ocrData.category || receiptTypeToCategory[ocrData.type] || '';
-        const date = ocrData.date ? formatDateForInput(new Date(ocrData.date).toLocaleDateString('zh-CN')) : '';
-
-        // 更新表单字段
-        setItems(prev => prev.map(item => {
-          if (item.id !== itemId) return item;
-          return {
-            ...item,
-            category: category || item.category,
-            description: ocrData.vendor || item.description,
-            amount: ocrData.amount ? ocrData.amount.toString() : item.amount,
-            currency: ocrData.currency || item.currency,
-            date: date || item.date,
-            isRecognizing: false,
-            // 火车票/机票专用字段
-            departure: ocrData.departure || item.departure,
-            destination: ocrData.destination || item.destination,
-            trainNumber: ocrData.trainNumber || item.trainNumber,
-            flightNumber: ocrData.flightNumber || item.flightNumber,
-            seatClass: ocrData.seatClass || item.seatClass,
-          };
-        }));
-
-        // 如果标题为空，自动设置
-        if (!title && ocrData.vendor) {
-          const typeLabels: Record<string, string> = {
-            'train_ticket': '火车票报销',
-            'flight_itinerary': '机票报销',
-            'hotel_receipt': '酒店报销',
-            'taxi_receipt': '交通报销',
-            'restaurant': '餐饮报销',
-          };
-          const suggestedTitle = typeLabels[ocrData.type] || '费用报销';
-          setTitle(`${ocrData.vendor} - ${suggestedTitle}`);
-        }
-      } else {
-        // 识别失败，取消识别状态
-        setItems(prev => prev.map(item =>
-          item.id === itemId ? { ...item, isRecognizing: false } : item
-        ));
+        applyOcrData(result.data);
       }
     } catch (error) {
       console.error('OCR error:', error);
-      setItems(prev => prev.map(item =>
-        item.id === itemId ? { ...item, isRecognizing: false } : item
-      ));
+    } finally {
+      setIsRecognizing(false);
     }
   };
 
-  const addItem = () => {
-    setItems([
-      ...items,
-      {
-        id: Date.now().toString(),
-        category: '',
-        description: '',
-        amount: '',
-        currency: 'CNY',
-        date: new Date().toISOString().split('T')[0],
-        files: [],
-      },
-    ]);
-  };
-
-  const removeItem = (id: string) => {
-    if (items.length > 1) {
-      setItems(items.filter((item) => item.id !== id));
-    }
-  };
-
-  const updateItem = (id: string, field: keyof ExpenseItem, value: any) => {
-    setItems(
-      items.map((item) =>
-        item.id === id ? { ...item, [field]: value } : item
-      )
-    );
-  };
-
-  const handleFileSelect = async (itemId: string, files: FileList | null) => {
+  const handleFileSelect = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
     const newFiles: UploadedFile[] = Array.from(files).map(file => ({
@@ -259,23 +193,18 @@ export default function NewReimbursementPage() {
       preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
     }));
 
-    const item = items.find(i => i.id === itemId);
-    if (item) {
-      updateItem(itemId, 'files', [...item.files, ...newFiles]);
-    }
+    setUploadedFiles(prev => [...prev, ...newFiles]);
 
-    // 自动识别第一个上传的图片文件
     const imageFile = Array.from(files).find(f => f.type.startsWith('image/'));
     if (imageFile) {
-      await recognizeReceipt(imageFile, itemId);
+      await recognizeReceipt(imageFile);
     }
   };
 
-  const handleDrop = async (e: React.DragEvent, itemId: string) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const files = e.dataTransfer.files;
-    await handleFileSelect(itemId, files);
+    await handleFileSelect(e.dataTransfer.files);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -283,37 +212,65 @@ export default function NewReimbursementPage() {
     e.stopPropagation();
   };
 
-  const removeFile = (itemId: string, fileIndex: number) => {
-    const item = items.find(i => i.id === itemId);
-    if (item) {
-      const newFiles = item.files.filter((_, idx) => idx !== fileIndex);
-      updateItem(itemId, 'files', newFiles);
+  const removeFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const addLineItem = () => {
+    setLineItems([
+      ...lineItems,
+      {
+        id: Date.now().toString(),
+        description: '',
+        category: '',
+        amount: '',
+        currency: 'CNY',
+        date: new Date().toISOString().split('T')[0],
+      },
+    ]);
+  };
+
+  const removeLineItem = (id: string) => {
+    if (lineItems.length > 1) {
+      setLineItems(lineItems.filter(item => item.id !== id));
     }
   };
 
-  const totalAmount = items.reduce(
+  const updateLineItem = (id: string, field: keyof LineItem, value: string) => {
+    setLineItems(lineItems.map(item =>
+      item.id === id ? { ...item, [field]: value } : item
+    ));
+  };
+
+  const totalAmount = lineItems.reduce(
     (sum, item) => sum + (parseFloat(item.amount) || 0),
     0
   );
 
   const handleSubmit = async (isDraft: boolean) => {
+    if (!description) {
+      alert('请填写报销说明');
+      return;
+    }
+    if (lineItems.some(item => !item.amount || !item.category)) {
+      alert('请完善费用明细');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      // 构建费用明细，包含出发地/目的地信息
-      const itemsData = items.map(item => {
-        // 对于火车票/机票，将出发地-目的地加入描述
-        let description = item.description;
+      const itemsData = lineItems.map(item => {
+        let itemDesc = item.description;
         if ((item.category === 'train' || item.category === 'flight') && item.departure && item.destination) {
-          description = `${item.departure} → ${item.destination}${item.trainNumber ? ` (${item.trainNumber})` : ''}${item.flightNumber ? ` (${item.flightNumber})` : ''}${item.seatClass ? ` ${item.seatClass}` : ''}`;
+          itemDesc = `${item.departure} → ${item.destination}${item.trainNumber ? ` (${item.trainNumber})` : ''}${item.flightNumber ? ` (${item.flightNumber})` : ''}${item.seatClass ? ` ${item.seatClass}` : ''}`;
         }
         return {
           category: item.category,
-          description: description,
+          description: itemDesc,
           amount: item.amount,
           currency: item.currency,
           date: item.date,
-          location: item.location,
-          vendor: item.description, // 原始的商家/承运人信息
+          vendor: item.description,
         };
       });
 
@@ -321,8 +278,7 @@ export default function NewReimbursementPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title,
-          tripId: tripId || undefined,
+          title: description,
           items: itemsData,
           status: isDraft ? 'draft' : 'pending',
         }),
@@ -342,255 +298,218 @@ export default function NewReimbursementPage() {
     }
   };
 
-  const inputStyle = {
-    width: '100%',
-    padding: '0.625rem 0.875rem',
-    border: '1px solid #d1d5db',
-    borderRadius: '0.5rem',
-    fontSize: '0.875rem',
-    outline: 'none',
-    boxSizing: 'border-box' as const,
-    backgroundColor: 'white'
+  const getCategoryLabel = (value: string) => {
+    const cat = expenseCategories.find(c => c.value === value);
+    return cat ? `${cat.icon} ${cat.label}` : value;
   };
 
-  const labelStyle = {
-    display: 'block',
-    fontSize: '0.875rem',
-    fontWeight: 500,
-    color: '#374151',
-    marginBottom: '0.375rem'
-  };
+  const AutoFilledBadge = () => (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '4px',
+      padding: '2px 8px',
+      backgroundColor: '#dcfce7',
+      color: '#166534',
+      borderRadius: '9999px',
+      fontSize: '11px',
+      fontWeight: 500,
+      marginLeft: '8px',
+    }}>
+      <span style={{ fontSize: '10px' }}>✓</span> AI 自动填充
+    </span>
+  );
 
-  const selectStyle = {
-    ...inputStyle,
-    height: '38px',
-    cursor: 'pointer'
-  };
+  const VerifiedBadge = () => (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '2px',
+      color: '#16a34a',
+      fontSize: '12px',
+      marginLeft: '6px',
+    }}>
+      <span style={{ fontSize: '14px' }}>✓</span> 已验证
+    </span>
+  );
 
   return (
-    <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+    <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
       {/* Header */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-          <Link
-            href="/dashboard/reimbursements"
-            style={{ color: '#6b7280', textDecoration: 'none', fontSize: '0.875rem' }}
-          >
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+          <Link href="/dashboard/reimbursements" style={{ color: '#6b7280', textDecoration: 'none', fontSize: '14px' }}>
             我的报销
           </Link>
           <span style={{ color: '#9ca3af' }}>/</span>
-          <span style={{ color: '#111827', fontSize: '0.875rem' }}>新建报销</span>
+          <span style={{ color: '#111827', fontSize: '14px' }}>提交报销</span>
         </div>
-        <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', marginBottom: '0.25rem' }}>
-          新建报销
-        </h2>
-        <p style={{ color: '#6b7280' }}>填写报销信息并上传票据（上传后自动识别）</p>
+        <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>提交报销</h1>
       </div>
 
-      {/* Basic Info Card */}
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '0.75rem',
-        border: '1px solid #e5e7eb',
-        marginBottom: '1.5rem',
-        overflow: 'hidden'
-      }}>
-        <div style={{
-          padding: '1rem 1.25rem',
-          borderBottom: '1px solid #e5e7eb',
-          backgroundColor: '#f9fafb'
-        }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>基本信息</h3>
-        </div>
-        <div style={{ padding: '1.25rem' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div>
-              <label style={labelStyle}>报销标题 *</label>
+      {/* Main Content - Two Column Layout */}
+      <div style={{ display: 'grid', gridTemplateColumns: '400px 1fr', gap: '24px' }}>
+        {/* Left Column - Upload Area */}
+        <div>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            border: '1px solid #e5e7eb',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #e5e7eb',
+              backgroundColor: '#f9fafb',
+            }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>上传票据</h3>
+            </div>
+            <div style={{ padding: '20px' }}>
               <input
-                type="text"
-                placeholder="例如：上海出差报销"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                style={inputStyle}
+                type="file"
+                ref={fileInputRef}
+                onChange={(e) => handleFileSelect(e.target.files)}
+                accept="image/*,.pdf"
+                multiple
+                style={{ display: 'none' }}
               />
-            </div>
-            <div>
-              <label style={labelStyle}>关联行程（可选）</label>
-              <select
-                value={tripId}
-                onChange={(e) => setTripId(e.target.value)}
-                style={selectStyle}
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragEnter={handleDragOver}
+                style={{
+                  border: '2px dashed #d1d5db',
+                  borderRadius: '12px',
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  backgroundColor: '#fafafa',
+                  transition: 'all 0.2s',
+                  minHeight: '200px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
               >
-                <option value="">不关联行程</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Expense Items Card */}
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '0.75rem',
-        border: '1px solid #e5e7eb',
-        marginBottom: '1.5rem',
-        overflow: 'hidden'
-      }}>
-        <div style={{
-          padding: '1rem 1.25rem',
-          borderBottom: '1px solid #e5e7eb',
-          backgroundColor: '#f9fafb',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>费用明细</h3>
-          <button
-            onClick={addItem}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.375rem',
-              padding: '0.5rem 0.875rem',
-              backgroundColor: 'white',
-              color: '#2563eb',
-              border: '1px solid #2563eb',
-              borderRadius: '0.5rem',
-              fontSize: '0.875rem',
-              fontWeight: 500,
-              cursor: 'pointer'
-            }}
-          >
-            <span style={{ fontSize: '1rem' }}>+</span> 添加费用
-          </button>
-        </div>
-        <div style={{ padding: '1.25rem' }}>
-          {items.map((item, index) => (
-            <div
-              key={item.id}
-              style={{
-                backgroundColor: '#f9fafb',
-                borderRadius: '0.75rem',
-                padding: '1.25rem',
-                marginBottom: index < items.length - 1 ? '1rem' : 0,
-                border: '1px solid #e5e7eb'
-              }}
-            >
-              {/* Item Header */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: '1rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{ fontWeight: 600, color: '#111827' }}>费用 #{index + 1}</span>
-                  {item.isRecognizing && (
-                    <span style={{
-                      fontSize: '0.75rem',
-                      color: '#2563eb',
+                {isRecognizing ? (
+                  <>
+                    <div style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '50%',
+                      border: '3px solid #e5e7eb',
+                      borderTopColor: '#2563eb',
+                      animation: 'spin 1s linear infinite',
+                      marginBottom: '16px',
+                    }} />
+                    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                    <p style={{ fontSize: '14px', color: '#2563eb', fontWeight: 500 }}>AI 正在识别票据...</p>
+                    <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>请稍候，自动提取信息中</p>
+                  </>
+                ) : (
+                  <>
+                    <div style={{
+                      width: '64px',
+                      height: '64px',
+                      borderRadius: '16px',
                       backgroundColor: '#eff6ff',
-                      padding: '0.125rem 0.5rem',
-                      borderRadius: '9999px'
-                    }}>
-                      识别中...
-                    </span>
-                  )}
-                </div>
-                {items.length > 1 && (
-                  <button
-                    onClick={() => removeItem(item.id)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#dc2626',
-                      cursor: 'pointer',
-                      padding: '0.25rem',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.25rem',
-                      fontSize: '0.875rem'
-                    }}
-                  >
-                    <span>🗑️</span> 删除
-                  </button>
+                      justifyContent: 'center',
+                      marginBottom: '16px',
+                    }}>
+                      <span style={{ fontSize: '28px' }}>📤</span>
+                    </div>
+                    <p style={{ fontSize: '14px', color: '#111827', fontWeight: 500, marginBottom: '4px' }}>
+                      点击或拖拽上传票据
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#6b7280' }}>
+                      支持 JPG, PNG, PDF 格式
+                    </p>
+                    <p style={{
+                      fontSize: '11px',
+                      color: '#2563eb',
+                      marginTop: '12px',
+                      padding: '6px 12px',
+                      backgroundColor: '#eff6ff',
+                      borderRadius: '6px',
+                    }}>
+                      AI 自动识别并填充表单
+                    </p>
+                  </>
                 )}
               </div>
 
-              {/* Receipt Upload - Move to top */}
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={labelStyle}>上传票据（自动识别）</label>
-                <input
-                  type="file"
-                  ref={el => { fileInputRefs.current[item.id] = el; }}
-                  onChange={(e) => handleFileSelect(item.id, e.target.files)}
-                  accept="image/*,.pdf"
-                  multiple
-                  style={{ display: 'none' }}
-                />
-                <div
-                  onClick={() => fileInputRefs.current[item.id]?.click()}
-                  onDrop={(e) => handleDrop(e, item.id)}
-                  onDragOver={handleDragOver}
-                  onDragEnter={handleDragOver}
-                  style={{
-                    border: '2px dashed #2563eb',
-                    borderRadius: '0.5rem',
-                    padding: '1rem',
-                    textAlign: 'center',
-                    cursor: 'pointer',
-                    backgroundColor: '#eff6ff',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>📤</div>
-                  <p style={{ fontSize: '0.875rem', color: '#2563eb', marginBottom: '0.125rem', fontWeight: 500 }}>
-                    点击或拖拽上传票据，自动识别填充
+              {/* Uploaded Files Preview */}
+              {uploadedFiles.length > 0 && (
+                <div style={{ marginTop: '16px' }}>
+                  <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
+                    已上传 {uploadedFiles.length} 个文件
                   </p>
-                  <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                    支持 JPG, PNG, PDF 格式
-                  </p>
-                </div>
-
-                {/* Uploaded Files Preview */}
-                {item.files.length > 0 && (
-                  <div style={{ marginTop: '0.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    {item.files.map((uploadedFile, fileIndex) => (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {uploadedFiles.map((file, index) => (
                       <div
-                        key={fileIndex}
+                        key={index}
                         style={{
-                          position: 'relative',
-                          display: 'inline-flex',
+                          display: 'flex',
                           alignItems: 'center',
-                          gap: '0.5rem',
-                          padding: '0.375rem 0.5rem',
-                          backgroundColor: 'white',
+                          gap: '12px',
+                          padding: '12px',
+                          backgroundColor: '#f9fafb',
+                          borderRadius: '8px',
                           border: '1px solid #e5e7eb',
-                          borderRadius: '0.375rem'
                         }}
                       >
-                        {uploadedFile.preview ? (
+                        {file.preview ? (
                           <img
-                            src={uploadedFile.preview}
+                            src={file.preview}
                             alt="预览"
-                            style={{ width: '24px', height: '24px', objectFit: 'cover', borderRadius: '0.25rem' }}
+                            style={{
+                              width: '48px',
+                              height: '48px',
+                              objectFit: 'cover',
+                              borderRadius: '6px',
+                            }}
                           />
                         ) : (
-                          <span style={{ fontSize: '1rem' }}>📄</span>
+                          <div style={{
+                            width: '48px',
+                            height: '48px',
+                            backgroundColor: '#e5e7eb',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}>
+                            <span style={{ fontSize: '20px' }}>📄</span>
+                          </div>
                         )}
-                        <span style={{ fontSize: '0.75rem', color: '#374151', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {uploadedFile.file.name}
-                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{
+                            fontSize: '13px',
+                            color: '#111827',
+                            fontWeight: 500,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {file.file.name}
+                          </p>
+                          <p style={{ fontSize: '11px', color: '#6b7280' }}>
+                            {(file.file.size / 1024).toFixed(1)} KB
+                          </p>
+                        </div>
                         <button
-                          onClick={(e) => { e.stopPropagation(); removeFile(item.id, fileIndex); }}
+                          onClick={(e) => { e.stopPropagation(); removeFile(index); }}
                           style={{
                             background: 'none',
                             border: 'none',
                             color: '#dc2626',
                             cursor: 'pointer',
-                            padding: '0',
-                            fontSize: '0.875rem',
-                            lineHeight: 1
+                            padding: '4px',
+                            fontSize: '18px',
                           }}
                         >
                           ×
@@ -598,252 +517,435 @@ export default function NewReimbursementPage() {
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
-
-              {/* Row 1: Category, Amount, Date */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: '1rem',
-                marginBottom: '1rem'
-              }}>
-                <div>
-                  <label style={labelStyle}>费用类别 *</label>
-                  <select
-                    value={item.category}
-                    onChange={(e) => updateItem(item.id, 'category', e.target.value)}
-                    style={selectStyle}
-                  >
-                    <option value="">选择类别</option>
-                    {expenseCategories.map((cat) => (
-                      <option key={cat.value} value={cat.value}>
-                        {cat.icon} {cat.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={labelStyle}>金额 *</label>
-                  <div style={{ display: 'flex' }}>
-                    <select
-                      value={item.currency}
-                      onChange={(e) => updateItem(item.id, 'currency', e.target.value)}
-                      style={{
-                        padding: '0.625rem 0.5rem',
-                        border: '1px solid #d1d5db',
-                        borderRight: 'none',
-                        borderRadius: '0.5rem 0 0 0.5rem',
-                        fontSize: '0.875rem',
-                        backgroundColor: '#f3f4f6',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <option value="CNY">¥</option>
-                      <option value="USD">$</option>
-                      <option value="EUR">€</option>
-                    </select>
-                    <input
-                      type="number"
-                      placeholder="0.00"
-                      value={item.amount}
-                      onChange={(e) => updateItem(item.id, 'amount', e.target.value)}
-                      style={{
-                        ...inputStyle,
-                        borderRadius: '0 0.5rem 0.5rem 0',
-                        flex: 1
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label style={labelStyle}>日期 *</label>
-                  <input
-                    type="date"
-                    value={item.date}
-                    onChange={(e) => updateItem(item.id, 'date', e.target.value)}
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-
-              {/* Row 2: Departure/Destination for Train/Flight */}
-              {(item.category === 'train' || item.category === 'flight') && (
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
-                  gap: '1rem',
-                  marginBottom: '1rem'
-                }}>
-                  <div>
-                    <label style={labelStyle}>出发地 *</label>
-                    <input
-                      type="text"
-                      placeholder={item.category === 'train' ? '例如：北京南站' : '例如：北京首都'}
-                      value={item.departure || ''}
-                      onChange={(e) => updateItem(item.id, 'departure', e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={labelStyle}>目的地 *</label>
-                    <input
-                      type="text"
-                      placeholder={item.category === 'train' ? '例如：上海虹桥站' : '例如：上海浦东'}
-                      value={item.destination || ''}
-                      onChange={(e) => updateItem(item.id, 'destination', e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={labelStyle}>{item.category === 'train' ? '车次号' : '航班号'}</label>
-                    <input
-                      type="text"
-                      placeholder={item.category === 'train' ? '例如：G1234' : '例如：CA1234'}
-                      value={item.category === 'train' ? (item.trainNumber || '') : (item.flightNumber || '')}
-                      onChange={(e) => updateItem(item.id, item.category === 'train' ? 'trainNumber' : 'flightNumber', e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
 
-              {/* Row 3: Description, Location/Seat Class */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: (item.category === 'train' || item.category === 'flight') ? 'repeat(3, 1fr)' : '1fr 1fr',
-                gap: '1rem'
-              }}>
+        {/* Right Column - Expense Details Form */}
+        <div>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            border: '1px solid #e5e7eb',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #e5e7eb',
+              backgroundColor: '#f9fafb',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>费用详情</h3>
+                {(merchantAutoFilled || dateAutoFilled || itemsAutoFilled) && <AutoFilledBadge />}
+              </div>
+            </div>
+            <div style={{ padding: '20px' }}>
+              {/* Merchant and Date Row */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
                 <div>
-                  <label style={labelStyle}>费用说明 *</label>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    color: '#374151',
+                    marginBottom: '6px',
+                  }}>
+                    商户/供应商
+                    {merchantAutoFilled && <VerifiedBadge />}
+                  </label>
                   <input
                     type="text"
-                    placeholder="例如：往返机票"
-                    value={item.description}
-                    onChange={(e) => updateItem(item.id, 'description', e.target.value)}
-                    style={inputStyle}
+                    placeholder="商户名称"
+                    value={merchant}
+                    onChange={(e) => { setMerchant(e.target.value); setMerchantAutoFilled(false); }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      border: merchantAutoFilled ? '1px solid #86efac' : '1px solid #d1d5db',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      backgroundColor: merchantAutoFilled ? '#f0fdf4' : 'white',
+                      boxSizing: 'border-box',
+                    }}
                   />
                 </div>
-
-                {(item.category === 'train' || item.category === 'flight') && (
-                  <div>
-                    <label style={labelStyle}>座位等级</label>
-                    <select
-                      value={item.seatClass || ''}
-                      onChange={(e) => updateItem(item.id, 'seatClass', e.target.value)}
-                      style={selectStyle}
-                    >
-                      <option value="">选择座位等级</option>
-                      {item.category === 'train' ? (
-                        <>
-                          <option value="二等座">二等座</option>
-                          <option value="一等座">一等座</option>
-                          <option value="商务座">商务座</option>
-                          <option value="硬座">硬座</option>
-                          <option value="软座">软座</option>
-                          <option value="硬卧">硬卧</option>
-                          <option value="软卧">软卧</option>
-                        </>
-                      ) : (
-                        <>
-                          <option value="经济舱">经济舱</option>
-                          <option value="超级经济舱">超级经济舱</option>
-                          <option value="公务舱">公务舱</option>
-                          <option value="头等舱">头等舱</option>
-                        </>
-                      )}
-                    </select>
-                  </div>
-                )}
-
                 <div>
-                  <label style={labelStyle}>消费地点（可选）</label>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    color: '#374151',
+                    marginBottom: '6px',
+                  }}>
+                    日期
+                    {dateAutoFilled && <VerifiedBadge />}
+                  </label>
                   <input
-                    type="text"
-                    placeholder="例如：上海"
-                    value={item.location || ''}
-                    onChange={(e) => updateItem(item.id, 'location', e.target.value)}
-                    style={inputStyle}
+                    type="date"
+                    value={expenseDate}
+                    onChange={(e) => { setExpenseDate(e.target.value); setDateAutoFilled(false); }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      border: dateAutoFilled ? '1px solid #86efac' : '1px solid #d1d5db',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      backgroundColor: dateAutoFilled ? '#f0fdf4' : 'white',
+                      boxSizing: 'border-box',
+                    }}
                   />
+                </div>
+              </div>
+
+              {/* General Description */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  color: '#374151',
+                  marginBottom: '6px',
+                }}>
+                  报销说明 *
+                  {descAutoFilled && <VerifiedBadge />}
+                </label>
+                <input
+                  type="text"
+                  placeholder="例如：上海出差-客户拜访"
+                  value={description}
+                  onChange={(e) => { setDescription(e.target.value); setDescAutoFilled(false); }}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    border: descAutoFilled ? '1px solid #86efac' : '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    backgroundColor: descAutoFilled ? '#f0fdf4' : 'white',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              {/* Line Items Section */}
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '12px',
+                }}>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    color: '#374151',
+                  }}>
+                    费用明细
+                    {itemsAutoFilled && <VerifiedBadge />}
+                  </label>
+                  <button
+                    onClick={addLineItem}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '6px 12px',
+                      backgroundColor: 'white',
+                      color: '#2563eb',
+                      border: '1px solid #2563eb',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    + 添加明细
+                  </button>
+                </div>
+
+                {/* Line Items Table */}
+                <div style={{
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                }}>
+                  {/* Table Header */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '2fr 1.5fr 1fr 1fr 40px',
+                    gap: '8px',
+                    padding: '10px 12px',
+                    backgroundColor: '#f9fafb',
+                    borderBottom: '1px solid #e5e7eb',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    color: '#6b7280',
+                  }}>
+                    <div>描述</div>
+                    <div>类别</div>
+                    <div>金额</div>
+                    <div>日期</div>
+                    <div></div>
+                  </div>
+
+                  {/* Line Items */}
+                  {lineItems.map((item, index) => (
+                    <div key={item.id}>
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '2fr 1.5fr 1fr 1fr 40px',
+                        gap: '8px',
+                        padding: '10px 12px',
+                        borderBottom: index < lineItems.length - 1 ? '1px solid #e5e7eb' : 'none',
+                        backgroundColor: itemsAutoFilled ? '#f0fdf4' : 'white',
+                      }}>
+                        <input
+                          type="text"
+                          placeholder="费用描述"
+                          value={item.description}
+                          onChange={(e) => updateLineItem(item.id, 'description', e.target.value)}
+                          style={{
+                            padding: '8px 10px',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            backgroundColor: 'white',
+                          }}
+                        />
+                        <select
+                          value={item.category}
+                          onChange={(e) => updateLineItem(item.id, 'category', e.target.value)}
+                          style={{
+                            padding: '8px 10px',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            backgroundColor: 'white',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <option value="">选择类别</option>
+                          {expenseCategories.map((cat) => (
+                            <option key={cat.value} value={cat.value}>
+                              {cat.icon} {cat.label}
+                            </option>
+                          ))}
+                        </select>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <span style={{
+                            padding: '8px 6px',
+                            backgroundColor: '#f3f4f6',
+                            border: '1px solid #e5e7eb',
+                            borderRight: 'none',
+                            borderRadius: '6px 0 0 6px',
+                            fontSize: '13px',
+                            color: '#6b7280',
+                          }}>
+                            ¥
+                          </span>
+                          <input
+                            type="number"
+                            placeholder="0.00"
+                            value={item.amount}
+                            onChange={(e) => updateLineItem(item.id, 'amount', e.target.value)}
+                            style={{
+                              flex: 1,
+                              padding: '8px 10px',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '0 6px 6px 0',
+                              fontSize: '13px',
+                              backgroundColor: 'white',
+                              minWidth: 0,
+                            }}
+                          />
+                        </div>
+                        <input
+                          type="date"
+                          value={item.date}
+                          onChange={(e) => updateLineItem(item.id, 'date', e.target.value)}
+                          style={{
+                            padding: '8px 6px',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            backgroundColor: 'white',
+                          }}
+                        />
+                        <button
+                          onClick={() => removeLineItem(item.id)}
+                          disabled={lineItems.length === 1}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: lineItems.length === 1 ? '#d1d5db' : '#dc2626',
+                            cursor: lineItems.length === 1 ? 'not-allowed' : 'pointer',
+                            padding: '4px',
+                            fontSize: '16px',
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      {/* Extra fields for train/flight */}
+                      {(item.category === 'train' || item.category === 'flight') && (
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(4, 1fr)',
+                          gap: '8px',
+                          padding: '10px 12px',
+                          backgroundColor: '#fefce8',
+                          borderBottom: index < lineItems.length - 1 ? '1px solid #e5e7eb' : 'none',
+                        }}>
+                          <input
+                            type="text"
+                            placeholder="出发地"
+                            value={item.departure || ''}
+                            onChange={(e) => updateLineItem(item.id, 'departure', e.target.value)}
+                            style={{
+                              padding: '6px 10px',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              backgroundColor: 'white',
+                            }}
+                          />
+                          <input
+                            type="text"
+                            placeholder="目的地"
+                            value={item.destination || ''}
+                            onChange={(e) => updateLineItem(item.id, 'destination', e.target.value)}
+                            style={{
+                              padding: '6px 10px',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              backgroundColor: 'white',
+                            }}
+                          />
+                          <input
+                            type="text"
+                            placeholder={item.category === 'train' ? '车次号' : '航班号'}
+                            value={item.category === 'train' ? (item.trainNumber || '') : (item.flightNumber || '')}
+                            onChange={(e) => updateLineItem(item.id, item.category === 'train' ? 'trainNumber' : 'flightNumber', e.target.value)}
+                            style={{
+                              padding: '6px 10px',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              backgroundColor: 'white',
+                            }}
+                          />
+                          <select
+                            value={item.seatClass || ''}
+                            onChange={(e) => updateLineItem(item.id, 'seatClass', e.target.value)}
+                            style={{
+                              padding: '6px 10px',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              backgroundColor: 'white',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <option value="">座位等级</option>
+                            {item.category === 'train' ? (
+                              <>
+                                <option value="二等座">二等座</option>
+                                <option value="一等座">一等座</option>
+                                <option value="商务座">商务座</option>
+                              </>
+                            ) : (
+                              <>
+                                <option value="经济舱">经济舱</option>
+                                <option value="公务舱">公务舱</option>
+                                <option value="头等舱">头等舱</option>
+                              </>
+                            )}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Total and Actions */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingTop: '16px',
+                borderTop: '1px solid #e5e7eb',
+              }}>
+                <div>
+                  <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '2px' }}>费用合计</p>
+                  <p style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>
+                    ¥{totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button
+                    onClick={() => router.push('/dashboard/reimbursements')}
+                    style={{
+                      padding: '10px 20px',
+                      backgroundColor: 'white',
+                      color: '#6b7280',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={() => handleSubmit(true)}
+                    disabled={isSubmitting}
+                    style={{
+                      padding: '10px 20px',
+                      backgroundColor: 'white',
+                      color: '#2563eb',
+                      border: '1px solid #2563eb',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                      opacity: isSubmitting ? 0.6 : 1,
+                    }}
+                  >
+                    保存草稿
+                  </button>
+                  <button
+                    onClick={() => handleSubmit(false)}
+                    disabled={isSubmitting || !description}
+                    style={{
+                      padding: '10px 20px',
+                      background: isSubmitting || !description ? '#9ca3af' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      cursor: isSubmitting || !description ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {isSubmitting ? '提交中...' : '提交审批'}
+                  </button>
                 </div>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Summary & Actions */}
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '0.75rem',
-        border: '1px solid #e5e7eb',
-        padding: '1.5rem',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-      }}>
-        <div>
-          <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>费用合计</p>
-          <p style={{ fontSize: '2rem', fontWeight: 700, color: '#111827' }}>
-            ¥{totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-          </p>
-          <p style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
-            共 {items.length} 笔费用
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button
-            onClick={() => router.push('/dashboard/reimbursements')}
-            style={{
-              padding: '0.625rem 1.25rem',
-              backgroundColor: 'white',
-              color: '#6b7280',
-              border: '1px solid #d1d5db',
-              borderRadius: '0.5rem',
-              fontSize: '0.875rem',
-              fontWeight: 500,
-              cursor: 'pointer'
-            }}
-          >
-            取消
-          </button>
-          <button
-            onClick={() => handleSubmit(true)}
-            disabled={isSubmitting}
-            style={{
-              padding: '0.625rem 1.25rem',
-              backgroundColor: 'white',
-              color: '#2563eb',
-              border: '1px solid #2563eb',
-              borderRadius: '0.5rem',
-              fontSize: '0.875rem',
-              fontWeight: 500,
-              cursor: isSubmitting ? 'not-allowed' : 'pointer',
-              opacity: isSubmitting ? 0.6 : 1
-            }}
-          >
-            保存草稿
-          </button>
-          <button
-            onClick={() => handleSubmit(false)}
-            disabled={isSubmitting || !title}
-            style={{
-              padding: '0.625rem 1.25rem',
-              background: isSubmitting || !title ? '#9ca3af' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '0.5rem',
-              fontSize: '0.875rem',
-              fontWeight: 500,
-              cursor: isSubmitting || !title ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {isSubmitting ? '提交中...' : '提交审批'}
-          </button>
+          </div>
         </div>
       </div>
     </div>
