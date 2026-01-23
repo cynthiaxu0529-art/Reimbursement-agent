@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react';
 
-const tabs = [
-  { id: 'profile', label: '👤 个人信息', icon: '👤' },
-  { id: 'company', label: '🏢 公司设置', icon: '🏢' },
-  { id: 'team', label: '👥 团队管理', icon: '👥' },
-  { id: 'policies', label: '📋 报销政策', icon: '📋' },
+type UserRole = 'employee' | 'approver' | 'admin';
+
+const allTabs = [
+  { id: 'profile', label: '👤 个人信息', icon: '👤', adminOnly: false },
+  { id: 'company', label: '🏢 公司设置', icon: '🏢', adminOnly: true },
+  { id: 'team', label: '👥 团队管理', icon: '👥', adminOnly: true },
+  { id: 'policies', label: '📋 报销政策', icon: '📋', adminOnly: true },
 ];
 
 export default function SettingsPage() {
@@ -18,6 +20,9 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [userRole, setUserRole] = useState<UserRole>('employee');
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isEditingCompany, setIsEditingCompany] = useState(false);
 
   // Profile data
   const [profile, setProfile] = useState({
@@ -45,6 +50,17 @@ export default function SettingsPage() {
   const [pendingInvites] = useState([
     { email: 'newuser@example.com', role: 'employee', sentAt: '2024-01-20' },
   ]);
+
+  // 从 localStorage 读取角色
+  useEffect(() => {
+    const savedRole = localStorage.getItem('userRole') as UserRole;
+    if (savedRole && (savedRole === 'employee' || savedRole === 'approver' || savedRole === 'admin')) {
+      setUserRole(savedRole);
+    }
+  }, []);
+
+  // 根据角色过滤可见的 tabs
+  const tabs = allTabs.filter(tab => !tab.adminOnly || userRole === 'admin');
 
   // 获取用户资料
   useEffect(() => {
@@ -114,6 +130,7 @@ export default function SettingsPage() {
       const result = await response.json();
       if (result.success) {
         showMessage('个人信息已保存');
+        setIsEditingProfile(false);
       } else {
         showMessage(result.error || '保存失败', true);
       }
@@ -140,6 +157,7 @@ export default function SettingsPage() {
       const result = await response.json();
       if (result.success) {
         showMessage('公司设置已保存');
+        setIsEditingCompany(false);
       } else {
         showMessage(result.error || '保存失败', true);
       }
@@ -169,6 +187,13 @@ export default function SettingsPage() {
     fontSize: '0.875rem',
     outline: 'none',
     boxSizing: 'border-box' as const,
+  };
+
+  const disabledInputStyle = {
+    ...inputStyle,
+    backgroundColor: '#f9fafb',
+    color: '#374151',
+    cursor: 'not-allowed',
   };
 
   const labelStyle = {
@@ -269,11 +294,30 @@ export default function SettingsPage() {
       {activeTab === 'profile' && (
         <div style={{ maxWidth: '600px' }}>
           <div style={cardStyle}>
-            <div style={{ padding: '1.25rem', borderBottom: '1px solid #e5e7eb' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>个人信息</h3>
-              <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                更新您的个人资料和钱包地址
-              </p>
+            <div style={{ padding: '1.25rem', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>个人信息</h3>
+                <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                  更新您的个人资料和钱包地址
+                </p>
+              </div>
+              {!isEditingProfile && (
+                <button
+                  onClick={() => setIsEditingProfile(true)}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    backgroundColor: 'white',
+                    color: '#2563eb',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: '0.5rem',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                  }}
+                >
+                  ✏️ 编辑
+                </button>
+              )}
             </div>
             <div style={{ padding: '1.25rem' }}>
               <div style={{ display: 'grid', gap: '1rem' }}>
@@ -283,7 +327,8 @@ export default function SettingsPage() {
                     type="text"
                     value={profile.name}
                     onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-                    style={inputStyle}
+                    disabled={!isEditingProfile}
+                    style={isEditingProfile ? inputStyle : disabledInputStyle}
                   />
                 </div>
                 <div>
@@ -300,7 +345,8 @@ export default function SettingsPage() {
                   <select
                     value={profile.department}
                     onChange={(e) => setProfile({ ...profile, department: e.target.value })}
-                    style={inputStyle}
+                    disabled={!isEditingProfile}
+                    style={isEditingProfile ? inputStyle : disabledInputStyle}
                   >
                     <option value="">请选择部门</option>
                     {company.departments.map((dept) => (
@@ -315,7 +361,8 @@ export default function SettingsPage() {
                     value={profile.phone}
                     onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
                     placeholder="例如：13800138000"
-                    style={inputStyle}
+                    disabled={!isEditingProfile}
+                    style={isEditingProfile ? inputStyle : disabledInputStyle}
                   />
                 </div>
 
@@ -331,7 +378,8 @@ export default function SettingsPage() {
                         value={profile.walletAddress}
                         onChange={(e) => setProfile({ ...profile, walletAddress: e.target.value })}
                         placeholder="例如：0x1234...abcd"
-                        style={inputStyle}
+                        disabled={!isEditingProfile}
+                        style={isEditingProfile ? inputStyle : disabledInputStyle}
                       />
                       <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
                         请填写您的加密货币钱包地址，用于接收报销款项
@@ -340,22 +388,39 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                <button
-                  onClick={handleSaveProfile}
-                  disabled={saving}
-                  style={{
-                    marginTop: '1rem',
-                    padding: '0.625rem 1.25rem',
-                    backgroundColor: saving ? '#9ca3af' : '#2563eb',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.5rem',
-                    fontWeight: 500,
-                    cursor: saving ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {saving ? '保存中...' : '保存更改'}
-                </button>
+                {isEditingProfile && (
+                  <div style={{ marginTop: '1rem', display: 'flex', gap: '0.75rem' }}>
+                    <button
+                      onClick={handleSaveProfile}
+                      disabled={saving}
+                      style={{
+                        padding: '0.625rem 1.25rem',
+                        backgroundColor: saving ? '#9ca3af' : '#2563eb',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '0.5rem',
+                        fontWeight: 500,
+                        cursor: saving ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {saving ? '保存中...' : '保存更改'}
+                    </button>
+                    <button
+                      onClick={() => setIsEditingProfile(false)}
+                      style={{
+                        padding: '0.625rem 1.25rem',
+                        backgroundColor: 'white',
+                        color: '#374151',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '0.5rem',
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      取消
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -366,11 +431,30 @@ export default function SettingsPage() {
       {activeTab === 'company' && (
         <div style={{ maxWidth: '600px' }}>
           <div style={cardStyle}>
-            <div style={{ padding: '1.25rem', borderBottom: '1px solid #e5e7eb' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>公司设置</h3>
-              <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                管理公司的基本信息和报销规则
-              </p>
+            <div style={{ padding: '1.25rem', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>公司设置</h3>
+                <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                  管理公司的基本信息和报销规则
+                </p>
+              </div>
+              {!isEditingCompany && (
+                <button
+                  onClick={() => setIsEditingCompany(true)}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    backgroundColor: 'white',
+                    color: '#2563eb',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: '0.5rem',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                  }}
+                >
+                  ✏️ 编辑
+                </button>
+              )}
             </div>
             <div style={{ padding: '1.25rem' }}>
               <div style={{ display: 'grid', gap: '1rem' }}>
@@ -380,7 +464,8 @@ export default function SettingsPage() {
                     type="text"
                     value={company.name}
                     onChange={(e) => setCompany({ ...company, name: e.target.value })}
-                    style={inputStyle}
+                    disabled={!isEditingCompany}
+                    style={isEditingCompany ? inputStyle : disabledInputStyle}
                   />
                 </div>
                 <div>
@@ -388,7 +473,8 @@ export default function SettingsPage() {
                   <select
                     value={company.currency}
                     onChange={(e) => setCompany({ ...company, currency: e.target.value })}
-                    style={inputStyle}
+                    disabled={!isEditingCompany}
+                    style={isEditingCompany ? inputStyle : disabledInputStyle}
                   >
                     <option value="CNY">人民币 (CNY)</option>
                     <option value="USD">美元 (USD)</option>
@@ -403,7 +489,8 @@ export default function SettingsPage() {
                       type="number"
                       value={company.autoApproveLimit}
                       onChange={(e) => setCompany({ ...company, autoApproveLimit: parseInt(e.target.value) || 0 })}
-                      style={{ ...inputStyle, width: '120px' }}
+                      disabled={!isEditingCompany}
+                      style={{ ...(isEditingCompany ? inputStyle : disabledInputStyle), width: '120px' }}
                     />
                     <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>元以下自动批准</span>
                   </div>
@@ -435,62 +522,83 @@ export default function SettingsPage() {
                         }}
                       >
                         {dept}
-                        <button
-                          onClick={() => {
-                            const newDepts = company.departments.filter((_, i) => i !== index);
-                            setCompany({ ...company, departments: newDepts });
-                          }}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: '#9ca3af',
-                            cursor: 'pointer',
-                            padding: '0',
-                            marginLeft: '0.25rem',
-                          }}
-                        >
-                          ×
-                        </button>
+                        {isEditingCompany && (
+                          <button
+                            onClick={() => {
+                              const newDepts = company.departments.filter((_, i) => i !== index);
+                              setCompany({ ...company, departments: newDepts });
+                            }}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#9ca3af',
+                              cursor: 'pointer',
+                              padding: '0',
+                              marginLeft: '0.25rem',
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
                       </span>
                     ))}
-                    <button
-                      onClick={() => {
-                        const newDept = prompt('请输入新部门名称');
-                        if (newDept && !company.departments.includes(newDept)) {
-                          setCompany({ ...company, departments: [...company.departments, newDept] });
-                        }
-                      }}
-                      style={{
-                        padding: '0.25rem 0.75rem',
-                        backgroundColor: '#eff6ff',
-                        color: '#2563eb',
-                        border: '1px dashed #93c5fd',
-                        borderRadius: '9999px',
-                        fontSize: '0.875rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      + 添加部门
-                    </button>
+                    {isEditingCompany && (
+                      <button
+                        onClick={() => {
+                          const newDept = prompt('请输入新部门名称');
+                          if (newDept && !company.departments.includes(newDept)) {
+                            setCompany({ ...company, departments: [...company.departments, newDept] });
+                          }
+                        }}
+                        style={{
+                          padding: '0.25rem 0.75rem',
+                          backgroundColor: '#eff6ff',
+                          color: '#2563eb',
+                          border: '1px dashed #93c5fd',
+                          borderRadius: '9999px',
+                          fontSize: '0.875rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        + 添加部门
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <button
-                  onClick={handleSaveCompany}
-                  disabled={saving}
-                  style={{
-                    marginTop: '1rem',
-                    padding: '0.625rem 1.25rem',
-                    backgroundColor: saving ? '#9ca3af' : '#2563eb',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.5rem',
-                    fontWeight: 500,
-                    cursor: saving ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {saving ? '保存中...' : '保存更改'}
-                </button>
+                {isEditingCompany && (
+                  <div style={{ marginTop: '1rem', display: 'flex', gap: '0.75rem' }}>
+                    <button
+                      onClick={handleSaveCompany}
+                      disabled={saving}
+                      style={{
+                        padding: '0.625rem 1.25rem',
+                        backgroundColor: saving ? '#9ca3af' : '#2563eb',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '0.5rem',
+                        fontWeight: 500,
+                        cursor: saving ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {saving ? '保存中...' : '保存更改'}
+                    </button>
+                    <button
+                      onClick={() => setIsEditingCompany(false)}
+                      style={{
+                        padding: '0.625rem 1.25rem',
+                        backgroundColor: 'white',
+                        color: '#374151',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '0.5rem',
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      取消
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
