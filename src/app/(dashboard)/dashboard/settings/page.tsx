@@ -14,8 +14,12 @@ const allTabs = [
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('profile');
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState('employee');
+  const [inviteData, setInviteData] = useState({
+    name: '',
+    email: '',
+    department: '',
+    role: 'employee',
+  });
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -169,13 +173,13 @@ export default function SettingsPage() {
   };
 
   const handleInvite = async () => {
-    if (!inviteEmail) return;
+    if (!inviteData.email || !inviteData.name) return;
     setSaving(true);
     // TODO: Call API to send invite
     await new Promise(resolve => setTimeout(resolve, 1000));
-    showMessage(`邀请已发送至 ${inviteEmail}`);
+    showMessage(`邀请已发送至 ${inviteData.email}`);
     setShowInviteModal(false);
-    setInviteEmail('');
+    setInviteData({ name: '', email: '', department: '', role: 'employee' });
     setSaving(false);
   };
 
@@ -839,38 +843,94 @@ export default function SettingsPage() {
             borderRadius: '0.75rem',
             padding: '1.5rem',
             width: '100%',
-            maxWidth: '400px',
+            maxWidth: '480px',
             margin: '1rem',
           }}>
-            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.5rem' }}>
               邀请团队成员
             </h3>
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={labelStyle}>邮箱地址</label>
-              <input
-                type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="colleague@company.com"
-                style={inputStyle}
-              />
+            <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '1.25rem' }}>
+              填写员工基本信息，发送邀请后员工可自行补充电话和钱包地址
+            </p>
+
+            <div style={{ display: 'grid', gap: '1rem' }}>
+              <div>
+                <label style={labelStyle}>
+                  员工姓名 <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={inviteData.name}
+                  onChange={(e) => setInviteData({ ...inviteData, name: e.target.value })}
+                  placeholder="请输入员工姓名"
+                  style={inputStyle}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>
+                  邮箱地址 <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                <input
+                  type="email"
+                  value={inviteData.email}
+                  onChange={(e) => setInviteData({ ...inviteData, email: e.target.value })}
+                  placeholder="employee@company.com"
+                  style={inputStyle}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>所属部门</label>
+                <select
+                  value={inviteData.department}
+                  onChange={(e) => setInviteData({ ...inviteData, department: e.target.value })}
+                  style={inputStyle}
+                >
+                  <option value="">请选择部门</option>
+                  {company.departments.map((dept) => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={labelStyle}>角色权限</label>
+                <select
+                  value={inviteData.role}
+                  onChange={(e) => setInviteData({ ...inviteData, role: e.target.value })}
+                  style={inputStyle}
+                >
+                  <option value="employee">员工 - 可以提交报销</option>
+                  <option value="approver">审批人 - 可以审批下属报销</option>
+                  <option value="finance">财务 - 可以处理打款</option>
+                  <option value="admin">管理员 - 所有权限</option>
+                </select>
+              </div>
             </div>
-            <div style={{ marginBottom: '1.5rem' }}>
-              <label style={labelStyle}>角色</label>
-              <select
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="employee">员工 - 可以提交报销</option>
-                <option value="manager">经理 - 可以审批下属报销</option>
-                <option value="finance">财务 - 可以处理打款</option>
-                <option value="admin">管理员 - 所有权限</option>
-              </select>
+
+            <div style={{
+              marginTop: '1.25rem',
+              padding: '0.75rem',
+              backgroundColor: '#f0f9ff',
+              borderRadius: '0.5rem',
+              border: '1px solid #bae6fd'
+            }}>
+              <p style={{ fontSize: '0.75rem', color: '#0369a1' }}>
+                💡 邀请发送后，员工将收到邀请链接。员工登录后需要自行填写：
+              </p>
+              <ul style={{ fontSize: '0.75rem', color: '#0369a1', margin: '0.5rem 0 0 1rem', padding: 0 }}>
+                <li>手机号码</li>
+                <li>钱包地址（用于接收报销款项）</li>
+              </ul>
             </div>
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
               <button
-                onClick={() => setShowInviteModal(false)}
+                onClick={() => {
+                  setShowInviteModal(false);
+                  setInviteData({ name: '', email: '', department: '', role: 'employee' });
+                }}
                 style={{
                   padding: '0.5rem 1rem',
                   backgroundColor: 'white',
@@ -884,17 +944,17 @@ export default function SettingsPage() {
               </button>
               <button
                 onClick={handleInvite}
-                disabled={saving || !inviteEmail}
+                disabled={saving || !inviteData.email || !inviteData.name}
                 style={{
                   padding: '0.5rem 1rem',
-                  backgroundColor: saving || !inviteEmail ? '#9ca3af' : '#2563eb',
+                  backgroundColor: saving || !inviteData.email || !inviteData.name ? '#9ca3af' : '#2563eb',
                   color: 'white',
                   border: 'none',
                   borderRadius: '0.5rem',
-                  cursor: saving || !inviteEmail ? 'not-allowed' : 'pointer',
+                  cursor: saving || !inviteData.email || !inviteData.name ? 'not-allowed' : 'pointer',
                 }}
               >
-                {saving ? '发送中...' : '发送邀请'}
+                {saving ? '发送中...' : '发送邀请链接'}
               </button>
             </div>
           </div>
