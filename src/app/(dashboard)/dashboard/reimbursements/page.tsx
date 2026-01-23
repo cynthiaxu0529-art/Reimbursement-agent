@@ -132,40 +132,55 @@ export default function ReimbursementsPage() {
         </Link>
       </div>
 
-      {/* Stats Row */}
+      {/* Stats Row - Clickable for filtering */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(4, 1fr)',
         gap: '1rem',
         marginBottom: '1.5rem',
       }}>
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          padding: '1rem 1.25rem',
-          border: '1px solid #e5e7eb',
-        }}>
+        <button
+          onClick={() => setFilter('all')}
+          style={{
+            backgroundColor: filter === 'all' ? '#eff6ff' : 'white',
+            borderRadius: '0.75rem',
+            padding: '1rem 1.25rem',
+            border: filter === 'all' ? '2px solid #2563eb' : '1px solid #e5e7eb',
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
           <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>全部报销</p>
           <p style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827' }}>{stats.total}</p>
-        </div>
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          padding: '1rem 1.25rem',
-          border: '1px solid #e5e7eb',
-        }}>
+        </button>
+        <button
+          onClick={() => setFilter('pending')}
+          style={{
+            backgroundColor: filter === 'pending' ? '#fef3c7' : 'white',
+            borderRadius: '0.75rem',
+            padding: '1rem 1.25rem',
+            border: filter === 'pending' ? '2px solid #d97706' : '1px solid #e5e7eb',
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
           <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>待审批</p>
           <p style={{ fontSize: '1.5rem', fontWeight: 700, color: '#d97706' }}>{stats.pending}</p>
-        </div>
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          padding: '1rem 1.25rem',
-          border: '1px solid #e5e7eb',
-        }}>
+        </button>
+        <button
+          onClick={() => setFilter('approved')}
+          style={{
+            backgroundColor: filter === 'approved' ? '#dcfce7' : 'white',
+            borderRadius: '0.75rem',
+            padding: '1rem 1.25rem',
+            border: filter === 'approved' ? '2px solid #16a34a' : '1px solid #e5e7eb',
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
           <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>已批准</p>
           <p style={{ fontSize: '1.5rem', fontWeight: 700, color: '#16a34a' }}>{stats.approved}</p>
-        </div>
+        </button>
         <div style={{
           backgroundColor: 'white',
           borderRadius: '0.75rem',
