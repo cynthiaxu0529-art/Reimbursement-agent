@@ -19,13 +19,31 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
+    const role = searchParams.get('role'); // 'approver' 查看待审批的
     const page = parseInt(searchParams.get('page') || '1');
-    const pageSize = parseInt(searchParams.get('pageSize') || '10');
+    const pageSize = parseInt(searchParams.get('pageSize') || '50');
 
     // 构建查询条件
-    const conditions = [eq(reimbursements.userId, session.user.id)];
+    let conditions: any[] = [];
+
+    if (role === 'approver' && session.user.tenantId) {
+      // 审批人模式：查看同租户的报销（排除自己的）
+      conditions.push(eq(reimbursements.tenantId, session.user.tenantId));
+    } else {
+      // 员工模式：只看自己的
+      conditions.push(eq(reimbursements.userId, session.user.id));
+    }
+
+    // 支持多个状态（逗号分隔）
     if (status) {
-      conditions.push(eq(reimbursements.status, status as any));
+      const statuses = status.split(',').map(s => s.trim());
+      if (statuses.length === 1) {
+        conditions.push(eq(reimbursements.status, statuses[0] as any));
+      } else {
+        // 多个状态用 inArray
+        const { inArray } = await import('drizzle-orm');
+        conditions.push(inArray(reimbursements.status, statuses as any[]));
+      }
     }
 
     // 查询报销列表

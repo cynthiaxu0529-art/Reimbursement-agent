@@ -49,15 +49,15 @@ export default function ApprovalsPage() {
   useEffect(() => {
     const fetchApprovals = async () => {
       try {
-        // 获取所有待审批的报销
-        const pendingResponse = await fetch('/api/reimbursements?status=pending');
+        // 获取所有待审批的报销（以审批人身份）
+        const pendingResponse = await fetch('/api/reimbursements?status=pending&role=approver');
         const pendingResult = await pendingResponse.json();
         if (pendingResult.success) {
           setPendingApprovals(pendingResult.data || []);
         }
 
         // 获取审批历史（已批准或已拒绝的）
-        const historyResponse = await fetch('/api/reimbursements?status=approved,rejected');
+        const historyResponse = await fetch('/api/reimbursements?status=approved,rejected&role=approver');
         const historyResult = await historyResponse.json();
         if (historyResult.success) {
           setApprovalHistory(historyResult.data || []);
