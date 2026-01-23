@@ -6,10 +6,24 @@ import { eq } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
+// 解析邀请 token
+function parseInviteToken(token: string): { email: string; tenantId: string; roles: string[]; department: string } | null {
+  try {
+    const decoded = Buffer.from(token, 'base64').toString('utf-8');
+    const data = JSON.parse(decoded);
+    if (data.tenantId && data.email) {
+      return data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { email, password, name, companyName } = body;
+    const { email, password, name, companyName, inviteToken } = body;
 
     // 验证必填字段
     if (!email || !password || !name) {
@@ -34,9 +48,39 @@ export async function POST(request: NextRequest) {
     // 加密密码
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // 创建租户（如果提供了公司名）
+    // 处理邀请 token
     let tenantId: string | null = null;
-    if (companyName) {
+    type UserRole = 'employee' | 'manager' | 'finance' | 'admin' | 'super_admin';
+    let userRole: UserRole = 'employee';
+
+    // 映射邀请角色到数据库角色
+    const roleMapping: Record<string, UserRole> = {
+      employee: 'employee',
+      approver: 'manager',  // 审批人 -> manager
+      manager: 'manager',
+      finance: 'finance',
+      admin: 'admin',
+      super_admin: 'super_admin',
+    };
+
+    if (inviteToken) {
+      // 通过邀请链接注册
+      const inviteData = parseInviteToken(inviteToken);
+      if (inviteData) {
+        // 验证邮箱匹配
+        if (inviteData.email.toLowerCase() !== email.toLowerCase()) {
+          return NextResponse.json(
+            { error: '邮箱与邀请不匹配' },
+            { status: 400 }
+          );
+        }
+        tenantId = inviteData.tenantId;
+        // 使用邀请中的角色（取第一个作为主要角色），并映射到数据库角色
+        const inviteRole = inviteData.roles?.[0] || 'employee';
+        userRole = roleMapping[inviteRole] || 'employee';
+      }
+    } else if (companyName) {
+      // 创建新公司
       const slug = companyName
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
@@ -52,6 +96,7 @@ export async function POST(request: NextRequest) {
         .returning();
 
       tenantId = tenant.id;
+      userRole = 'admin' as UserRole; // 创建公司的用户默认为管理员
     }
 
     // 创建用户
@@ -62,7 +107,7 @@ export async function POST(request: NextRequest) {
         name,
         passwordHash,
         tenantId,
-        role: tenantId ? 'admin' : 'employee', // 创建公司的用户默认为管理员
+        role: userRole,
       })
       .returning({
         id: users.id,

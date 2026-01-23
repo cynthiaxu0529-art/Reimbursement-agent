@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { sendEmail, checkEmailConfig } from '@/lib/email';
+import { db } from '@/lib/db';
+import { users } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +13,15 @@ export async function POST(request: NextRequest) {
     const session = await auth();
     if (!session?.user) {
       return NextResponse.json({ success: false, error: '未授权' }, { status: 401 });
+    }
+
+    // Get inviter's tenant ID
+    const inviter = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+    });
+
+    if (!inviter?.tenantId) {
+      return NextResponse.json({ success: false, error: '您还未加入公司，无法邀请成员' }, { status: 400 });
     }
 
     // Check email configuration
@@ -28,8 +40,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '邮箱地址必填' }, { status: 400 });
     }
 
-    // Generate invite token (in production, save this to database)
-    const inviteToken = Buffer.from(`${email}-${Date.now()}`).toString('base64');
+    // Generate invite token with tenant ID and roles
+    const inviteData = {
+      email,
+      tenantId: inviter.tenantId,
+      roles: roles || ['employee'],
+      department: department || '',
+      timestamp: Date.now(),
+    };
+    const inviteToken = Buffer.from(JSON.stringify(inviteData)).toString('base64');
 
     // Build invite URL
     const baseUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
