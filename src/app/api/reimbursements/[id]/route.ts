@@ -18,6 +18,12 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+
+    // 验证 ID 格式
+    if (!id || typeof id !== 'string' || id.length < 10) {
+      return NextResponse.json({ error: '无效的报销单ID' }, { status: 400 });
+    }
+
     const session = await auth();
     if (!session?.user) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -28,8 +34,6 @@ export async function GET(
       where: eq(reimbursements.id, id),
       with: {
         items: true,
-        trip: true,
-        approvals: true,
       },
     });
 
@@ -38,7 +42,10 @@ export async function GET(
     }
 
     // 检查权限：必须是自己的报销或同一租户（审批人）
-    if (reimbursement.userId !== session.user.id && reimbursement.tenantId !== session.user.tenantId) {
+    const isOwner = reimbursement.userId === session.user.id;
+    const isSameTenant = session.user.tenantId && reimbursement.tenantId === session.user.tenantId;
+
+    if (!isOwner && !isSameTenant) {
       return NextResponse.json({ error: '无权查看此报销单' }, { status: 403 });
     }
 
