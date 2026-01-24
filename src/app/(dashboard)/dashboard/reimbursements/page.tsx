@@ -60,11 +60,8 @@ export default function ReimbursementsPage() {
   const [search, setSearch] = useState('');
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detailData, setDetailData] = useState<Reimbursement | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // 刷新列表
   const refreshList = async () => {
@@ -83,84 +80,40 @@ export default function ReimbursementsPage() {
     }
   };
 
-  // 从 API 获取报销列表
   useEffect(() => {
     const fetchReimbursements = async () => {
       setLoading(true);
       await refreshList();
       setLoading(false);
     };
-
     fetchReimbursements();
   }, [filter]);
 
-  // 获取详情 - 优先使用列表数据
-  useEffect(() => {
-    if (!selectedId) {
-      setDetailData(null);
-      return;
-    }
-
-    // 先从列表中获取基本数据
-    const listItem = reimbursements.find(r => r.id === selectedId);
-    if (listItem) {
-      setDetailData(listItem);
-    }
-
-    // 然后从 API 获取完整数据
-    const fetchDetail = async () => {
-      setDetailLoading(true);
-      try {
-        const response = await fetch(`/api/reimbursements/${selectedId}`);
-        const result = await response.json();
-        if (result.success && result.data) {
-          setDetailData(result.data);
-        }
-        // 如果 API 失败但列表有数据，保持列表数据
-      } catch (error) {
-        console.error('Failed to fetch detail:', error);
-        // 保持列表数据作为 fallback
-      } finally {
-        setDetailLoading(false);
-      }
-    };
-
-    fetchDetail();
-  }, [selectedId, reimbursements]);
-
   // 删除草稿
-  const handleDelete = async () => {
-    if (!selectedId || !detailData || detailData.status !== 'draft') return;
-    if (!confirm('确定要删除这个草稿吗？')) return;
-
-    setActionLoading(true);
+  const handleDelete = async (id: string) => {
+    if (!confirm('确定要删除这个报销单吗？')) return;
+    setActionLoading(id);
     try {
-      const response = await fetch(`/api/reimbursements/${selectedId}`, {
-        method: 'DELETE',
-      });
+      const response = await fetch(`/api/reimbursements/${id}`, { method: 'DELETE' });
       const result = await response.json();
       if (result.success) {
-        setReimbursements(prev => prev.filter(r => r.id !== selectedId));
-        setSelectedId(null);
-        setDetailData(null);
+        setReimbursements(prev => prev.filter(r => r.id !== id));
+        if (expandedId === id) setExpandedId(null);
       } else {
         alert(result.error || '删除失败');
       }
     } catch (error) {
-      console.error('Delete error:', error);
       alert('删除失败');
     } finally {
-      setActionLoading(false);
+      setActionLoading(null);
     }
   };
 
   // 提交审批
-  const handleSubmit = async () => {
-    if (!selectedId || !detailData || detailData.status !== 'draft') return;
-
-    setActionLoading(true);
+  const handleSubmit = async (id: string) => {
+    setActionLoading(id);
     try {
-      const response = await fetch(`/api/reimbursements/${selectedId}`, {
+      const response = await fetch(`/api/reimbursements/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'pending' }),
@@ -168,26 +121,22 @@ export default function ReimbursementsPage() {
       const result = await response.json();
       if (result.success) {
         await refreshList();
-        setDetailData(prev => prev ? { ...prev, status: 'pending' } : null);
       } else {
         alert(result.error || '提交失败');
       }
     } catch (error) {
-      console.error('Submit error:', error);
       alert('提交失败');
     } finally {
-      setActionLoading(false);
+      setActionLoading(null);
     }
   };
 
   // 撤回申请
-  const handleWithdraw = async () => {
-    if (!selectedId || !detailData || detailData.status !== 'pending') return;
-    if (!confirm('确定要撤回这个报销申请吗？撤回后将变为草稿状态。')) return;
-
-    setActionLoading(true);
+  const handleWithdraw = async (id: string) => {
+    if (!confirm('确定要撤回这个报销申请吗？')) return;
+    setActionLoading(id);
     try {
-      const response = await fetch(`/api/reimbursements/${selectedId}`, {
+      const response = await fetch(`/api/reimbursements/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'draft' }),
@@ -195,24 +144,20 @@ export default function ReimbursementsPage() {
       const result = await response.json();
       if (result.success) {
         await refreshList();
-        setDetailData(prev => prev ? { ...prev, status: 'draft' } : null);
       } else {
         alert(result.error || '撤回失败');
       }
     } catch (error) {
-      console.error('Withdraw error:', error);
       alert('撤回失败');
     } finally {
-      setActionLoading(false);
+      setActionLoading(null);
     }
   };
 
-  // 过滤搜索
   const filteredReimbursements = reimbursements.filter(r =>
     !search || r.title.toLowerCase().includes(search.toLowerCase())
   );
 
-  // 统计
   const stats = {
     total: reimbursements.length,
     pending: reimbursements.filter(r => r.status === 'pending' || r.status === 'under_review').length,
@@ -221,292 +166,292 @@ export default function ReimbursementsPage() {
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+    return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
   };
 
-  const formatFullDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+  const getExchangeRate = (item: Reimbursement) => {
+    if (item.totalAmountInBaseCurrency && item.totalAmount > 0) {
+      return item.totalAmountInBaseCurrency / item.totalAmount;
+    }
+    return 0.14; // 默认汇率
   };
 
   return (
-    <div style={{ display: 'flex', gap: '24px', height: 'calc(100vh - 140px)' }}>
-      {/* Main Content */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: '20px'
-        }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', marginBottom: '4px' }}>
-              报销申请
-            </h1>
-            <p style={{ color: '#6b7280', fontSize: '14px' }}>管理和跟踪你的报销申请</p>
-          </div>
-          <Link
-            href="/dashboard/reimbursements/new"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '10px 20px',
-              background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-              color: 'white',
-              borderRadius: '8px',
-              textDecoration: 'none',
-              fontWeight: 500,
-              fontSize: '14px'
-            }}
-          >
-            <span>+</span> 新建报销
-          </Link>
+    <div>
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: '20px'
+      }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', marginBottom: '4px' }}>
+            报销申请
+          </h1>
+          <p style={{ color: '#6b7280', fontSize: '14px' }}>管理和跟踪你的报销申请</p>
         </div>
+        <Link
+          href="/dashboard/reimbursements/new"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '10px 20px',
+            background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+            color: 'white',
+            borderRadius: '8px',
+            textDecoration: 'none',
+            fontWeight: 500,
+            fontSize: '14px'
+          }}
+        >
+          <span>+</span> 新建报销
+        </Link>
+      </div>
 
-        {/* Stats Row */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '16px',
-          marginBottom: '20px',
-        }}>
-          <button
-            onClick={() => setFilter('all')}
-            style={{
-              backgroundColor: filter === 'all' ? '#eff6ff' : 'white',
-              borderRadius: '12px',
-              padding: '16px',
-              border: filter === 'all' ? '2px solid #2563eb' : '1px solid #e5e7eb',
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-          >
-            <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>全部报销</p>
-            <p style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>{stats.total}</p>
-          </button>
-          <button
-            onClick={() => setFilter('pending')}
-            style={{
-              backgroundColor: filter === 'pending' ? '#fef3c7' : 'white',
-              borderRadius: '12px',
-              padding: '16px',
-              border: filter === 'pending' ? '2px solid #d97706' : '1px solid #e5e7eb',
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-          >
-            <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>待审批</p>
-            <p style={{ fontSize: '24px', fontWeight: 700, color: '#d97706' }}>{stats.pending}</p>
-          </button>
-          <button
-            onClick={() => setFilter('approved')}
-            style={{
-              backgroundColor: filter === 'approved' ? '#dcfce7' : 'white',
-              borderRadius: '12px',
-              padding: '16px',
-              border: filter === 'approved' ? '2px solid #16a34a' : '1px solid #e5e7eb',
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-          >
-            <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>已批准</p>
-            <p style={{ fontSize: '24px', fontWeight: 700, color: '#16a34a' }}>{stats.approved}</p>
-          </button>
-          <div style={{
-            backgroundColor: 'white',
+      {/* Stats Row */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: '16px',
+        marginBottom: '20px',
+      }}>
+        <button
+          onClick={() => setFilter('all')}
+          style={{
+            backgroundColor: filter === 'all' ? '#eff6ff' : 'white',
             borderRadius: '12px',
             padding: '16px',
+            border: filter === 'all' ? '2px solid #2563eb' : '1px solid #e5e7eb',
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
+          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>全部报销</p>
+          <p style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>{stats.total}</p>
+        </button>
+        <button
+          onClick={() => setFilter('pending')}
+          style={{
+            backgroundColor: filter === 'pending' ? '#fef3c7' : 'white',
+            borderRadius: '12px',
+            padding: '16px',
+            border: filter === 'pending' ? '2px solid #d97706' : '1px solid #e5e7eb',
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
+          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>待审批</p>
+          <p style={{ fontSize: '24px', fontWeight: 700, color: '#d97706' }}>{stats.pending}</p>
+        </button>
+        <button
+          onClick={() => setFilter('approved')}
+          style={{
+            backgroundColor: filter === 'approved' ? '#dcfce7' : 'white',
+            borderRadius: '12px',
+            padding: '16px',
+            border: filter === 'approved' ? '2px solid #16a34a' : '1px solid #e5e7eb',
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
+          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>已批准</p>
+          <p style={{ fontSize: '24px', fontWeight: 700, color: '#16a34a' }}>{stats.approved}</p>
+        </button>
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '12px',
+          padding: '16px',
+          border: '1px solid #e5e7eb',
+        }}>
+          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>报销总额</p>
+          <p style={{ fontSize: '24px', fontWeight: 700, color: '#2563eb' }}>
+            ¥{stats.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+          </p>
+        </div>
+      </div>
+
+      {/* Search Bar */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '12px',
+        padding: '12px 16px',
+        border: '1px solid #e5e7eb',
+        marginBottom: '16px',
+      }}>
+        <input
+          type="text"
+          placeholder="搜索报销..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            width: '100%',
+            padding: '8px 12px',
             border: '1px solid #e5e7eb',
-          }}>
-            <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>报销总额</p>
-            <p style={{ fontSize: '24px', fontWeight: 700, color: '#2563eb' }}>
-              ¥{stats.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-            </p>
-          </div>
-        </div>
+            borderRadius: '8px',
+            fontSize: '14px',
+            outline: 'none',
+            boxSizing: 'border-box',
+          }}
+        />
+      </div>
 
-        {/* Search Bar */}
+      {/* Table */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '12px',
+        border: '1px solid #e5e7eb',
+        overflow: 'hidden',
+      }}>
+        {/* Table Header */}
         <div style={{
-          backgroundColor: 'white',
-          borderRadius: '12px',
+          display: 'grid',
+          gridTemplateColumns: '100px 100px 1.5fr 120px 80px 100px 90px 140px',
+          gap: '12px',
           padding: '12px 16px',
-          border: '1px solid #e5e7eb',
-          marginBottom: '16px',
+          backgroundColor: '#f9fafb',
+          borderBottom: '1px solid #e5e7eb',
+          fontSize: '12px',
+          fontWeight: 600,
+          color: '#6b7280',
         }}>
-          <input
-            type="text"
-            placeholder="搜索报销..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              border: '1px solid #e5e7eb',
-              borderRadius: '8px',
-              fontSize: '14px',
-              outline: 'none',
-              boxSizing: 'border-box',
-            }}
-          />
+          <div>报销单号</div>
+          <div>提交日期</div>
+          <div>报销说明</div>
+          <div style={{ textAlign: 'right' }}>原币金额</div>
+          <div style={{ textAlign: 'right' }}>汇率</div>
+          <div style={{ textAlign: 'right' }}>美元金额</div>
+          <div style={{ textAlign: 'center' }}>状态</div>
+          <div style={{ textAlign: 'center' }}>操作</div>
         </div>
 
-        {/* Table */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden',
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-        }}>
-          {/* Table Header */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
-            gap: '12px',
-            padding: '12px 16px',
-            backgroundColor: '#f9fafb',
-            borderBottom: '1px solid #e5e7eb',
-            fontSize: '12px',
-            fontWeight: 600,
-            color: '#6b7280',
-            textTransform: 'uppercase',
-          }}>
-            <div>报销说明</div>
-            <div>类别</div>
-            <div>提交日期</div>
-            <div>状态</div>
-            <div style={{ textAlign: 'right' }}>金额</div>
-          </div>
+        {/* Table Body */}
+        <div>
+          {loading && (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+              加载中...
+            </div>
+          )}
 
-          {/* Table Body */}
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            {loading && (
-              <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
-                加载中...
+          {!loading && filteredReimbursements.length === 0 && (
+            <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+              <div style={{
+                width: '64px',
+                height: '64px',
+                backgroundColor: '#f3f4f6',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 16px',
+                fontSize: '24px'
+              }}>
+                📄
               </div>
-            )}
+              <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+                {search ? '未找到匹配的报销记录' : '还没有报销记录'}
+              </h3>
+              <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: '20px' }}>
+                {search ? '请尝试其他搜索关键词' : '创建你的第一笔报销'}
+              </p>
+              {!search && (
+                <Link
+                  href="/dashboard/reimbursements/new"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '10px 20px',
+                    background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                    color: 'white',
+                    borderRadius: '8px',
+                    textDecoration: 'none',
+                    fontSize: '14px',
+                    fontWeight: 500
+                  }}
+                >
+                  + 新建报销
+                </Link>
+              )}
+            </div>
+          )}
 
-            {!loading && filteredReimbursements.length === 0 && (
-              <div style={{ padding: '60px 20px', textAlign: 'center' }}>
-                <div style={{
-                  width: '64px',
-                  height: '64px',
-                  backgroundColor: '#f3f4f6',
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  margin: '0 auto 16px',
-                  fontSize: '24px'
-                }}>
-                  📄
-                </div>
-                <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
-                  {search ? '未找到匹配的报销记录' : '还没有报销记录'}
-                </h3>
-                <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: '20px' }}>
-                  {search ? '请尝试其他搜索关键词' : '创建你的第一笔报销'}
-                </p>
-                {!search && (
-                  <Link
-                    href="/dashboard/reimbursements/new"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '10px 20px',
-                      background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                      color: 'white',
-                      borderRadius: '8px',
-                      textDecoration: 'none',
-                      fontSize: '14px',
-                      fontWeight: 500
-                    }}
-                  >
-                    + 新建报销
-                  </Link>
-                )}
-              </div>
-            )}
+          {!loading && filteredReimbursements.map((item) => {
+            const statusInfo = statusLabels[item.status] || statusLabels.draft;
+            const exchangeRate = getExchangeRate(item);
+            const usdAmount = item.totalAmountInBaseCurrency || item.totalAmount * exchangeRate;
+            const isExpanded = expandedId === item.id;
+            const isLoading = actionLoading === item.id;
 
-            {!loading && filteredReimbursements.map((item) => {
-              const statusInfo = statusLabels[item.status] || statusLabels.draft;
-              const mainCategory = item.items?.[0]?.category || 'other';
-              const categoryInfo = categoryLabels[mainCategory] || categoryLabels.other;
-              const isSelected = selectedId === item.id;
-
-              return (
+            return (
+              <div key={item.id}>
+                {/* Main Row */}
                 <div
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
+                    gridTemplateColumns: '100px 100px 1.5fr 120px 80px 100px 90px 140px',
                     gap: '12px',
                     padding: '14px 16px',
                     borderBottom: '1px solid #e5e7eb',
-                    cursor: 'pointer',
-                    backgroundColor: isSelected ? '#eff6ff' : 'white',
-                    transition: 'background-color 0.15s',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSelected) e.currentTarget.style.backgroundColor = '#f9fafb';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isSelected) e.currentTarget.style.backgroundColor = 'white';
+                    backgroundColor: isExpanded ? '#f8fafc' : 'white',
+                    alignItems: 'center',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                      width: '36px',
-                      height: '36px',
-                      backgroundColor: isSelected ? '#dbeafe' : '#f3f4f6',
-                      borderRadius: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '16px',
-                    }}>
-                      {categoryInfo.icon}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <p style={{
-                        fontSize: '14px',
-                        fontWeight: 500,
-                        color: '#111827',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        {item.title}
-                      </p>
-                      <p style={{ fontSize: '12px', color: '#6b7280' }}>
-                        {item.items?.length || 0} 项费用
-                      </p>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{
+                  {/* 报销单号 */}
+                  <div
+                    style={{
                       fontSize: '13px',
-                      color: '#374151',
-                      padding: '4px 8px',
-                      backgroundColor: '#f3f4f6',
-                      borderRadius: '4px',
-                    }}>
-                      {categoryInfo.label}
-                    </span>
+                      color: '#2563eb',
+                      fontWeight: 500,
+                      cursor: item.items?.length > 0 ? 'pointer' : 'default',
+                    }}
+                    onClick={() => item.items?.length > 0 && setExpandedId(isExpanded ? null : item.id)}
+                  >
+                    #{item.id.slice(0, 8).toUpperCase()}
+                    {item.items?.length > 1 && (
+                      <span style={{ marginLeft: '4px', fontSize: '10px' }}>
+                        {isExpanded ? '▼' : '▶'}
+                      </span>
+                    )}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', fontSize: '13px', color: '#6b7280' }}>
+
+                  {/* 提交日期 */}
+                  <div style={{ fontSize: '13px', color: '#6b7280' }}>
                     {formatDate(item.submittedAt || item.createdAt)}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
+
+                  {/* 报销说明 */}
+                  <div>
+                    <p style={{ fontSize: '14px', fontWeight: 500, color: '#111827', marginBottom: '2px' }}>
+                      {item.title}
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#6b7280' }}>
+                      {item.items?.length || 0} 项费用
+                    </p>
+                  </div>
+
+                  {/* 原币金额 */}
+                  <div style={{ textAlign: 'right', fontSize: '13px', fontWeight: 600, color: '#111827' }}>
+                    ¥{item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                  </div>
+
+                  {/* 汇率 */}
+                  <div style={{ textAlign: 'right', fontSize: '12px', color: '#6b7280' }}>
+                    {exchangeRate.toFixed(4)}
+                  </div>
+
+                  {/* 美元金额 */}
+                  <div style={{ textAlign: 'right', fontSize: '13px', fontWeight: 600, color: '#0369a1' }}>
+                    ${usdAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </div>
+
+                  {/* 状态 */}
+                  <div style={{ textAlign: 'center' }}>
                     <span style={{
-                      fontSize: '12px',
+                      fontSize: '11px',
                       fontWeight: 500,
-                      padding: '4px 10px',
+                      padding: '4px 8px',
                       borderRadius: '9999px',
                       backgroundColor: statusInfo.bgColor,
                       color: statusInfo.color,
@@ -514,532 +459,205 @@ export default function ReimbursementsPage() {
                       {statusInfo.label}
                     </span>
                   </div>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'flex-end',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#111827',
-                  }}>
-                    ¥{item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
 
-      {/* Detail Panel */}
-      {selectedId && (
-        <div style={{
-          width: '480px',
-          flexShrink: 0,
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-        }}>
-          {/* Panel Header */}
-          <div style={{
-            padding: '16px 20px',
-            borderBottom: '1px solid #e5e7eb',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}>
-            <div>
-              <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>Application Details</h3>
-              <p style={{ fontSize: '12px', color: '#6b7280' }}>ID: #{detailData?.id?.slice(0, 8).toUpperCase() || selectedId.slice(0, 8).toUpperCase()}</p>
-            </div>
-            <button
-              onClick={() => setSelectedId(null)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#6b7280',
-                cursor: 'pointer',
-                fontSize: '20px',
-                padding: '4px',
-              }}
-            >
-              ×
-            </button>
-          </div>
-
-          {/* Panel Content */}
-          <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
-            {detailLoading && !detailData && (
-              <div style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>
-                加载中...
-              </div>
-            )}
-
-            {!detailLoading && !detailData && (
-              <div style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>
-                无法加载详情
-              </div>
-            )}
-
-            {detailData && (
-              <>
-                {/* Title & Status Card */}
-                <div style={{
-                  backgroundColor: '#f9fafb',
-                  borderRadius: '8px',
-                  padding: '16px',
-                  marginBottom: '16px',
-                  borderLeft: '4px solid',
-                  borderLeftColor: statusLabels[detailData.status]?.color || '#6b7280',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', flex: 1 }}>
-                      {detailData.title}
-                    </h2>
-                    <span style={{
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      padding: '4px 12px',
-                      borderRadius: '4px',
-                      backgroundColor: statusLabels[detailData.status]?.bgColor || '#f3f4f6',
-                      color: statusLabels[detailData.status]?.color || '#6b7280',
-                      textTransform: 'uppercase',
-                      flexShrink: 0,
-                      marginLeft: '12px',
-                    }}>
-                      {statusLabels[detailData.status]?.label || detailData.status}
-                    </span>
-                  </div>
-                  <p style={{ fontSize: '12px', color: '#6b7280' }}>
-                    {detailData.status === 'draft' ? '创建于' : '提交于'} {formatFullDate(detailData.submittedAt || detailData.createdAt)}
-                  </p>
-                </div>
-
-                {/* Divider */}
-                <div style={{ height: '1px', backgroundColor: '#e5e7eb', margin: '16px 0' }} />
-
-                {/* Amounts Side by Side */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '24px',
-                  marginBottom: '20px',
-                }}>
-                  <div>
-                    <p style={{ fontSize: '11px', fontWeight: 500, color: '#6b7280', textTransform: 'uppercase', marginBottom: '4px' }}>
-                      TOTAL CLAIMED
-                    </p>
-                    <p style={{ fontSize: '20px', fontWeight: 700, color: '#111827' }}>
-                      ¥{detailData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                  <div>
-                    <p style={{ fontSize: '11px', fontWeight: 500, color: '#6b7280', textTransform: 'uppercase', marginBottom: '4px' }}>
-                      CONVERTED (USD)
-                    </p>
-                    <p style={{ fontSize: '20px', fontWeight: 700, color: '#0369a1' }}>
-                      ${(detailData.totalAmountInBaseCurrency || detailData.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Line Items Table */}
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                    <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>
-                      Line Items
-                    </h4>
-                    <span style={{
-                      fontSize: '11px',
-                      backgroundColor: '#e5e7eb',
-                      color: '#374151',
-                      padding: '2px 8px',
-                      borderRadius: '10px',
-                      fontWeight: 500,
-                    }}>
-                      {detailData.items?.length || 0}
-                    </span>
-                  </div>
-
-                  {detailData.items && detailData.items.length > 0 ? (
-                    <div style={{
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                      overflow: 'hidden',
-                    }}>
-                      {/* Table Header */}
-                      <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1.8fr 1fr 0.8fr 1fr',
-                        gap: '8px',
-                        padding: '10px 12px',
-                        backgroundColor: '#f9fafb',
-                        borderBottom: '1px solid #e5e7eb',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        color: '#6b7280',
-                        textTransform: 'uppercase',
-                      }}>
-                        <div>ITEM DETAILS</div>
-                        <div style={{ textAlign: 'right' }}>RECEIPT AMT</div>
-                        <div style={{ textAlign: 'right' }}>EXCH. RATE</div>
-                        <div style={{ textAlign: 'right' }}>CONVERTED</div>
-                      </div>
-
-                      {/* Table Rows */}
-                      {detailData.items.map((item, index) => {
-                        const catInfo = categoryLabels[item.category] || categoryLabels.other;
-                        const exchangeRate = item.currency === 'USD' ? 1 : (item.amountInBaseCurrency && item.amount > 0 ? item.amountInBaseCurrency / item.amount : 0.14);
-                        const convertedAmount = item.amountInBaseCurrency || item.amount * exchangeRate;
-
-                        return (
-                          <div
-                            key={item.id}
-                            style={{
-                              display: 'grid',
-                              gridTemplateColumns: '1.8fr 1fr 0.8fr 1fr',
-                              gap: '8px',
-                              padding: '12px',
-                              borderBottom: index < (detailData.items?.length || 0) - 1 ? '1px solid #e5e7eb' : 'none',
-                              borderLeft: '3px solid',
-                              borderLeftColor: index % 2 === 0 ? '#f59e0b' : '#10b981',
-                              alignItems: 'flex-start',
-                            }}
-                          >
-                            {/* Item Details */}
-                            <div>
-                              <p style={{
-                                fontSize: '13px',
-                                fontWeight: 600,
-                                color: '#111827',
-                                marginBottom: '2px',
-                              }}>
-                                {item.description || catInfo.label}
-                              </p>
-                              <p style={{ fontSize: '11px', color: '#6b7280' }}>
-                                {catInfo.label} {item.vendor ? `· ${item.vendor}` : ''}
-                              </p>
-                              {item.receiptUrl && (
-                                <p
-                                  style={{
-                                    fontSize: '11px',
-                                    color: '#2563eb',
-                                    marginTop: '4px',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                  }}
-                                  onClick={() => setPreviewImage(item.receiptUrl || null)}
-                                >
-                                  📎 receipt.jpg
-                                </p>
-                              )}
-                            </div>
-
-                            {/* Receipt Amount */}
-                            <div style={{ textAlign: 'right' }}>
-                              <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>
-                                {item.currency === 'USD' ? '$' : '¥'}{item.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                              </p>
-                              <p style={{ fontSize: '10px', color: '#6b7280' }}>
-                                {item.currency}
-                              </p>
-                            </div>
-
-                            {/* Exchange Rate */}
-                            <div style={{ textAlign: 'right' }}>
-                              <p style={{ fontSize: '12px', color: '#6b7280' }}>
-                                {exchangeRate.toFixed(4)}
-                              </p>
-                            </div>
-
-                            {/* Converted Amount */}
-                            <div style={{ textAlign: 'right' }}>
-                              <p style={{ fontSize: '13px', fontWeight: 600, color: '#0369a1' }}>
-                                ${convertedAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p style={{ fontSize: '13px', color: '#6b7280', textAlign: 'center', padding: '20px' }}>
-                      暂无明细
-                    </p>
-                  )}
-                </div>
-
-                {/* Reject Reason */}
-                {detailData.status === 'rejected' && detailData.rejectReason && (
-                  <div style={{
-                    backgroundColor: '#fee2e2',
-                    borderRadius: '8px',
-                    padding: '12px',
-                    marginBottom: '20px',
-                  }}>
-                    <p style={{ fontSize: '12px', fontWeight: 500, color: '#dc2626', marginBottom: '4px' }}>
-                      拒绝原因
-                    </p>
-                    <p style={{ fontSize: '13px', color: '#991b1b' }}>
-                      {detailData.rejectReason}
-                    </p>
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {/* Draft actions */}
-                  {detailData.status === 'draft' && (
-                    <>
-                      <div style={{ display: 'flex', gap: '12px' }}>
+                  {/* 操作 */}
+                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                    {item.status === 'draft' && (
+                      <>
                         <Link
-                          href={`/dashboard/reimbursements/${detailData.id}/edit`}
+                          href={`/dashboard/reimbursements/${item.id}/edit`}
                           style={{
-                            flex: 1,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: '10px 16px',
-                            backgroundColor: 'white',
+                            padding: '4px 8px',
+                            fontSize: '11px',
                             color: '#2563eb',
-                            border: '1px solid #2563eb',
-                            borderRadius: '8px',
+                            backgroundColor: '#eff6ff',
+                            border: 'none',
+                            borderRadius: '4px',
                             textDecoration: 'none',
-                            fontSize: '14px',
-                            fontWeight: 500,
                           }}
                         >
                           编辑
                         </Link>
                         <button
-                          onClick={handleSubmit}
-                          disabled={actionLoading}
+                          onClick={() => handleSubmit(item.id)}
+                          disabled={isLoading}
                           style={{
-                            flex: 1,
-                            padding: '10px 16px',
-                            background: actionLoading ? '#9ca3af' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                            padding: '4px 8px',
+                            fontSize: '11px',
                             color: 'white',
+                            backgroundColor: isLoading ? '#9ca3af' : '#2563eb',
                             border: 'none',
-                            borderRadius: '8px',
-                            fontSize: '14px',
-                            fontWeight: 500,
-                            cursor: actionLoading ? 'not-allowed' : 'pointer',
+                            borderRadius: '4px',
+                            cursor: isLoading ? 'not-allowed' : 'pointer',
                           }}
                         >
-                          {actionLoading ? '处理中...' : '提交审批'}
+                          提交
                         </button>
-                      </div>
+                        <button
+                          onClick={() => handleDelete(item.id)}
+                          disabled={isLoading}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: '11px',
+                            color: '#dc2626',
+                            backgroundColor: '#fee2e2',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: isLoading ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          删除
+                        </button>
+                      </>
+                    )}
+                    {item.status === 'pending' && (
                       <button
-                        onClick={handleDelete}
-                        disabled={actionLoading}
+                        onClick={() => handleWithdraw(item.id)}
+                        disabled={isLoading}
                         style={{
-                          width: '100%',
-                          padding: '10px 16px',
-                          backgroundColor: 'white',
-                          color: '#dc2626',
-                          border: '1px solid #dc2626',
-                          borderRadius: '8px',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                          cursor: actionLoading ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        删除草稿
-                      </button>
-                    </>
-                  )}
-
-                  {/* Pending actions */}
-                  {detailData.status === 'pending' && (
-                    <>
-                      <div style={{
-                        padding: '12px',
-                        backgroundColor: '#fef3c7',
-                        borderRadius: '8px',
-                        textAlign: 'center',
-                      }}>
-                        <p style={{ fontSize: '13px', color: '#92400e' }}>
-                          等待审批中...
-                        </p>
-                      </div>
-                      <button
-                        onClick={handleWithdraw}
-                        disabled={actionLoading}
-                        style={{
-                          width: '100%',
-                          padding: '10px 16px',
-                          backgroundColor: 'white',
+                          padding: '4px 8px',
+                          fontSize: '11px',
                           color: '#d97706',
-                          border: '1px solid #d97706',
-                          borderRadius: '8px',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                          cursor: actionLoading ? 'not-allowed' : 'pointer',
+                          backgroundColor: '#fef3c7',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: isLoading ? 'not-allowed' : 'pointer',
                         }}
                       >
-                        {actionLoading ? '处理中...' : '撤回申请'}
+                        撤回
                       </button>
-                    </>
-                  )}
-
-                  {/* Under review */}
-                  {detailData.status === 'under_review' && (
-                    <div style={{
-                      padding: '12px',
-                      backgroundColor: '#dbeafe',
-                      borderRadius: '8px',
-                      textAlign: 'center',
-                    }}>
-                      <p style={{ fontSize: '13px', color: '#1e40af' }}>
-                        审核中，请等待...
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Approved */}
-                  {detailData.status === 'approved' && (
-                    <div style={{
-                      padding: '12px',
-                      backgroundColor: '#dcfce7',
-                      borderRadius: '8px',
-                      textAlign: 'center',
-                    }}>
-                      <p style={{ fontSize: '13px', color: '#166534' }}>
-                        已批准，等待付款
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Rejected - can resubmit */}
-                  {detailData.status === 'rejected' && (
-                    <Link
-                      href={`/dashboard/reimbursements/new`}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '10px 16px',
-                        backgroundColor: 'white',
-                        color: '#2563eb',
-                        border: '1px solid #2563eb',
-                        borderRadius: '8px',
-                        textDecoration: 'none',
-                        fontSize: '14px',
-                        fontWeight: 500,
-                      }}
-                    >
-                      重新提交
-                    </Link>
-                  )}
+                    )}
+                    {(item.status === 'approved' || item.status === 'paid') && (
+                      <span style={{ fontSize: '11px', color: '#6b7280' }}>-</span>
+                    )}
+                    {item.status === 'rejected' && (
+                      <Link
+                        href="/dashboard/reimbursements/new"
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          color: '#2563eb',
+                          backgroundColor: '#eff6ff',
+                          border: 'none',
+                          borderRadius: '4px',
+                          textDecoration: 'none',
+                        }}
+                      >
+                        重新提交
+                      </Link>
+                    )}
+                  </div>
                 </div>
-              </>
-            )}
-          </div>
 
-          {/* Download Button - Fixed at Bottom */}
-          {detailData && (
-            <div style={{
-              padding: '16px 20px',
-              borderTop: '1px solid #e5e7eb',
-            }}>
-              <button
-                onClick={() => {
-                  alert('PDF 导出功能开发中...');
-                }}
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  backgroundColor: 'white',
-                  color: '#374151',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                }}
-              >
-                Download Full Report PDF
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+                {/* Expanded Details */}
+                {isExpanded && item.items && item.items.length > 0 && (
+                  <div style={{
+                    backgroundColor: '#f8fafc',
+                    borderBottom: '1px solid #e5e7eb',
+                    padding: '16px 24px 16px 40px',
+                  }}>
+                    <div style={{
+                      backgroundColor: 'white',
+                      borderRadius: '8px',
+                      border: '1px solid #e5e7eb',
+                      overflow: 'hidden',
+                    }}>
+                      {/* Detail Header */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr',
+                        gap: '8px',
+                        padding: '10px 12px',
+                        backgroundColor: '#f9fafb',
+                        borderBottom: '1px solid #e5e7eb',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        color: '#6b7280',
+                      }}>
+                        <div>供应商</div>
+                        <div>费用描述</div>
+                        <div>类别</div>
+                        <div style={{ textAlign: 'right' }}>原币金额</div>
+                        <div style={{ textAlign: 'right' }}>汇率</div>
+                        <div style={{ textAlign: 'right' }}>美元金额</div>
+                      </div>
 
-      {/* Image Preview Modal */}
-      {previewImage && (
-        <div
-          onClick={() => setPreviewImage(null)}
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.85)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-            cursor: 'zoom-out',
-          }}
-        >
-          <div style={{
-            position: 'relative',
-            maxWidth: '90vw',
-            maxHeight: '90vh',
-          }}>
-            <img
-              src={previewImage}
-              alt="凭证预览"
-              style={{
-                maxWidth: '100%',
-                maxHeight: '90vh',
-                objectFit: 'contain',
-                borderRadius: '8px',
-                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-              }}
-            />
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setPreviewImage(null);
-              }}
-              style={{
-                position: 'absolute',
-                top: '-40px',
-                right: '0',
-                backgroundColor: 'transparent',
-                border: 'none',
-                color: 'white',
-                fontSize: '24px',
-                cursor: 'pointer',
-                padding: '8px',
-              }}
-            >
-              ×
-            </button>
-            <p style={{
-              position: 'absolute',
-              bottom: '-36px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              color: 'rgba(255,255,255,0.7)',
-              fontSize: '13px',
-            }}>
-              点击任意位置关闭
-            </p>
-          </div>
+                      {/* Detail Rows */}
+                      {item.items.map((lineItem, idx) => {
+                        const catInfo = categoryLabels[lineItem.category] || categoryLabels.other;
+                        const itemRate = lineItem.currency === 'USD' ? 1 :
+                          (lineItem.amountInBaseCurrency && lineItem.amount > 0
+                            ? lineItem.amountInBaseCurrency / lineItem.amount
+                            : 0.14);
+                        const itemUsd = lineItem.amountInBaseCurrency || lineItem.amount * itemRate;
+
+                        return (
+                          <div
+                            key={lineItem.id || idx}
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr',
+                              gap: '8px',
+                              padding: '10px 12px',
+                              borderBottom: idx < item.items.length - 1 ? '1px solid #f3f4f6' : 'none',
+                              fontSize: '13px',
+                            }}
+                          >
+                            <div style={{ color: '#374151' }}>
+                              {lineItem.vendor || '-'}
+                            </div>
+                            <div style={{ color: '#111827' }}>
+                              {lineItem.description || catInfo.label}
+                            </div>
+                            <div>
+                              <span style={{
+                                padding: '2px 6px',
+                                backgroundColor: '#f3f4f6',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                color: '#374151',
+                              }}>
+                                {catInfo.icon} {catInfo.label}
+                              </span>
+                            </div>
+                            <div style={{ textAlign: 'right', fontWeight: 500, color: '#111827' }}>
+                              {lineItem.currency === 'USD' ? '$' : '¥'}
+                              {lineItem.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                              <span style={{ fontSize: '10px', color: '#6b7280', marginLeft: '2px' }}>
+                                {lineItem.currency}
+                              </span>
+                            </div>
+                            <div style={{ textAlign: 'right', color: '#6b7280', fontSize: '12px' }}>
+                              {itemRate.toFixed(4)}
+                            </div>
+                            <div style={{ textAlign: 'right', fontWeight: 600, color: '#0369a1' }}>
+                              ${itemUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Reject Reason */}
+                    {item.status === 'rejected' && item.rejectReason && (
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '10px 12px',
+                        backgroundColor: '#fee2e2',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        color: '#991b1b',
+                      }}>
+                        <strong>拒绝原因：</strong>{item.rejectReason}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-      )}
+      </div>
     </div>
   );
 }
