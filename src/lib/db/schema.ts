@@ -193,6 +193,10 @@ export const reimbursements = pgTable('reimbursements', {
 
   submittedAt: timestamp('submitted_at'),
   approvedAt: timestamp('approved_at'),
+  approvedBy: uuid('approved_by'),
+  rejectedAt: timestamp('rejected_at'),
+  rejectedBy: uuid('rejected_by'),
+  rejectReason: text('reject_reason'),
   paidAt: timestamp('paid_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

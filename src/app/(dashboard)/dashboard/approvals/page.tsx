@@ -1,6 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 
 interface ReimbursementItem {
   id: string;
@@ -8,9 +12,22 @@ interface ReimbursementItem {
   description: string;
   amount: number;
   currency: string;
+  amountInBaseCurrency?: number;
   date: string;
   receiptUrl?: string;
   vendor?: string;
+}
+
+// Risk alert interface
+interface RiskAlert {
+  id: string;
+  type: 'over_budget' | 'anomaly' | 'missing_attachment' | 'policy_violation';
+  level: 'high' | 'medium' | 'low';
+  itemId?: string;
+  message: string;
+  standardValue?: number;
+  actualValue?: number;
+  percentage?: number;
 }
 
 interface Reimbursement {
@@ -18,6 +35,8 @@ interface Reimbursement {
   title: string;
   status: string;
   totalAmount: number;
+  totalAmountInBaseCurrency?: number;
+  baseCurrency?: string;
   createdAt: string;
   submittedAt?: string;
   items: ReimbursementItem[];
@@ -25,6 +44,7 @@ interface Reimbursement {
     name: string;
     email: string;
   };
+  riskAlerts?: RiskAlert[];
 }
 
 const categoryLabels: Record<string, { label: string; icon: string }> = {
@@ -40,10 +60,88 @@ const categoryLabels: Record<string, { label: string; icon: string }> = {
   other: { label: '其他', icon: '📦' },
 };
 
-const statusLabels: Record<string, { label: string; color: string; bgColor: string }> = {
-  pending: { label: '待审批', color: '#d97706', bgColor: '#fef3c7' },
-  approved: { label: '已批准', color: '#16a34a', bgColor: '#dcfce7' },
-  rejected: { label: '已拒绝', color: '#dc2626', bgColor: '#fee2e2' },
+const statusConfig: Record<string, { label: string; variant: 'default' | 'warning' | 'info' | 'success' | 'danger' }> = {
+  pending: { label: '待审批', variant: 'warning' },
+  under_review: { label: '审核中', variant: 'info' },
+  approved: { label: '已批准', variant: 'success' },
+  rejected: { label: '已拒绝', variant: 'danger' },
+};
+
+const currencySymbols: Record<string, string> = {
+  CNY: '¥',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  JPY: '¥',
+  HKD: 'HK$',
+  SGD: 'S$',
+  AUD: 'A$',
+  CAD: 'C$',
+  KRW: '₩',
+};
+
+// Risk level config
+const riskLevelConfig: Record<string, { icon: string; label: string; bgClass: string; textClass: string; borderClass: string }> = {
+  high: { icon: '🔴', label: '超标', bgClass: 'bg-red-50', textClass: 'text-red-700', borderClass: 'border-red-500' },
+  medium: { icon: '🟡', label: '异常', bgClass: 'bg-amber-50', textClass: 'text-amber-700', borderClass: 'border-amber-500' },
+  low: { icon: '🟠', label: '提醒', bgClass: 'bg-orange-50', textClass: 'text-orange-700', borderClass: 'border-orange-500' },
+};
+
+// Generate reimbursement number
+const generateReimbursementNumber = (createdAt: string, id: string): string => {
+  const date = new Date(createdAt);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const idSuffix = id.slice(-4).toUpperCase();
+  return `BX${year}${month}${day}-${idSuffix}`;
+};
+
+// Mock risk analysis function (in production, this would be from backend)
+const analyzeRisks = (item: Reimbursement): RiskAlert[] => {
+  const alerts: RiskAlert[] = [];
+
+  // Check each expense item
+  item.items?.forEach((expense) => {
+    // Hotel over budget check (mock standard: 500 CNY/night)
+    if (expense.category === 'hotel' && expense.amount > 500) {
+      alerts.push({
+        id: `risk-${expense.id}-budget`,
+        type: 'over_budget',
+        level: 'high',
+        itemId: expense.id,
+        message: `酒店费用 ¥${expense.amount}/晚 超出标准 ¥500/晚`,
+        standardValue: 500,
+        actualValue: expense.amount,
+        percentage: Math.round(((expense.amount - 500) / 500) * 100),
+      });
+    }
+
+    // Flight anomaly check (mock: if > 2000 CNY)
+    if (expense.category === 'flight' && expense.amount > 2000) {
+      alerts.push({
+        id: `risk-${expense.id}-anomaly`,
+        type: 'anomaly',
+        level: 'medium',
+        itemId: expense.id,
+        message: `机票费用较同期平均高出${Math.round((expense.amount / 1500 - 1) * 100)}%`,
+        actualValue: expense.amount,
+      });
+    }
+
+    // Missing attachment check
+    if (!expense.receiptUrl && expense.amount > 100) {
+      alerts.push({
+        id: `risk-${expense.id}-attachment`,
+        type: 'missing_attachment',
+        level: 'low',
+        itemId: expense.id,
+        message: `${categoryLabels[expense.category]?.label || expense.category}费用缺少发票附件`,
+      });
+    }
+  });
+
+  return alerts;
 };
 
 export default function ApprovalsPage() {
@@ -51,21 +149,39 @@ export default function ApprovalsPage() {
   const [pendingApprovals, setPendingApprovals] = useState<Reimbursement[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<Reimbursement[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detailData, setDetailData] = useState<Reimbursement | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedData, setExpandedData] = useState<Reimbursement | null>(null);
+  const [expandLoading, setExpandLoading] = useState(false);
   const [comment, setComment] = useState('');
-  const [processing, setProcessing] = useState(false);
+  const [processing, setProcessing] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 获取待审批列表
+  // Reminder modal state
+  const [reminderModal, setReminderModal] = useState<{
+    open: boolean;
+    reimbursementId: string;
+    submitterEmail?: string;
+    submitterName?: string;
+    alerts: RiskAlert[];
+  } | null>(null);
+  const [reminderMethod, setReminderMethod] = useState<'email' | 'slack' | 'both'>('email');
+  const [selectedAlerts, setSelectedAlerts] = useState<string[]>([]);
+  const [reminderNote, setReminderNote] = useState('');
+  const [sendingReminder, setSendingReminder] = useState(false);
+
+  // Fetch approvals
   useEffect(() => {
     const fetchApprovals = async () => {
       try {
         const pendingResponse = await fetch('/api/reimbursements?status=pending&role=approver');
         const pendingResult = await pendingResponse.json();
         if (pendingResult.success) {
-          setPendingApprovals(pendingResult.data || []);
+          // Add risk analysis to each item
+          const dataWithRisks = (pendingResult.data || []).map((item: Reimbursement) => ({
+            ...item,
+            riskAlerts: analyzeRisks(item),
+          }));
+          setPendingApprovals(dataWithRisks);
         }
 
         const historyResponse = await fetch('/api/reimbursements?status=approved,rejected&role=approver');
@@ -83,59 +199,58 @@ export default function ApprovalsPage() {
     fetchApprovals();
   }, []);
 
-  // 获取详情 - 优先使用列表数据
+  // Fetch expanded detail
   useEffect(() => {
-    if (!selectedId) {
-      setDetailData(null);
+    if (!expandedId) {
+      setExpandedData(null);
       return;
     }
 
-    // 先从列表中获取基本数据
     const currentList = activeTab === 'pending' ? pendingApprovals : approvalHistory;
-    const listItem = currentList.find(r => r.id === selectedId);
+    const listItem = currentList.find(r => r.id === expandedId);
     if (listItem) {
-      setDetailData(listItem);
+      setExpandedData(listItem);
     }
 
-    // 然后从 API 获取完整数据
     const fetchDetail = async () => {
-      setDetailLoading(true);
+      setExpandLoading(true);
       try {
-        const response = await fetch(`/api/reimbursements/${selectedId}`);
+        const response = await fetch(`/api/reimbursements/${expandedId}`);
         const result = await response.json();
         if (result.success && result.data) {
-          setDetailData(result.data);
+          const dataWithRisks = {
+            ...result.data,
+            riskAlerts: analyzeRisks(result.data),
+          };
+          setExpandedData(dataWithRisks);
         }
-        // 如果 API 失败但列表有数据，保持列表数据
       } catch (error) {
         console.error('Failed to fetch detail:', error);
-        // 保持列表数据作为 fallback
       } finally {
-        setDetailLoading(false);
+        setExpandLoading(false);
       }
     };
 
     fetchDetail();
-  }, [selectedId, pendingApprovals, approvalHistory, activeTab]);
+  }, [expandedId, pendingApprovals, approvalHistory, activeTab]);
 
-  const handleApprove = async () => {
-    if (!selectedId) return;
-    setProcessing(true);
+  const handleApprove = async (id: string) => {
+    setProcessing(id);
     try {
-      const response = await fetch(`/api/reimbursements/${selectedId}`, {
+      const response = await fetch(`/api/reimbursements/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'approved', comment }),
       });
       const result = await response.json();
       if (result.success) {
-        const approved = pendingApprovals.find(a => a.id === selectedId);
+        const approved = pendingApprovals.find(a => a.id === id);
         if (approved) {
           approved.status = 'approved';
           setApprovalHistory([approved, ...approvalHistory]);
         }
-        setPendingApprovals(pendingApprovals.filter(a => a.id !== selectedId));
-        setSelectedId(null);
+        setPendingApprovals(pendingApprovals.filter(a => a.id !== id));
+        setExpandedId(null);
         setComment('');
       } else {
         alert(result.error || '操作失败');
@@ -144,28 +259,31 @@ export default function ApprovalsPage() {
       console.error('Approve error:', error);
       alert('操作失败');
     } finally {
-      setProcessing(false);
+      setProcessing(null);
     }
   };
 
-  const handleReject = async () => {
-    if (!selectedId || !comment) return;
-    setProcessing(true);
+  const handleReject = async (id: string, reason: string) => {
+    if (!reason) {
+      alert('请输入拒绝原因');
+      return;
+    }
+    setProcessing(id);
     try {
-      const response = await fetch(`/api/reimbursements/${selectedId}`, {
+      const response = await fetch(`/api/reimbursements/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'rejected', rejectReason: comment }),
+        body: JSON.stringify({ status: 'rejected', rejectReason: reason }),
       });
       const result = await response.json();
       if (result.success) {
-        const rejected = pendingApprovals.find(a => a.id === selectedId);
+        const rejected = pendingApprovals.find(a => a.id === id);
         if (rejected) {
           rejected.status = 'rejected';
           setApprovalHistory([rejected, ...approvalHistory]);
         }
-        setPendingApprovals(pendingApprovals.filter(a => a.id !== selectedId));
-        setSelectedId(null);
+        setPendingApprovals(pendingApprovals.filter(a => a.id !== id));
+        setExpandedId(null);
         setComment('');
       } else {
         alert(result.error || '操作失败');
@@ -174,616 +292,571 @@ export default function ApprovalsPage() {
       console.error('Reject error:', error);
       alert('操作失败');
     } finally {
-      setProcessing(false);
+      setProcessing(null);
     }
   };
 
+  const openReminderModal = (item: Reimbursement) => {
+    setReminderModal({
+      open: true,
+      reimbursementId: item.id,
+      submitterEmail: item.submitter?.email,
+      submitterName: item.submitter?.name,
+      alerts: item.riskAlerts || [],
+    });
+    setSelectedAlerts(item.riskAlerts?.filter(a => a.type === 'missing_attachment').map(a => a.id) || []);
+    setReminderNote('');
+  };
+
+  const sendReminder = async () => {
+    if (!reminderModal || selectedAlerts.length === 0) return;
+
+    setSendingReminder(true);
+    // Mock sending - in production this would call an API
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    alert(`已通过${reminderMethod === 'both' ? '邮件和Slack' : reminderMethod === 'email' ? '邮件' : 'Slack'}发送补充提醒`);
+    setSendingReminder(false);
+    setReminderModal(null);
+  };
+
+  // Calculate stats
   const stats = {
     pending: pendingApprovals.length,
+    underReview: pendingApprovals.filter(a => a.status === 'under_review').length,
     approved: approvalHistory.filter(a => a.status === 'approved').length,
-    pendingAmount: pendingApprovals.reduce((sum, a) => sum + a.totalAmount, 0),
+    rejected: approvalHistory.filter(a => a.status === 'rejected').length,
+    withRisks: pendingApprovals.filter(a => (a.riskAlerts?.length || 0) > 0).length,
   };
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
   };
 
-  const formatFullDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
-  };
-
   const currentList = activeTab === 'pending' ? pendingApprovals : approvalHistory;
 
+  // Get risk count for item
+  const getRiskCount = (item: Reimbursement) => item.riskAlerts?.length || 0;
+  const getHighestRiskLevel = (item: Reimbursement): 'high' | 'medium' | 'low' | 'none' => {
+    if (!item.riskAlerts || item.riskAlerts.length === 0) return 'none';
+    if (item.riskAlerts.some(r => r.level === 'high')) return 'high';
+    if (item.riskAlerts.some(r => r.level === 'medium')) return 'medium';
+    return 'low';
+  };
+
   return (
-    <div style={{ display: 'flex', gap: '24px', height: 'calc(100vh - 140px)' }}>
-      {/* Main Content */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <div style={{ marginBottom: '20px' }}>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', marginBottom: '4px' }}>
-            审批管理
-          </h1>
-          <p style={{ color: '#6b7280', fontSize: '14px' }}>审核团队成员的报销申请</p>
-        </div>
-
-        {/* Stats */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '16px',
-          marginBottom: '20px'
-        }}>
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            padding: '16px',
-            border: '1px solid #e5e7eb'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>待审批</p>
-                <p style={{ fontSize: '24px', fontWeight: 700, color: '#d97706' }}>{stats.pending}</p>
-              </div>
-              <div style={{
-                width: '44px',
-                height: '44px',
-                backgroundColor: '#fef3c7',
-                borderRadius: '10px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '20px'
-              }}>
-                ⏳
-              </div>
-            </div>
-          </div>
-
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            padding: '16px',
-            border: '1px solid #e5e7eb'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>已审批</p>
-                <p style={{ fontSize: '24px', fontWeight: 700, color: '#16a34a' }}>{stats.approved}</p>
-              </div>
-              <div style={{
-                width: '44px',
-                height: '44px',
-                backgroundColor: '#dcfce7',
-                borderRadius: '10px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '20px'
-              }}>
-                ✅
-              </div>
-            </div>
-          </div>
-
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            padding: '16px',
-            border: '1px solid #e5e7eb'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>待审批金额</p>
-                <p style={{ fontSize: '24px', fontWeight: 700, color: '#2563eb' }}>
-                  ¥{stats.pendingAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                </p>
-              </div>
-              <div style={{
-                width: '44px',
-                height: '44px',
-                backgroundColor: '#dbeafe',
-                borderRadius: '10px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '20px'
-              }}>
-                💰
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div style={{
-          display: 'flex',
-          gap: '8px',
-          marginBottom: '16px',
-        }}>
-          <button
-            onClick={() => { setActiveTab('pending'); setSelectedId(null); }}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: activeTab === 'pending' ? '#7c3aed' : 'white',
-              color: activeTab === 'pending' ? 'white' : '#6b7280',
-              border: activeTab === 'pending' ? 'none' : '1px solid #e5e7eb',
-              borderRadius: '8px',
-              fontWeight: 500,
-              cursor: 'pointer',
-              fontSize: '14px',
-            }}
-          >
-            待审批 ({stats.pending})
-          </button>
-          <button
-            onClick={() => { setActiveTab('history'); setSelectedId(null); }}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: activeTab === 'history' ? '#7c3aed' : 'white',
-              color: activeTab === 'history' ? 'white' : '#6b7280',
-              border: activeTab === 'history' ? 'none' : '1px solid #e5e7eb',
-              borderRadius: '8px',
-              fontWeight: 500,
-              cursor: 'pointer',
-              fontSize: '14px',
-            }}
-          >
-            审批历史
-          </button>
-        </div>
-
-        {/* Table */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden',
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-        }}>
-          {/* Table Header */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
-            gap: '12px',
-            padding: '12px 16px',
-            backgroundColor: '#f9fafb',
-            borderBottom: '1px solid #e5e7eb',
-            fontSize: '12px',
-            fontWeight: 600,
-            color: '#6b7280',
-            textTransform: 'uppercase',
-          }}>
-            <div>报销说明</div>
-            <div>申请人</div>
-            <div>提交日期</div>
-            <div>状态</div>
-            <div style={{ textAlign: 'right' }}>金额</div>
-          </div>
-
-          {/* Table Body */}
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            {loading && (
-              <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
-                加载中...
-              </div>
-            )}
-
-            {!loading && currentList.length === 0 && (
-              <div style={{ padding: '60px 20px', textAlign: 'center' }}>
-                <div style={{
-                  width: '64px',
-                  height: '64px',
-                  backgroundColor: '#f3f4f6',
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  margin: '0 auto 16px',
-                  fontSize: '24px'
-                }}>
-                  {activeTab === 'pending' ? '✅' : '📋'}
-                </div>
-                <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
-                  {activeTab === 'pending' ? '没有待审批的报销' : '暂无审批记录'}
-                </h3>
-                <p style={{ color: '#6b7280', fontSize: '14px' }}>
-                  {activeTab === 'pending'
-                    ? '当团队成员提交报销申请后，将会在这里显示'
-                    : '审批过的报销申请将会显示在这里'}
-                </p>
-              </div>
-            )}
-
-            {!loading && currentList.map((item) => {
-              const mainCategory = item.items?.[0]?.category || 'other';
-              const categoryInfo = categoryLabels[mainCategory] || categoryLabels.other;
-              const statusInfo = statusLabels[item.status] || statusLabels.pending;
-              const isSelected = selectedId === item.id;
-
-              return (
-                <div
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
-                    gap: '12px',
-                    padding: '14px 16px',
-                    borderBottom: '1px solid #e5e7eb',
-                    cursor: 'pointer',
-                    backgroundColor: isSelected ? '#f3e8ff' : 'white',
-                    transition: 'background-color 0.15s',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSelected) e.currentTarget.style.backgroundColor = '#f9fafb';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isSelected) e.currentTarget.style.backgroundColor = 'white';
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                      width: '36px',
-                      height: '36px',
-                      backgroundColor: isSelected ? '#e9d5ff' : '#f3f4f6',
-                      borderRadius: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '16px',
-                    }}>
-                      {categoryInfo.icon}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <p style={{
-                        fontSize: '14px',
-                        fontWeight: 500,
-                        color: '#111827',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        {item.title}
-                      </p>
-                      <p style={{ fontSize: '12px', color: '#6b7280' }}>
-                        {item.items?.length || 0} 项费用
-                      </p>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', fontSize: '13px', color: '#374151' }}>
-                    {item.submitter?.name || '用户'}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', fontSize: '13px', color: '#6b7280' }}>
-                    {formatDate(item.submittedAt || item.createdAt)}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      padding: '4px 10px',
-                      borderRadius: '9999px',
-                      backgroundColor: statusInfo.bgColor,
-                      color: statusInfo.color,
-                    }}>
-                      {statusInfo.label}
-                    </span>
-                  </div>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'flex-end',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#111827',
-                  }}>
-                    ¥{item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+    <div className="flex flex-col h-[calc(100vh-140px)]">
+      {/* Header */}
+      <div className="mb-5">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">报销审批</h1>
+        <p className="text-sm text-gray-500">审核和处理待审批的报销申请</p>
       </div>
 
-      {/* Detail Panel */}
-      {selectedId && (
-        <div style={{
-          width: '400px',
-          flexShrink: 0,
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-        }}>
-          {/* Panel Header */}
-          <div style={{
-            padding: '16px 20px',
-            borderBottom: '1px solid #e5e7eb',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            backgroundColor: '#f9fafb',
-          }}>
-            <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>报销详情</h3>
-            <button
-              onClick={() => setSelectedId(null)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#6b7280',
-                cursor: 'pointer',
-                fontSize: '18px',
-                padding: '4px',
-              }}
-            >
-              ×
-            </button>
-          </div>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-4 gap-4 mb-5">
+        <button
+          onClick={() => setActiveTab('pending')}
+          className={`rounded-xl p-4 text-left transition-all ${
+            activeTab === 'pending'
+              ? 'bg-amber-50 border-2 border-amber-600'
+              : 'bg-white border border-gray-200 hover:border-gray-300'
+          }`}
+        >
+          <p className="text-[13px] text-gray-500 mb-1">待审批</p>
+          <p className="text-2xl font-bold text-amber-600">{stats.pending}</p>
+          {stats.withRisks > 0 && (
+            <p className="text-xs text-red-600 mt-1">⚠️ {stats.withRisks}项异常</p>
+          )}
+        </button>
 
-          {/* Panel Content */}
-          <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
-            {detailLoading && !detailData && (
-              <div style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>
-                加载中...
+        <Card className="p-4">
+          <p className="text-[13px] text-gray-500 mb-1">审核中</p>
+          <p className="text-2xl font-bold text-blue-600">{stats.underReview}</p>
+        </Card>
+
+        <button
+          onClick={() => setActiveTab('history')}
+          className={`rounded-xl p-4 text-left transition-all ${
+            activeTab === 'history'
+              ? 'bg-green-50 border-2 border-green-600'
+              : 'bg-white border border-gray-200 hover:border-gray-300'
+          }`}
+        >
+          <p className="text-[13px] text-gray-500 mb-1">已审批</p>
+          <p className="text-2xl font-bold text-green-600">{stats.approved}</p>
+        </button>
+
+        <Card className="p-4">
+          <p className="text-[13px] text-gray-500 mb-1">已拒绝</p>
+          <p className="text-2xl font-bold text-red-600">{stats.rejected}</p>
+        </Card>
+      </div>
+
+      {/* Table */}
+      <Card className="flex-1 flex flex-col overflow-hidden">
+        {/* Table Header */}
+        <div className="grid grid-cols-[150px_100px_1.2fr_90px_90px_120px_120px_60px] gap-2 px-4 py-3 bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase items-center">
+          <div>报销编号</div>
+          <div>申请人</div>
+          <div>报销说明</div>
+          <div>提交日期</div>
+          <div>状态</div>
+          <div className="text-right">原币金额</div>
+          <div className="text-right">报销金额</div>
+          <div className="text-center">风险</div>
+        </div>
+
+        {/* Table Body */}
+        <div className="flex-1 overflow-auto">
+          {loading && (
+            <div className="p-10 text-center text-gray-500">加载中...</div>
+          )}
+
+          {!loading && currentList.length === 0 && (
+            <div className="py-16 px-5 text-center">
+              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                {activeTab === 'pending' ? '✅' : '📋'}
               </div>
-            )}
+              <h3 className="text-base font-semibold text-gray-900 mb-2">
+                {activeTab === 'pending' ? '没有待审批的报销' : '暂无审批记录'}
+              </h3>
+              <p className="text-sm text-gray-500">
+                {activeTab === 'pending'
+                  ? '当团队成员提交报销申请后，将会在这里显示'
+                  : '审批过的报销申请将会显示在这里'}
+              </p>
+            </div>
+          )}
 
-            {!detailLoading && !detailData && (
-              <div style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>
-                无法加载详情
-              </div>
-            )}
+          {!loading && currentList.map((item) => {
+            const isExpanded = expandedId === item.id;
+            const reimbursementNo = generateReimbursementNumber(item.createdAt, item.id);
+            const riskCount = getRiskCount(item);
+            const riskLevel = getHighestRiskLevel(item);
+            const statusInfo = statusConfig[item.status] || statusConfig.pending;
 
-            {detailData && (
-              <>
-                {/* Title & Status */}
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#111827', flex: 1 }}>
-                      {detailData.title}
-                    </h2>
-                    <span style={{
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      padding: '4px 10px',
-                      borderRadius: '9999px',
-                      backgroundColor: statusLabels[detailData.status]?.bgColor || '#f3f4f6',
-                      color: statusLabels[detailData.status]?.color || '#6b7280',
-                      flexShrink: 0,
-                      marginLeft: '12px',
-                    }}>
-                      {statusLabels[detailData.status]?.label || detailData.status}
+            // Calculate original currency
+            const firstItem = item.items?.[0];
+            const originalCurrency = firstItem?.currency || 'CNY';
+            const originalAmount = item.items?.reduce((sum, i) => sum + i.amount, 0) || item.totalAmount;
+            const currencySymbol = currencySymbols[originalCurrency] || originalCurrency;
+            const hasMultipleCurrencies = item.items?.some(i => i.currency !== originalCurrency);
+
+            return (
+              <div key={item.id}>
+                {/* Main Row */}
+                <div
+                  className={`grid grid-cols-[150px_100px_1.2fr_90px_90px_120px_120px_60px] gap-2 px-4 py-3.5 items-center transition-colors ${
+                    isExpanded ? 'bg-purple-50' : 'hover:bg-gray-50'
+                  } ${!isExpanded ? 'border-b' : ''}`}
+                >
+                  {/* Reimbursement Number - Clickable */}
+                  <button
+                    onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                    className="text-[13px] font-medium text-violet-600 font-mono flex items-center gap-1.5 text-left hover:text-violet-800"
+                  >
+                    <span className={`text-[10px] text-gray-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+                      ▶
                     </span>
+                    {reimbursementNo}
+                  </button>
+
+                  {/* Submitter */}
+                  <div className="text-[13px] text-gray-700">
+                    {item.submitter?.name || '用户'}
                   </div>
-                  <p style={{ fontSize: '13px', color: '#6b7280' }}>
-                    {detailData.submitter?.name || '用户'} · 提交于 {formatFullDate(detailData.submittedAt || detailData.createdAt)}
-                  </p>
-                </div>
 
-                {/* Amount */}
-                <div style={{
-                  backgroundColor: '#f9fafb',
-                  borderRadius: '8px',
-                  padding: '16px',
-                  marginBottom: '20px',
-                }}>
-                  <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>报销金额</p>
-                  <p style={{ fontSize: '28px', fontWeight: 700, color: '#111827' }}>
-                    ¥{detailData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                  </p>
-                </div>
-
-                {/* Line Items */}
-                <div style={{ marginBottom: '20px' }}>
-                  <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '12px' }}>
-                    费用明细 ({detailData.items?.length || 0})
-                  </h4>
-                  <div style={{
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                    overflow: 'hidden',
-                  }}>
-                    {detailData.items?.map((item, index) => {
-                      const catInfo = categoryLabels[item.category] || categoryLabels.other;
-                      return (
-                        <div
-                          key={item.id}
-                          style={{
-                            padding: '12px',
-                            borderBottom: index < (detailData.items?.length || 0) - 1 ? '1px solid #e5e7eb' : 'none',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '12px',
-                          }}
-                        >
-                          <div style={{
-                            width: '32px',
-                            height: '32px',
-                            backgroundColor: '#f3f4f6',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '14px',
-                          }}>
-                            {catInfo.icon}
-                          </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{
-                              fontSize: '13px',
-                              fontWeight: 500,
-                              color: '#111827',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}>
-                              {item.description || catInfo.label}
-                            </p>
-                            <p style={{ fontSize: '11px', color: '#6b7280' }}>
-                              {catInfo.label} · {formatDate(item.date)}
-                            </p>
-                          </div>
-                          <div style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>
-                            ¥{item.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                          </div>
-                        </div>
-                      );
-                    })}
+                  {/* Description */}
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {item.title}
+                    </p>
+                    <p className="text-xs text-gray-500">{item.items?.length || 0} 项费用</p>
                   </div>
-                </div>
 
-                {/* Attachments */}
-                {detailData.items?.some(item => item.receiptUrl) && (
-                  <div style={{ marginBottom: '20px' }}>
-                    <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '12px' }}>
-                      附件凭证
-                    </h4>
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(3, 1fr)',
-                      gap: '8px',
-                    }}>
-                      {detailData.items?.filter(item => item.receiptUrl).map((item, index) => (
-                        <div
-                          key={`receipt-${item.id}-${index}`}
-                          onClick={() => setPreviewImage(item.receiptUrl || null)}
-                          style={{
-                            position: 'relative',
-                            paddingBottom: '100%',
-                            backgroundColor: '#f3f4f6',
-                            borderRadius: '8px',
-                            overflow: 'hidden',
-                            cursor: 'pointer',
-                            border: '1px solid #e5e7eb',
-                          }}
-                        >
-                          <img
-                            src={item.receiptUrl}
-                            alt={`凭证 ${index + 1}`}
-                            style={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              width: '100%',
-                              height: '100%',
-                              objectFit: 'cover',
-                            }}
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                          <div style={{
-                            position: 'absolute',
-                            bottom: '4px',
-                            right: '4px',
-                            backgroundColor: 'rgba(0,0,0,0.6)',
-                            color: 'white',
-                            fontSize: '10px',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                          }}>
-                            点击放大
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                  {/* Submit Date */}
+                  <div className="text-[13px] text-gray-500">
+                    {formatDate(item.submittedAt || item.createdAt)}
                   </div>
-                )}
 
-                {/* Actions for pending */}
-                {detailData.status === 'pending' && (
+                  {/* Status */}
                   <div>
-                    <div style={{ marginBottom: '16px' }}>
-                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '6px', color: '#374151' }}>
-                        审批意见
-                      </label>
-                      <textarea
-                        value={comment}
-                        onChange={(e) => setComment(e.target.value)}
-                        placeholder="输入审批意见（拒绝时必填）..."
-                        style={{
-                          width: '100%',
-                          padding: '10px 12px',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          fontSize: '14px',
-                          minHeight: '80px',
-                          resize: 'vertical',
-                          boxSizing: 'border-box',
-                        }}
+                    <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                  </div>
+
+                  {/* Original Amount */}
+                  <div className="text-right">
+                    <p className="text-[13px] font-semibold text-gray-900">
+                      {currencySymbol}{originalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                    </p>
+                    <p className="text-[10px] text-gray-500">
+                      {hasMultipleCurrencies ? '多币种' : originalCurrency}
+                    </p>
+                  </div>
+
+                  {/* Reimbursement Amount */}
+                  <div className="text-right">
+                    <p className="text-[13px] font-semibold text-green-600">
+                      ¥{item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+
+                  {/* Risk Indicator */}
+                  <div className="text-center">
+                    {riskLevel === 'none' ? (
+                      <span className="text-green-600 text-sm">✓</span>
+                    ) : (
+                      <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-xl text-xs font-medium ${riskLevelConfig[riskLevel].bgClass} ${riskLevelConfig[riskLevel].textClass}`}>
+                        ⚠️ {riskCount}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Expanded Detail Panel */}
+                {isExpanded && (
+                  <div className="bg-purple-50 border-b p-4">
+                    {expandLoading && !expandedData && (
+                      <div className="text-center text-gray-500 py-5">加载中...</div>
+                    )}
+
+                    {expandedData && expandedData.id === item.id && (
+                      <div>
+                        {/* Risk Alerts Section */}
+                        {expandedData.riskAlerts && expandedData.riskAlerts.length > 0 && (
+                          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+                            <div className="flex items-center justify-between mb-2.5">
+                              <h4 className="text-sm font-semibold text-red-600 flex items-center gap-1.5">
+                                ⚠️ 风险提示
+                              </h4>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openReminderModal(expandedData)}
+                                className="text-violet-600 border-violet-600 hover:bg-violet-50"
+                              >
+                                📧 发送补充提醒
+                              </Button>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              {expandedData.riskAlerts.map((alert) => (
+                                <div
+                                  key={alert.id}
+                                  className={`flex items-center gap-2 p-2 bg-white rounded-md border-l-[3px] ${riskLevelConfig[alert.level].borderClass}`}
+                                >
+                                  <span>{riskLevelConfig[alert.level].icon}</span>
+                                  <span className="text-[13px] text-gray-700">
+                                    <strong className={riskLevelConfig[alert.level].textClass}>
+                                      {riskLevelConfig[alert.level].label}:
+                                    </strong>{' '}
+                                    {alert.message}
+                                    {alert.percentage && (
+                                      <span className="text-red-600 font-medium"> (超出{alert.percentage}%)</span>
+                                    )}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Line Items Table */}
+                        <div className="mb-4">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-3">
+                            费用明细 ({expandedData.items?.length || 0} 项)
+                          </h4>
+
+                          {expandedData.items && expandedData.items.length > 0 ? (
+                            <div className="bg-white border rounded-lg overflow-hidden">
+                              {/* Items Header */}
+                              <div className="grid grid-cols-[2fr_1fr_120px_100px_120px_40px] gap-3 px-3.5 py-2.5 bg-gray-50 border-b text-[11px] font-semibold text-gray-500 uppercase">
+                                <div>费用项目</div>
+                                <div>类别</div>
+                                <div className="text-right">原币金额</div>
+                                <div className="text-center">汇率</div>
+                                <div className="text-right">折算金额</div>
+                                <div></div>
+                              </div>
+
+                              {/* Items Rows */}
+                              {expandedData.items.map((lineItem, idx) => {
+                                const catInfo = categoryLabels[lineItem.category] || categoryLabels.other;
+                                const itemCurrency = lineItem.currency || 'CNY';
+                                const itemSymbol = currencySymbols[itemCurrency] || itemCurrency;
+                                const exchangeRate = itemCurrency === 'CNY' ? 1 : (lineItem.amountInBaseCurrency && lineItem.amount > 0 ? lineItem.amountInBaseCurrency / lineItem.amount : 0.14);
+                                const convertedAmount = lineItem.amountInBaseCurrency || lineItem.amount * exchangeRate;
+                                const itemRisks = expandedData.riskAlerts?.filter(r => r.itemId === lineItem.id) || [];
+                                const hasRisk = itemRisks.length > 0;
+                                const itemRiskLevel = itemRisks.find(r => r.level === 'high') ? 'high' : itemRisks.find(r => r.level === 'medium') ? 'medium' : 'low';
+
+                                return (
+                                  <div
+                                    key={lineItem.id}
+                                    className={`grid grid-cols-[2fr_1fr_120px_100px_120px_40px] gap-3 px-3.5 py-3 items-center ${
+                                      idx < (expandedData.items?.length || 0) - 1 ? 'border-b border-gray-100' : ''
+                                    } ${hasRisk ? 'bg-amber-50' : ''}`}
+                                  >
+                                    {/* Item Description */}
+                                    <div>
+                                      <p className="text-[13px] font-medium text-gray-900">
+                                        {lineItem.description || catInfo.label}
+                                      </p>
+                                      {lineItem.vendor && (
+                                        <p className="text-[11px] text-gray-500">{lineItem.vendor}</p>
+                                      )}
+                                      {lineItem.receiptUrl && (
+                                        <button
+                                          onClick={() => setPreviewImage(lineItem.receiptUrl || null)}
+                                          className="text-[11px] text-blue-600 mt-0.5 hover:underline"
+                                        >
+                                          📎 查看凭证
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {/* Category */}
+                                    <div>
+                                      <span className="text-xs text-gray-700 px-2 py-1 bg-gray-100 rounded">
+                                        {catInfo.icon} {catInfo.label}
+                                      </span>
+                                    </div>
+
+                                    {/* Original Amount */}
+                                    <div className="text-right">
+                                      <p className="text-[13px] font-semibold text-gray-900">
+                                        {itemSymbol}{lineItem.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                                      </p>
+                                      <p className="text-[10px] text-gray-500">{itemCurrency}</p>
+                                    </div>
+
+                                    {/* Exchange Rate */}
+                                    <div className="text-center text-xs text-gray-500">
+                                      {exchangeRate.toFixed(4)}
+                                    </div>
+
+                                    {/* Converted Amount */}
+                                    <div className="text-right">
+                                      <p className="text-[13px] font-semibold text-green-600">
+                                        ¥{convertedAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                                      </p>
+                                    </div>
+
+                                    {/* Risk indicator */}
+                                    <div className="text-center">
+                                      {hasRisk ? (
+                                        <span className={riskLevelConfig[itemRiskLevel].textClass}>
+                                          {riskLevelConfig[itemRiskLevel].icon}
+                                        </span>
+                                      ) : (
+                                        <span className="text-green-600">✓</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+
+                              {/* Total Row */}
+                              <div className="grid grid-cols-[2fr_1fr_120px_100px_120px_40px] gap-3 px-3.5 py-3 bg-gray-50 border-t items-center">
+                                <div className="text-[13px] font-semibold text-gray-700">合计</div>
+                                <div></div>
+                                <div></div>
+                                <div></div>
+                                <div className="text-right">
+                                  <p className="text-sm font-bold text-green-600">
+                                    ¥{expandedData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                                  </p>
+                                </div>
+                                <div></div>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-[13px] text-gray-500 text-center py-5">暂无明细</p>
+                          )}
+                        </div>
+
+                        {/* Actions for pending */}
+                        {expandedData.status === 'pending' && (
+                          <Card className="p-4">
+                            <div className="mb-3">
+                              <label className="block text-[13px] font-medium mb-1.5 text-gray-700">
+                                审批意见
+                              </label>
+                              <textarea
+                                value={comment}
+                                onChange={(e) => setComment(e.target.value)}
+                                placeholder="输入审批意见（拒绝时必填）..."
+                                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm min-h-[60px] resize-y focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                              />
+                            </div>
+                            <div className="flex gap-3 justify-end">
+                              {expandedData.riskAlerts && expandedData.riskAlerts.length > 0 && (
+                                <Button
+                                  variant="outline"
+                                  onClick={() => openReminderModal(expandedData)}
+                                  className="text-violet-600 border-violet-600 hover:bg-violet-50"
+                                >
+                                  📧 提醒补充
+                                </Button>
+                              )}
+                              <Button
+                                variant="outline"
+                                onClick={() => handleReject(item.id, comment)}
+                                disabled={!comment || processing === item.id}
+                                className="text-red-600 border-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {processing === item.id ? '处理中...' : '✕ 拒绝'}
+                              </Button>
+                              <Button
+                                onClick={() => handleApprove(item.id)}
+                                disabled={processing === item.id}
+                                className="bg-green-600 hover:bg-green-700 text-white"
+                              >
+                                {processing === item.id ? '处理中...' : '✓ 批准'}
+                              </Button>
+                            </div>
+                          </Card>
+                        )}
+
+                        {/* Status for history */}
+                        {expandedData.status === 'approved' && (
+                          <div className="p-3 bg-green-100 rounded-lg text-center">
+                            <p className="text-[13px] text-green-800 font-medium">✓ 已批准</p>
+                          </div>
+                        )}
+
+                        {expandedData.status === 'rejected' && (
+                          <div className="p-3 bg-red-100 rounded-lg text-center">
+                            <p className="text-[13px] text-red-600 font-medium">✗ 已拒绝</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* Reminder Modal */}
+      {reminderModal?.open && (
+        <div
+          onClick={() => setReminderModal(null)}
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-xl w-[500px] max-h-[80vh] overflow-auto shadow-2xl"
+          >
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b flex items-center justify-between">
+              <h3 className="text-base font-semibold text-gray-900">📧 发送补充提醒</h3>
+              <button
+                onClick={() => setReminderModal(null)}
+                className="text-gray-500 hover:text-gray-700 text-xl"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-5">
+              {/* Recipient Info */}
+              <div className="mb-4">
+                <p className="text-[13px] text-gray-500 mb-1">发送给</p>
+                <p className="text-sm font-medium text-gray-900">
+                  {reminderModal.submitterName || '用户'} ({reminderModal.submitterEmail || 'email@example.com'})
+                </p>
+              </div>
+
+              {/* Send Method */}
+              <div className="mb-4">
+                <p className="text-[13px] font-medium text-gray-700 mb-2">发送方式</p>
+                <div className="flex gap-3">
+                  {[
+                    { value: 'email', label: '📧 邮件' },
+                    { value: 'slack', label: '💬 Slack' },
+                    { value: 'both', label: '📧💬 两者都发' },
+                  ].map((option) => (
+                    <label
+                      key={option.value}
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-lg cursor-pointer transition-all ${
+                        reminderMethod === option.value
+                          ? 'border-2 border-violet-600 bg-purple-50'
+                          : 'border border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="reminderMethod"
+                        value={option.value}
+                        checked={reminderMethod === option.value}
+                        onChange={(e) => setReminderMethod(e.target.value as 'email' | 'slack' | 'both')}
+                        className="hidden"
                       />
-                    </div>
-                    <div style={{ display: 'flex', gap: '12px' }}>
-                      <button
-                        onClick={handleReject}
-                        disabled={!comment || processing}
-                        style={{
-                          flex: 1,
-                          padding: '10px 16px',
-                          backgroundColor: (!comment || processing) ? '#f3f4f6' : 'white',
-                          color: (!comment || processing) ? '#9ca3af' : '#dc2626',
-                          border: (!comment || processing) ? '1px solid #e5e7eb' : '1px solid #dc2626',
-                          borderRadius: '8px',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                          cursor: (!comment || processing) ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        {processing ? '处理中...' : '拒绝'}
-                      </button>
-                      <button
-                        onClick={handleApprove}
-                        disabled={processing}
-                        style={{
-                          flex: 1,
-                          padding: '10px 16px',
-                          background: processing ? '#9ca3af' : 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                          cursor: processing ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        {processing ? '处理中...' : '批准'}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                      <span className="text-[13px] text-gray-700">{option.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
 
-                {/* Status indicator for history */}
-                {detailData.status === 'approved' && (
-                  <div style={{
-                    padding: '12px',
-                    backgroundColor: '#dcfce7',
-                    borderRadius: '8px',
-                    textAlign: 'center',
-                  }}>
-                    <p style={{ fontSize: '13px', color: '#166534', fontWeight: 500 }}>
-                      ✓ 已批准
-                    </p>
-                  </div>
-                )}
+              {/* Select Alerts */}
+              <div className="mb-4">
+                <p className="text-[13px] font-medium text-gray-700 mb-2">需要补充的内容</p>
+                <div className="flex flex-col gap-2">
+                  {reminderModal.alerts.map((alert) => (
+                    <label
+                      key={alert.id}
+                      className={`flex items-center gap-2.5 px-3 py-2.5 border rounded-lg cursor-pointer transition-all ${
+                        selectedAlerts.includes(alert.id) ? 'bg-purple-50 border-violet-300' : 'border-gray-200'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedAlerts.includes(alert.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedAlerts([...selectedAlerts, alert.id]);
+                          } else {
+                            setSelectedAlerts(selectedAlerts.filter(id => id !== alert.id));
+                          }
+                        }}
+                        className="w-4 h-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                      />
+                      <span className="text-[13px] text-gray-700">
+                        {riskLevelConfig[alert.level].icon} {alert.message}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
 
-                {detailData.status === 'rejected' && (
-                  <div style={{
-                    padding: '12px',
-                    backgroundColor: '#fee2e2',
-                    borderRadius: '8px',
-                    textAlign: 'center',
-                  }}>
-                    <p style={{ fontSize: '13px', color: '#dc2626', fontWeight: 500 }}>
-                      ✗ 已拒绝
-                    </p>
-                  </div>
-                )}
-              </>
-            )}
+              {/* Note */}
+              <div className="mb-5">
+                <p className="text-[13px] font-medium text-gray-700 mb-2">备注信息</p>
+                <textarea
+                  value={reminderNote}
+                  onChange={(e) => setReminderNote(e.target.value)}
+                  placeholder="请补充相关材料，如有特殊情况请说明。"
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm min-h-[80px] resize-y focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 justify-end">
+                <Button variant="outline" onClick={() => setReminderModal(null)}>
+                  取消
+                </Button>
+                <Button
+                  onClick={sendReminder}
+                  disabled={selectedAlerts.length === 0 || sendingReminder}
+                  className="bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50"
+                >
+                  {sendingReminder ? '发送中...' : '发送提醒'}
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -792,63 +865,24 @@ export default function ApprovalsPage() {
       {previewImage && (
         <div
           onClick={() => setPreviewImage(null)}
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.85)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-            cursor: 'zoom-out',
-          }}
+          className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 cursor-zoom-out"
         >
-          <div style={{
-            position: 'relative',
-            maxWidth: '90vw',
-            maxHeight: '90vh',
-          }}>
+          <div className="relative max-w-[90vw] max-h-[90vh]">
             <img
               src={previewImage}
               alt="凭证预览"
-              style={{
-                maxWidth: '100%',
-                maxHeight: '90vh',
-                objectFit: 'contain',
-                borderRadius: '8px',
-                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-              }}
+              className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
             />
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 setPreviewImage(null);
               }}
-              style={{
-                position: 'absolute',
-                top: '-40px',
-                right: '0',
-                backgroundColor: 'transparent',
-                border: 'none',
-                color: 'white',
-                fontSize: '24px',
-                cursor: 'pointer',
-                padding: '8px',
-              }}
+              className="absolute -top-10 right-0 bg-transparent border-none text-white text-2xl cursor-pointer p-2 hover:text-gray-300"
             >
               ×
             </button>
-            <p style={{
-              position: 'absolute',
-              bottom: '-36px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              color: 'rgba(255,255,255,0.7)',
-              fontSize: '13px',
-            }}>
+            <p className="absolute -bottom-9 left-1/2 -translate-x-1/2 text-white/70 text-[13px]">
               点击任意位置关闭
             </p>
           </div>

@@ -34,6 +34,15 @@ export async function GET(
       where: eq(reimbursements.id, id),
       with: {
         items: true,
+        user: {
+          columns: {
+            id: true,
+            name: true,
+            email: true,
+            avatar: true,
+            department: true,
+          },
+        },
       },
     });
 
@@ -49,9 +58,21 @@ export async function GET(
       return NextResponse.json({ error: '无权查看此报销单' }, { status: 403 });
     }
 
+    // Transform data to include submitter info
+    const transformedData = {
+      ...reimbursement,
+      submitter: reimbursement.user ? {
+        name: reimbursement.user.name,
+        email: reimbursement.user.email,
+        avatar: reimbursement.user.avatar,
+        department: reimbursement.user.department,
+      } : undefined,
+      user: undefined, // Remove the raw user object
+    };
+
     return NextResponse.json({
       success: true,
-      data: reimbursement,
+      data: transformedData,
     });
   } catch (error) {
     console.error('Get reimbursement error:', error);

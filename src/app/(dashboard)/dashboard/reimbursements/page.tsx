@@ -2,6 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 
 interface ReimbursementItem {
   id: string;
@@ -31,15 +36,15 @@ interface Reimbursement {
   items: ReimbursementItem[];
 }
 
-const statusLabels: Record<string, { label: string; color: string; bgColor: string }> = {
-  draft: { label: '草稿', color: '#6b7280', bgColor: '#f3f4f6' },
-  pending: { label: '待审批', color: '#d97706', bgColor: '#fef3c7' },
-  under_review: { label: '审核中', color: '#2563eb', bgColor: '#dbeafe' },
-  approved: { label: '已批准', color: '#16a34a', bgColor: '#dcfce7' },
-  rejected: { label: '已拒绝', color: '#dc2626', bgColor: '#fee2e2' },
-  processing: { label: '处理中', color: '#7c3aed', bgColor: '#ede9fe' },
-  paid: { label: '已付款', color: '#059669', bgColor: '#d1fae5' },
-  cancelled: { label: '已取消', color: '#9ca3af', bgColor: '#f3f4f6' },
+const statusConfig: Record<string, { label: string; bgColor: string; color: string }> = {
+  draft: { label: '草稿', bgColor: '#f3f4f6', color: '#4b5563' },
+  pending: { label: '待审批', bgColor: '#fef3c7', color: '#d97706' },
+  under_review: { label: '审核中', bgColor: '#dbeafe', color: '#2563eb' },
+  approved: { label: '已批准', bgColor: '#dcfce7', color: '#16a34a' },
+  rejected: { label: '已拒绝', bgColor: '#fee2e2', color: '#dc2626' },
+  processing: { label: '处理中', bgColor: '#dbeafe', color: '#2563eb' },
+  paid: { label: '已付款', bgColor: '#dcfce7', color: '#16a34a' },
+  cancelled: { label: '已取消', bgColor: '#f3f4f6', color: '#6b7280' },
 };
 
 const categoryLabels: Record<string, { label: string; icon: string }> = {
@@ -55,26 +60,38 @@ const categoryLabels: Record<string, { label: string; icon: string }> = {
   other: { label: '其他', icon: '📦' },
 };
 
+const currencySymbols: Record<string, string> = {
+  CNY: '¥', USD: '$', EUR: '€', GBP: '£', JPY: '¥',
+  HKD: 'HK$', SGD: 'S$', AUD: 'A$', CAD: 'C$', KRW: '₩',
+};
+
+const generateReimbursementNumber = (createdAt: string, id: string): string => {
+  const date = new Date(createdAt);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const idSuffix = id.slice(-4).toUpperCase();
+  return `BX${year}${month}${day}-${idSuffix}`;
+};
+
 export default function ReimbursementsPage() {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedData, setExpandedData] = useState<Reimbursement | null>(null);
+  const [expandLoading, setExpandLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 刷新列表
   const refreshList = async () => {
     try {
       const params = new URLSearchParams();
-      if (filter !== 'all') {
-        params.set('status', filter);
-      }
+      if (filter !== 'all') params.set('status', filter);
       const response = await fetch(`/api/reimbursements?${params.toString()}`);
       const result = await response.json();
-      if (result.success) {
-        setReimbursements(result.data || []);
-      }
+      if (result.success) setReimbursements(result.data || []);
     } catch (error) {
       console.error('Failed to fetch reimbursements:', error);
     }
@@ -89,6 +106,30 @@ export default function ReimbursementsPage() {
     fetchReimbursements();
   }, [filter]);
 
+  // Fetch expanded detail when expandedId changes
+  useEffect(() => {
+    if (!expandedId) {
+      setExpandedData(null);
+      return;
+    }
+    const listItem = reimbursements.find(r => r.id === expandedId);
+    if (listItem) setExpandedData(listItem);
+
+    const fetchDetail = async () => {
+      setExpandLoading(true);
+      try {
+        const response = await fetch(`/api/reimbursements/${expandedId}`);
+        const result = await response.json();
+        if (result.success && result.data) setExpandedData(result.data);
+      } catch (error) {
+        console.error('Failed to fetch detail:', error);
+      } finally {
+        setExpandLoading(false);
+      }
+    };
+    fetchDetail();
+  }, [expandedId, reimbursements]);
+
   // 删除草稿
   const handleDelete = async (id: string) => {
     if (!confirm('确定要删除这个报销单吗？')) return;
@@ -98,7 +139,10 @@ export default function ReimbursementsPage() {
       const result = await response.json();
       if (result.success) {
         setReimbursements(prev => prev.filter(r => r.id !== id));
-        if (expandedId === id) setExpandedId(null);
+        if (expandedId === id) {
+          setExpandedId(null);
+          setExpandedData(null);
+        }
       } else {
         alert(result.error || '删除失败');
       }
@@ -121,6 +165,9 @@ export default function ReimbursementsPage() {
       const result = await response.json();
       if (result.success) {
         await refreshList();
+        if (expandedId === id) {
+          setExpandedData(prev => prev ? { ...prev, status: 'pending' } : null);
+        }
       } else {
         alert(result.error || '提交失败');
       }
@@ -144,6 +191,9 @@ export default function ReimbursementsPage() {
       const result = await response.json();
       if (result.success) {
         await refreshList();
+        if (expandedId === id) {
+          setExpandedData(prev => prev ? { ...prev, status: 'draft' } : null);
+        }
       } else {
         alert(result.error || '撤回失败');
       }
@@ -378,7 +428,7 @@ export default function ReimbursementsPage() {
           )}
 
           {!loading && filteredReimbursements.map((item) => {
-            const statusInfo = statusLabels[item.status] || statusLabels.draft;
+            const statusInfo = statusConfig[item.status] || statusConfig.draft;
             const exchangeRate = getExchangeRate(item);
             const usdAmount = item.totalAmountInBaseCurrency || item.totalAmount * exchangeRate;
             const isExpanded = expandedId === item.id;
@@ -550,96 +600,115 @@ export default function ReimbursementsPage() {
                 </div>
 
                 {/* Expanded Details */}
-                {isExpanded && item.items && item.items.length > 0 && (
+                {isExpanded && (
                   <div style={{
                     backgroundColor: '#f8fafc',
                     borderBottom: '1px solid #e5e7eb',
                     padding: '16px 24px 16px 40px',
                   }}>
-                    <div style={{
-                      backgroundColor: 'white',
-                      borderRadius: '8px',
-                      border: '1px solid #e5e7eb',
-                      overflow: 'hidden',
-                    }}>
-                      {/* Detail Header */}
+                    {expandLoading && !expandedData && (
+                      <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>加载中...</div>
+                    )}
+
+                    {expandedData && expandedData.id === item.id && expandedData.items && expandedData.items.length > 0 && (
                       <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr',
-                        gap: '8px',
-                        padding: '10px 12px',
-                        backgroundColor: '#f9fafb',
-                        borderBottom: '1px solid #e5e7eb',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        color: '#6b7280',
+                        backgroundColor: 'white',
+                        borderRadius: '8px',
+                        border: '1px solid #e5e7eb',
+                        overflow: 'hidden',
                       }}>
-                        <div>供应商</div>
-                        <div>费用描述</div>
-                        <div>类别</div>
-                        <div style={{ textAlign: 'right' }}>原币金额</div>
-                        <div style={{ textAlign: 'right' }}>汇率</div>
-                        <div style={{ textAlign: 'right' }}>美元金额</div>
+                        {/* Detail Header */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr',
+                          gap: '8px',
+                          padding: '10px 12px',
+                          backgroundColor: '#f9fafb',
+                          borderBottom: '1px solid #e5e7eb',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: '#6b7280',
+                        }}>
+                          <div>供应商</div>
+                          <div>费用描述</div>
+                          <div>类别</div>
+                          <div style={{ textAlign: 'right' }}>原币金额</div>
+                          <div style={{ textAlign: 'right' }}>汇率</div>
+                          <div style={{ textAlign: 'right' }}>美元金额</div>
+                        </div>
+
+                        {/* Detail Rows */}
+                        {expandedData.items.map((lineItem, idx) => {
+                          const catInfo = categoryLabels[lineItem.category] || categoryLabels.other;
+                          const itemRate = lineItem.currency === 'USD' ? 1 :
+                            (lineItem.amountInBaseCurrency && lineItem.amount > 0
+                              ? lineItem.amountInBaseCurrency / lineItem.amount
+                              : 0.14);
+                          const itemUsd = lineItem.amountInBaseCurrency || lineItem.amount * itemRate;
+
+                          return (
+                            <div
+                              key={lineItem.id || idx}
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr',
+                                gap: '8px',
+                                padding: '10px 12px',
+                                borderBottom: idx < (expandedData.items?.length || 0) - 1 ? '1px solid #f3f4f6' : 'none',
+                                fontSize: '13px',
+                              }}
+                            >
+                              <div style={{ color: '#374151' }}>
+                                {lineItem.vendor || '-'}
+                              </div>
+                              <div style={{ color: '#111827' }}>
+                                {lineItem.description || catInfo.label}
+                                {lineItem.receiptUrl && (
+                                  <span
+                                    style={{
+                                      marginLeft: '6px',
+                                      fontSize: '11px',
+                                      color: '#2563eb',
+                                      cursor: 'pointer'
+                                    }}
+                                    onClick={() => setPreviewImage(lineItem.receiptUrl || null)}
+                                  >
+                                    📎 查看凭证
+                                  </span>
+                                )}
+                              </div>
+                              <div>
+                                <span style={{
+                                  padding: '2px 6px',
+                                  backgroundColor: '#f3f4f6',
+                                  borderRadius: '4px',
+                                  fontSize: '11px',
+                                  color: '#374151',
+                                }}>
+                                  {catInfo.icon} {catInfo.label}
+                                </span>
+                              </div>
+                              <div style={{ textAlign: 'right', fontWeight: 500, color: '#111827' }}>
+                                {lineItem.currency === 'USD' ? '$' : '¥'}
+                                {lineItem.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                                <span style={{ fontSize: '10px', color: '#6b7280', marginLeft: '2px' }}>
+                                  {lineItem.currency}
+                                </span>
+                              </div>
+                              <div style={{ textAlign: 'right', color: '#6b7280', fontSize: '12px' }}>
+                                {itemRate.toFixed(4)}
+                              </div>
+                              <div style={{ textAlign: 'right', fontWeight: 600, color: '#0369a1' }}>
+                                ${itemUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-
-                      {/* Detail Rows */}
-                      {item.items.map((lineItem, idx) => {
-                        const catInfo = categoryLabels[lineItem.category] || categoryLabels.other;
-                        const itemRate = lineItem.currency === 'USD' ? 1 :
-                          (lineItem.amountInBaseCurrency && lineItem.amount > 0
-                            ? lineItem.amountInBaseCurrency / lineItem.amount
-                            : 0.14);
-                        const itemUsd = lineItem.amountInBaseCurrency || lineItem.amount * itemRate;
-
-                        return (
-                          <div
-                            key={lineItem.id || idx}
-                            style={{
-                              display: 'grid',
-                              gridTemplateColumns: '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr',
-                              gap: '8px',
-                              padding: '10px 12px',
-                              borderBottom: idx < item.items.length - 1 ? '1px solid #f3f4f6' : 'none',
-                              fontSize: '13px',
-                            }}
-                          >
-                            <div style={{ color: '#374151' }}>
-                              {lineItem.vendor || '-'}
-                            </div>
-                            <div style={{ color: '#111827' }}>
-                              {lineItem.description || catInfo.label}
-                            </div>
-                            <div>
-                              <span style={{
-                                padding: '2px 6px',
-                                backgroundColor: '#f3f4f6',
-                                borderRadius: '4px',
-                                fontSize: '11px',
-                                color: '#374151',
-                              }}>
-                                {catInfo.icon} {catInfo.label}
-                              </span>
-                            </div>
-                            <div style={{ textAlign: 'right', fontWeight: 500, color: '#111827' }}>
-                              {lineItem.currency === 'USD' ? '$' : '¥'}
-                              {lineItem.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                              <span style={{ fontSize: '10px', color: '#6b7280', marginLeft: '2px' }}>
-                                {lineItem.currency}
-                              </span>
-                            </div>
-                            <div style={{ textAlign: 'right', color: '#6b7280', fontSize: '12px' }}>
-                              {itemRate.toFixed(4)}
-                            </div>
-                            <div style={{ textAlign: 'right', fontWeight: 600, color: '#0369a1' }}>
-                              ${itemUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    )}
 
                     {/* Reject Reason */}
-                    {item.status === 'rejected' && item.rejectReason && (
+                    {expandedData?.status === 'rejected' && expandedData?.rejectReason && (
                       <div style={{
                         marginTop: '12px',
                         padding: '10px 12px',
@@ -648,7 +717,7 @@ export default function ReimbursementsPage() {
                         fontSize: '12px',
                         color: '#991b1b',
                       }}>
-                        <strong>拒绝原因：</strong>{item.rejectReason}
+                        <strong>拒绝原因：</strong>{expandedData.rejectReason}
                       </div>
                     )}
                   </div>
@@ -658,6 +727,63 @@ export default function ReimbursementsPage() {
           })}
         </div>
       </div>
+
+      {/* Image Preview Modal */}
+      {previewImage && (
+        <div
+          onClick={() => setPreviewImage(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 50,
+            cursor: 'zoom-out',
+          }}
+        >
+          <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
+            <img
+              src={previewImage}
+              alt="凭证预览"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '90vh',
+                objectFit: 'contain',
+                borderRadius: '8px',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              }}
+            />
+            <button
+              onClick={(e) => { e.stopPropagation(); setPreviewImage(null); }}
+              style={{
+                position: 'absolute',
+                top: '-40px',
+                right: 0,
+                color: 'white',
+                fontSize: '24px',
+                padding: '8px',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              ×
+            </button>
+            <p style={{
+              position: 'absolute',
+              bottom: '-36px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              color: 'rgba(255, 255, 255, 0.7)',
+              fontSize: '14px',
+            }}>
+              点击任意位置关闭
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
