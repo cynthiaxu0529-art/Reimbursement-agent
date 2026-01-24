@@ -155,23 +155,32 @@ export async function POST(request: NextRequest) {
       0
     );
 
+    // 构建报销单数据（不包含 undefined 值）
+    const reimbursementData: any = {
+      tenantId: session.user.tenantId,
+      userId: session.user.id,
+      title,
+      description: description || null,
+      totalAmount,
+      totalAmountInBaseCurrency: usdTotal,
+      baseCurrency: 'USD',
+      status: submitStatus === 'pending' ? 'pending' : 'draft',
+      autoCollected: false,
+      sourceType: 'manual',
+    };
+
+    // 只有当有值时才添加这些字段
+    if (tripId) {
+      reimbursementData.tripId = tripId;
+    }
+    if (submitStatus === 'pending') {
+      reimbursementData.submittedAt = new Date();
+    }
+
     // 创建报销单
     const [reimbursement] = await db
       .insert(reimbursements)
-      .values({
-        tenantId: session.user.tenantId,
-        userId: session.user.id,
-        tripId: tripId || undefined,
-        title,
-        description,
-        totalAmount,
-        totalAmountInBaseCurrency: usdTotal,
-        baseCurrency: 'USD',
-        status: submitStatus === 'pending' ? 'pending' : 'draft',
-        autoCollected: false,
-        sourceType: 'manual',
-        submittedAt: submitStatus === 'pending' ? new Date() : undefined,
-      })
+      .values(reimbursementData)
       .returning();
 
     // 创建费用明细
