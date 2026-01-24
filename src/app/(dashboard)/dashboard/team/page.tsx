@@ -27,6 +27,8 @@ interface PendingInvite {
 
 const roleLabels: Record<string, string> = {
   admin: '管理员',
+  super_admin: '超级管理员',
+  manager: '经理',
   approver: '审批人',
   finance: '财务',
   employee: '员工',
@@ -34,6 +36,8 @@ const roleLabels: Record<string, string> = {
 
 const roleColors: Record<string, { bg: string; text: string }> = {
   admin: { bg: '#fef2f2', text: '#dc2626' },
+  super_admin: { bg: '#fef2f2', text: '#dc2626' },
+  manager: { bg: '#f3e8ff', text: '#7c3aed' },
   approver: { bg: '#f3e8ff', text: '#7c3aed' },
   finance: { bg: '#ecfdf5', text: '#059669' },
   employee: { bg: '#eff6ff', text: '#2563eb' },
@@ -54,27 +58,67 @@ export default function TeamPage() {
   });
 
   // 公司部门
-  const [departments] = useState(['技术部', '产品部', '运营部', '财务部', '人力资源部', '市场部']);
+  const [departments] = useState(['技术部', '产品部', '运营部', '财务部', '人力资源部', '市场部', '管理层']);
 
-  // 示例团队成员
-  const [members, setMembers] = useState<TeamMember[]>([
-    { id: 'example-1', name: '张总', email: 'ceo@demo.com', roles: ['admin'], department: '管理层', status: 'active', isExample: true },
-    { id: 'example-2', name: '李经理', email: 'tech_manager@demo.com', roles: ['approver', 'employee'], department: '技术部', status: 'active', isExample: true },
-    { id: 'example-3', name: '王经理', email: 'product_manager@demo.com', roles: ['approver', 'employee'], department: '产品部', status: 'active', isExample: true },
-    { id: 'example-4', name: '赵会计', email: 'finance@demo.com', roles: ['finance', 'employee'], department: '财务部', status: 'active', isExample: true },
-    { id: 'example-5', name: '刘工', email: 'dev1@demo.com', roles: ['employee'], department: '技术部', status: 'active', isExample: true },
-    { id: 'example-6', name: '陈工', email: 'dev2@demo.com', roles: ['employee'], department: '技术部', status: 'active', isExample: true },
-  ]);
+  // 团队成员（从 API 加载）
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // 待接受邀请
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
 
+  // 获取用户角色
   useEffect(() => {
     const savedRole = localStorage.getItem('userRole') as UserRole;
     if (savedRole && (savedRole === 'employee' || savedRole === 'approver' || savedRole === 'admin')) {
       setUserRole(savedRole);
     }
   }, []);
+
+  // 从 API 加载团队成员
+  useEffect(() => {
+    const fetchMembers = async () => {
+      try {
+        const response = await fetch('/api/team/members');
+        const result = await response.json();
+
+        if (result.success && result.data) {
+          // 添加真实数据
+          const realMembers = result.data.map((m: any) => ({
+            ...m,
+            isExample: false,
+          }));
+
+          // 如果没有真实成员，显示示例数据
+          if (realMembers.length === 0) {
+            setMembers([
+              { id: 'example-1', name: '张总', email: 'ceo@demo.com', roles: ['admin'], department: '管理层', status: 'active', isExample: true },
+              { id: 'example-2', name: '李经理', email: 'tech_manager@demo.com', roles: ['approver', 'employee'], department: '技术部', status: 'active', isExample: true },
+              { id: 'example-3', name: '王经理', email: 'product_manager@demo.com', roles: ['approver', 'employee'], department: '产品部', status: 'active', isExample: true },
+              { id: 'example-4', name: '赵会计', email: 'finance@demo.com', roles: ['finance', 'employee'], department: '财务部', status: 'active', isExample: true },
+            ]);
+          } else {
+            setMembers(realMembers);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch members:', error);
+        // 加载失败时显示示例数据
+        setMembers([
+          { id: 'example-1', name: '张总', email: 'ceo@demo.com', roles: ['admin'], department: '管理层', status: 'active', isExample: true },
+          { id: 'example-2', name: '李经理', email: 'tech_manager@demo.com', roles: ['approver', 'employee'], department: '技术部', status: 'active', isExample: true },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (userRole === 'admin') {
+      fetchMembers();
+    } else {
+      setLoading(false);
+    }
+  }, [userRole]);
 
   const showMessage = (msg: string, type: 'success' | 'error' = 'success') => {
     setMessage(msg);
@@ -377,8 +421,29 @@ export default function TeamPage() {
         </div>
       )}
 
+      {/* Loading State */}
+      {loading && (
+        <div style={{
+          padding: '3rem',
+          textAlign: 'center',
+          color: '#6b7280',
+        }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '50%',
+            border: '3px solid #e5e7eb',
+            borderTopColor: '#2563eb',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 1rem',
+          }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          <p>加载团队成员...</p>
+        </div>
+      )}
+
       {/* Organization Chart */}
-      {selectedDepartment === 'all' ? (
+      {!loading && selectedDepartment === 'all' && (
         // 组织架构视图
         <div style={{ display: 'grid', gap: '1.5rem' }}>
           {allDepartments.map(dept => {
@@ -479,7 +544,9 @@ export default function TeamPage() {
             );
           })}
         </div>
-      ) : (
+      )}
+
+      {!loading && selectedDepartment !== 'all' && (
         // 部门列表视图
         <div style={cardStyle}>
           <div style={{
@@ -560,21 +627,42 @@ export default function TeamPage() {
       )}
 
       {/* Example Data Notice */}
-      <div style={{
-        marginTop: '1.5rem',
-        padding: '0.75rem 1rem',
-        backgroundColor: '#f8fafc',
-        borderRadius: '0.5rem',
-        border: '1px solid #e5e7eb',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem'
-      }}>
-        <span style={{ fontSize: '1rem' }}>💡</span>
-        <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-          以上为示例数据，实际团队成员将通过邀请功能添加
-        </p>
-      </div>
+      {members.some(m => m.isExample) && (
+        <div style={{
+          marginTop: '1.5rem',
+          padding: '0.75rem 1rem',
+          backgroundColor: '#f8fafc',
+          borderRadius: '0.5rem',
+          border: '1px solid #e5e7eb',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          <span style={{ fontSize: '1rem' }}>💡</span>
+          <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+            以上为示例数据，实际团队成员将通过邀请功能添加
+          </p>
+        </div>
+      )}
+
+      {/* Real Data Info */}
+      {!loading && members.length > 0 && !members.some(m => m.isExample) && (
+        <div style={{
+          marginTop: '1.5rem',
+          padding: '0.75rem 1rem',
+          backgroundColor: '#ecfdf5',
+          borderRadius: '0.5rem',
+          border: '1px solid #a7f3d0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          <span style={{ fontSize: '1rem' }}>✅</span>
+          <p style={{ fontSize: '0.75rem', color: '#059669' }}>
+            已加载 {members.length} 名团队成员
+          </p>
+        </div>
+      )}
 
       {/* Invite Modal */}
       {showInviteModal && (
