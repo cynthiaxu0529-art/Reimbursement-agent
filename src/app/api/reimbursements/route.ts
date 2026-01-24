@@ -54,12 +54,33 @@ export async function GET(request: NextRequest) {
       offset: (page - 1) * pageSize,
       with: {
         items: true,
+        user: role === 'approver' ? {
+          columns: {
+            id: true,
+            name: true,
+            email: true,
+            avatar: true,
+            department: true,
+          },
+        } : undefined,
       },
     });
 
+    // Transform data to include submitter info for approver mode
+    const transformedList = list.map((item: any) => ({
+      ...item,
+      submitter: item.user ? {
+        name: item.user.name,
+        email: item.user.email,
+        avatar: item.user.avatar,
+        department: item.user.department,
+      } : undefined,
+      user: undefined, // Remove the raw user object
+    }));
+
     return NextResponse.json({
       success: true,
-      data: list,
+      data: transformedList,
       meta: { page, pageSize },
     });
   } catch (error) {
