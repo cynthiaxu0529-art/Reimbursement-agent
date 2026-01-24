@@ -115,9 +115,32 @@ export async function POST(request: NextRequest) {
     // 检查用户是否有公司
     if (!session.user.tenantId) {
       return NextResponse.json(
-        { error: '请先创建或加入公司' },
+        { error: '请先在设置中创建或加入公司，才能提交报销' },
         { status: 400 }
       );
+    }
+
+    // 验证费用项数据
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!item.category) {
+        return NextResponse.json(
+          { error: `第 ${i + 1} 项费用缺少类别` },
+          { status: 400 }
+        );
+      }
+      if (!item.amount || isNaN(parseFloat(item.amount))) {
+        return NextResponse.json(
+          { error: `第 ${i + 1} 项费用金额无效` },
+          { status: 400 }
+        );
+      }
+      if (!item.date) {
+        return NextResponse.json(
+          { error: `第 ${i + 1} 项费用缺少日期` },
+          { status: 400 }
+        );
+      }
     }
 
     // 计算原币总金额
@@ -175,8 +198,10 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Create reimbursement error:', error);
+    // 提供更详细的错误信息
+    const errorMessage = error instanceof Error ? error.message : '未知错误';
     return NextResponse.json(
-      { error: '创建报销单失败' },
+      { error: `创建报销单失败: ${errorMessage}` },
       { status: 500 }
     );
   }
