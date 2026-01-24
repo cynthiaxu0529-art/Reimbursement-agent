@@ -366,7 +366,7 @@ export default function ReimbursementsPage() {
           {/* Table Header */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '32px 140px 1.5fr 100px 100px 140px 100px 140px 120px',
+            gridTemplateColumns: '160px 1.5fr 100px 100px 140px 100px 140px 120px',
             gap: '8px',
             padding: '12px 16px',
             backgroundColor: '#f9fafb',
@@ -377,7 +377,6 @@ export default function ReimbursementsPage() {
             textTransform: 'uppercase',
             alignItems: 'center',
           }}>
-            <div></div>
             <div>报销编号</div>
             <div>报销说明</div>
             <div>提交日期</div>
@@ -464,14 +463,12 @@ export default function ReimbursementsPage() {
                 <div key={item.id}>
                   {/* Main Row */}
                   <div
-                    onClick={() => setExpandedId(isExpanded ? null : item.id)}
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: '32px 140px 1.5fr 100px 100px 140px 100px 140px 120px',
+                      gridTemplateColumns: '160px 1.5fr 100px 100px 140px 100px 140px 120px',
                       gap: '8px',
                       padding: '14px 16px',
                       borderBottom: isExpanded ? 'none' : '1px solid #e5e7eb',
-                      cursor: 'pointer',
                       backgroundColor: isExpanded ? '#eff6ff' : 'white',
                       transition: 'background-color 0.15s',
                       alignItems: 'center',
@@ -483,25 +480,27 @@ export default function ReimbursementsPage() {
                       if (!isExpanded) e.currentTarget.style.backgroundColor = 'white';
                     }}
                   >
-                    {/* Expand Icon */}
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#6b7280',
-                      transition: 'transform 0.2s',
-                      transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                    }}>
-                      ▶
-                    </div>
-
-                    {/* Reimbursement Number */}
-                    <div style={{
-                      fontSize: '13px',
-                      fontWeight: 500,
-                      color: '#2563eb',
-                      fontFamily: 'monospace',
-                    }}>
+                    {/* Reimbursement Number - Clickable to expand */}
+                    <div
+                      onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: 500,
+                        color: '#2563eb',
+                        fontFamily: 'monospace',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span style={{
+                        display: 'inline-block',
+                        transition: 'transform 0.2s',
+                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                        fontSize: '10px',
+                        color: '#6b7280',
+                      }}>▶</span>
                       {reimbursementNo}
                     </div>
 
@@ -617,7 +616,7 @@ export default function ReimbursementsPage() {
                     <div style={{
                       backgroundColor: '#f8fafc',
                       borderBottom: '1px solid #e5e7eb',
-                      padding: '16px 16px 16px 48px',
+                      padding: '16px',
                     }}>
                       {expandLoading && !expandedData && (
                         <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
