@@ -223,6 +223,11 @@ export const reimbursementItems = pgTable('reimbursement_items', {
   location: text('location'), // 允许为空
   vendor: text('vendor'),
 
+  // Hotel specific fields
+  checkInDate: timestamp('check_in_date'),
+  checkOutDate: timestamp('check_out_date'),
+  nights: integer('nights'),
+
   receiptId: uuid('receipt_id'),
   receiptUrl: text('receipt_url'),
 
