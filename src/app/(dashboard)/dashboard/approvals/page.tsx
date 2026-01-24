@@ -97,39 +97,129 @@ const generateReimbursementNumber = (createdAt: string, id: string): string => {
   return `BX${year}${month}${day}-${idSuffix}`;
 };
 
-// Mock risk analysis function (in production, this would be from backend)
-const analyzeRisks = (item: Reimbursement): RiskAlert[] => {
+// Policy rule interface
+interface PolicyRule {
+  id: string;
+  name: string;
+  categories?: string[];
+  limit?: {
+    type: 'per_item' | 'per_day' | 'per_month';
+    amount: number;
+    currency: string;
+  };
+  condition?: {
+    type: string;
+    operator: string;
+    value: string[];
+  };
+  message?: string;
+}
+
+interface Policy {
+  id: string;
+  name: string;
+  isActive: boolean;
+  rules: PolicyRule[];
+}
+
+// Exchange rate for USD to CNY (simplified)
+const USD_TO_CNY = 7.2;
+
+// Risk analysis based on policies
+const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): RiskAlert[] => {
   const alerts: RiskAlert[] = [];
+  const activePolicies = policies.filter(p => p.isActive);
 
-  // Check each expense item
+  // Group items by date for daily limit checking
+  const itemsByDate: Record<string, ReimbursementItem[]> = {};
+  item.items?.forEach(expense => {
+    const dateKey = expense.date?.split('T')[0] || 'unknown';
+    if (!itemsByDate[dateKey]) {
+      itemsByDate[dateKey] = [];
+    }
+    itemsByDate[dateKey].push(expense);
+  });
+
+  // Check each policy
+  for (const policy of activePolicies) {
+    for (const rule of policy.rules) {
+      if (!rule.limit) continue;
+
+      const ruleCategories = rule.categories || [];
+      const limitAmountUSD = rule.limit.amount;
+      const limitType = rule.limit.type;
+
+      // Check daily limits
+      if (limitType === 'per_day') {
+        for (const [date, dateItems] of Object.entries(itemsByDate)) {
+          // Filter items matching this rule's categories
+          const matchingItems = dateItems.filter(exp =>
+            ruleCategories.includes(exp.category)
+          );
+
+          if (matchingItems.length === 0) continue;
+
+          // Calculate total for the day in USD
+          const dailyTotalUSD = matchingItems.reduce((sum, exp) => {
+            const amountUSD = exp.currency === 'USD'
+              ? exp.amount
+              : (exp.amountInBaseCurrency || exp.amount) / USD_TO_CNY;
+            return sum + amountUSD;
+          }, 0);
+
+          if (dailyTotalUSD > limitAmountUSD) {
+            const overAmount = dailyTotalUSD - limitAmountUSD;
+            const percentage = Math.round((overAmount / limitAmountUSD) * 100);
+
+            alerts.push({
+              id: `risk-${date}-${ruleCategories.join('-')}`,
+              type: 'over_budget',
+              level: percentage > 50 ? 'high' : 'medium',
+              message: `${date} ${ruleCategories.map(c => categoryLabels[c]?.label || c).join('+')} 费用 $${dailyTotalUSD.toFixed(0)} 超出每日限额 $${limitAmountUSD}`,
+              standardValue: limitAmountUSD,
+              actualValue: dailyTotalUSD,
+              percentage,
+            });
+          }
+        }
+      }
+
+      // Check monthly limits
+      if (limitType === 'per_month') {
+        const matchingItems = item.items?.filter(exp =>
+          ruleCategories.includes(exp.category)
+        ) || [];
+
+        if (matchingItems.length === 0) continue;
+
+        // Calculate total in USD
+        const monthlyTotalUSD = matchingItems.reduce((sum, exp) => {
+          const amountUSD = exp.currency === 'USD'
+            ? exp.amount
+            : (exp.amountInBaseCurrency || exp.amount) / USD_TO_CNY;
+          return sum + amountUSD;
+        }, 0);
+
+        if (monthlyTotalUSD > limitAmountUSD) {
+          const overAmount = monthlyTotalUSD - limitAmountUSD;
+          const percentage = Math.round((overAmount / limitAmountUSD) * 100);
+
+          alerts.push({
+            id: `risk-monthly-${ruleCategories.join('-')}`,
+            type: 'over_budget',
+            level: 'high',
+            message: `${ruleCategories.map(c => categoryLabels[c]?.label || c).join('/')} 费用 $${monthlyTotalUSD.toFixed(0)} 超出每月限额 $${limitAmountUSD}`,
+            standardValue: limitAmountUSD,
+            actualValue: monthlyTotalUSD,
+            percentage,
+          });
+        }
+      }
+    }
+  }
+
+  // Always check for missing attachments
   item.items?.forEach((expense) => {
-    // Hotel over budget check (mock standard: 500 CNY/night)
-    if (expense.category === 'hotel' && expense.amount > 500) {
-      alerts.push({
-        id: `risk-${expense.id}-budget`,
-        type: 'over_budget',
-        level: 'high',
-        itemId: expense.id,
-        message: `酒店费用 ¥${expense.amount}/晚 超出标准 ¥500/晚`,
-        standardValue: 500,
-        actualValue: expense.amount,
-        percentage: Math.round(((expense.amount - 500) / 500) * 100),
-      });
-    }
-
-    // Flight anomaly check (mock: if > 2000 CNY)
-    if (expense.category === 'flight' && expense.amount > 2000) {
-      alerts.push({
-        id: `risk-${expense.id}-anomaly`,
-        type: 'anomaly',
-        level: 'medium',
-        itemId: expense.id,
-        message: `机票费用较同期平均高出${Math.round((expense.amount / 1500 - 1) * 100)}%`,
-        actualValue: expense.amount,
-      });
-    }
-
-    // Missing attachment check
     if (!expense.receiptUrl && expense.amount > 100) {
       alerts.push({
         id: `risk-${expense.id}-attachment`,
@@ -144,6 +234,11 @@ const analyzeRisks = (item: Reimbursement): RiskAlert[] => {
   return alerts;
 };
 
+// Fallback function when policies not loaded
+const analyzeRisks = (item: Reimbursement): RiskAlert[] => {
+  return analyzeRisksWithPolicies(item, []);
+};
+
 export default function ApprovalsPage() {
   const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
   const [pendingApprovals, setPendingApprovals] = useState<Reimbursement[]>([]);
@@ -155,6 +250,7 @@ export default function ApprovalsPage() {
   const [comment, setComment] = useState('');
   const [processing, setProcessing] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [policies, setPolicies] = useState<Policy[]>([]);
 
   // Reminder modal state
   const [reminderModal, setReminderModal] = useState<{
@@ -169,21 +265,36 @@ export default function ApprovalsPage() {
   const [reminderNote, setReminderNote] = useState('');
   const [sendingReminder, setSendingReminder] = useState(false);
 
-  // Fetch approvals
+  // Fetch policies and approvals
   useEffect(() => {
-    const fetchApprovals = async () => {
+    const fetchData = async () => {
       try {
+        // Fetch policies first
+        let loadedPolicies: Policy[] = [];
+        try {
+          const policiesResponse = await fetch('/api/settings/policies');
+          const policiesResult = await policiesResponse.json();
+          if (policiesResult.success) {
+            loadedPolicies = policiesResult.data || [];
+            setPolicies(loadedPolicies);
+          }
+        } catch (e) {
+          console.error('Failed to fetch policies:', e);
+        }
+
+        // Fetch pending approvals
         const pendingResponse = await fetch('/api/reimbursements?status=pending&role=approver');
         const pendingResult = await pendingResponse.json();
         if (pendingResult.success) {
-          // Add risk analysis to each item
+          // Add risk analysis to each item using real policies
           const dataWithRisks = (pendingResult.data || []).map((item: Reimbursement) => ({
             ...item,
-            riskAlerts: analyzeRisks(item),
+            riskAlerts: analyzeRisksWithPolicies(item, loadedPolicies),
           }));
           setPendingApprovals(dataWithRisks);
         }
 
+        // Fetch approval history
         const historyResponse = await fetch('/api/reimbursements?status=approved,rejected&role=approver');
         const historyResult = await historyResponse.json();
         if (historyResult.success) {
@@ -196,7 +307,7 @@ export default function ApprovalsPage() {
       }
     };
 
-    fetchApprovals();
+    fetchData();
   }, []);
 
   // Fetch expanded detail
@@ -220,7 +331,7 @@ export default function ApprovalsPage() {
         if (result.success && result.data) {
           const dataWithRisks = {
             ...result.data,
-            riskAlerts: analyzeRisks(result.data),
+            riskAlerts: analyzeRisksWithPolicies(result.data, policies),
           };
           setExpandedData(dataWithRisks);
         }
@@ -232,7 +343,7 @@ export default function ApprovalsPage() {
     };
 
     fetchDetail();
-  }, [expandedId, pendingApprovals, approvalHistory, activeTab]);
+  }, [expandedId, pendingApprovals, approvalHistory, activeTab, policies]);
 
   const handleApprove = async (id: string) => {
     setProcessing(id);
