@@ -55,15 +55,39 @@ const categoryLabels: Record<string, { label: string; icon: string }> = {
   other: { label: '其他', icon: '📦' },
 };
 
+// Currency symbols mapping
+const currencySymbols: Record<string, string> = {
+  CNY: '¥',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  JPY: '¥',
+  HKD: 'HK$',
+  SGD: 'S$',
+  AUD: 'A$',
+  CAD: 'C$',
+  KRW: '₩',
+};
+
+// Generate reimbursement number based on date and ID
+const generateReimbursementNumber = (createdAt: string, id: string): string => {
+  const date = new Date(createdAt);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const idSuffix = id.slice(-4).toUpperCase();
+  return `BX${year}${month}${day}-${idSuffix}`;
+};
+
 export default function ReimbursementsPage() {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detailData, setDetailData] = useState<Reimbursement | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedData, setExpandedData] = useState<Reimbursement | null>(null);
+  const [expandLoading, setExpandLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // 刷新列表
@@ -94,55 +118,59 @@ export default function ReimbursementsPage() {
     fetchReimbursements();
   }, [filter]);
 
-  // 获取详情 - 优先使用列表数据
+  // 获取展开行详情 - 优先使用列表数据
   useEffect(() => {
-    if (!selectedId) {
-      setDetailData(null);
+    if (!expandedId) {
+      setExpandedData(null);
       return;
     }
 
     // 先从列表中获取基本数据
-    const listItem = reimbursements.find(r => r.id === selectedId);
+    const listItem = reimbursements.find(r => r.id === expandedId);
     if (listItem) {
-      setDetailData(listItem);
+      setExpandedData(listItem);
     }
 
     // 然后从 API 获取完整数据
     const fetchDetail = async () => {
-      setDetailLoading(true);
+      setExpandLoading(true);
       try {
-        const response = await fetch(`/api/reimbursements/${selectedId}`);
+        const response = await fetch(`/api/reimbursements/${expandedId}`);
         const result = await response.json();
         if (result.success && result.data) {
-          setDetailData(result.data);
+          setExpandedData(result.data);
         }
         // 如果 API 失败但列表有数据，保持列表数据
       } catch (error) {
         console.error('Failed to fetch detail:', error);
         // 保持列表数据作为 fallback
       } finally {
-        setDetailLoading(false);
+        setExpandLoading(false);
       }
     };
 
     fetchDetail();
-  }, [selectedId, reimbursements]);
+  }, [expandedId, reimbursements]);
 
   // 删除草稿
-  const handleDelete = async () => {
-    if (!selectedId || !detailData || detailData.status !== 'draft') return;
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const item = reimbursements.find(r => r.id === id);
+    if (!item || item.status !== 'draft') return;
     if (!confirm('确定要删除这个草稿吗？')) return;
 
-    setActionLoading(true);
+    setActionLoading(id);
     try {
-      const response = await fetch(`/api/reimbursements/${selectedId}`, {
+      const response = await fetch(`/api/reimbursements/${id}`, {
         method: 'DELETE',
       });
       const result = await response.json();
       if (result.success) {
-        setReimbursements(prev => prev.filter(r => r.id !== selectedId));
-        setSelectedId(null);
-        setDetailData(null);
+        setReimbursements(prev => prev.filter(r => r.id !== id));
+        if (expandedId === id) {
+          setExpandedId(null);
+          setExpandedData(null);
+        }
       } else {
         alert(result.error || '删除失败');
       }
@@ -150,44 +178,20 @@ export default function ReimbursementsPage() {
       console.error('Delete error:', error);
       alert('删除失败');
     } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // 提交审批
-  const handleSubmit = async () => {
-    if (!selectedId || !detailData || detailData.status !== 'draft') return;
-
-    setActionLoading(true);
-    try {
-      const response = await fetch(`/api/reimbursements/${selectedId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'pending' }),
-      });
-      const result = await response.json();
-      if (result.success) {
-        await refreshList();
-        setDetailData(prev => prev ? { ...prev, status: 'pending' } : null);
-      } else {
-        alert(result.error || '提交失败');
-      }
-    } catch (error) {
-      console.error('Submit error:', error);
-      alert('提交失败');
-    } finally {
-      setActionLoading(false);
+      setActionLoading(null);
     }
   };
 
   // 撤回申请
-  const handleWithdraw = async () => {
-    if (!selectedId || !detailData || detailData.status !== 'pending') return;
+  const handleWithdraw = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const item = reimbursements.find(r => r.id === id);
+    if (!item || item.status !== 'pending') return;
     if (!confirm('确定要撤回这个报销申请吗？撤回后将变为草稿状态。')) return;
 
-    setActionLoading(true);
+    setActionLoading(id);
     try {
-      const response = await fetch(`/api/reimbursements/${selectedId}`, {
+      const response = await fetch(`/api/reimbursements/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'draft' }),
@@ -195,7 +199,9 @@ export default function ReimbursementsPage() {
       const result = await response.json();
       if (result.success) {
         await refreshList();
-        setDetailData(prev => prev ? { ...prev, status: 'draft' } : null);
+        if (expandedId === id) {
+          setExpandedData(prev => prev ? { ...prev, status: 'draft' } : null);
+        }
       } else {
         alert(result.error || '撤回失败');
       }
@@ -203,7 +209,7 @@ export default function ReimbursementsPage() {
       console.error('Withdraw error:', error);
       alert('撤回失败');
     } finally {
-      setActionLoading(false);
+      setActionLoading(null);
     }
   };
 
@@ -222,10 +228,6 @@ export default function ReimbursementsPage() {
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-  };
-
-  const formatFullDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
   };
 
   return (
@@ -364,8 +366,8 @@ export default function ReimbursementsPage() {
           {/* Table Header */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
-            gap: '12px',
+            gridTemplateColumns: '160px 1.5fr 100px 100px 140px 100px 140px 120px',
+            gap: '8px',
             padding: '12px 16px',
             backgroundColor: '#f9fafb',
             borderBottom: '1px solid #e5e7eb',
@@ -373,12 +375,16 @@ export default function ReimbursementsPage() {
             fontWeight: 600,
             color: '#6b7280',
             textTransform: 'uppercase',
+            alignItems: 'center',
           }}>
+            <div>报销编号</div>
             <div>报销说明</div>
-            <div>类别</div>
             <div>提交日期</div>
             <div>状态</div>
-            <div style={{ textAlign: 'right' }}>金额</div>
+            <div style={{ textAlign: 'right' }}>原币金额</div>
+            <div style={{ textAlign: 'center' }}>汇率</div>
+            <div style={{ textAlign: 'right' }}>报销金额</div>
+            <div style={{ textAlign: 'center' }}>操作</div>
           </div>
 
           {/* Table Body */}
@@ -434,44 +440,71 @@ export default function ReimbursementsPage() {
 
             {!loading && filteredReimbursements.map((item) => {
               const statusInfo = statusLabels[item.status] || statusLabels.draft;
-              const mainCategory = item.items?.[0]?.category || 'other';
-              const categoryInfo = categoryLabels[mainCategory] || categoryLabels.other;
-              const isSelected = selectedId === item.id;
+              const isExpanded = expandedId === item.id;
+              const reimbursementNo = generateReimbursementNumber(item.createdAt, item.id);
+
+              // Calculate original currency info from items
+              const firstItem = item.items?.[0];
+              const originalCurrency = firstItem?.currency || 'CNY';
+              const originalAmount = item.items?.reduce((sum, i) => sum + i.amount, 0) || item.totalAmount;
+              const currencySymbol = currencySymbols[originalCurrency] || originalCurrency;
+
+              // Calculate average exchange rate
+              const hasMultipleCurrencies = item.items?.some(i => i.currency !== originalCurrency);
+              const avgExchangeRate = item.totalAmountInBaseCurrency && originalAmount > 0
+                ? item.totalAmountInBaseCurrency / originalAmount
+                : (originalCurrency === 'CNY' ? 1 : 0.14);
+
+              // Check if row can show actions
+              const canWithdraw = item.status === 'pending';
+              const canDelete = item.status === 'draft';
 
               return (
-                <div
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
-                    gap: '12px',
-                    padding: '14px 16px',
-                    borderBottom: '1px solid #e5e7eb',
-                    cursor: 'pointer',
-                    backgroundColor: isSelected ? '#eff6ff' : 'white',
-                    transition: 'background-color 0.15s',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSelected) e.currentTarget.style.backgroundColor = '#f9fafb';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isSelected) e.currentTarget.style.backgroundColor = 'white';
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                      width: '36px',
-                      height: '36px',
-                      backgroundColor: isSelected ? '#dbeafe' : '#f3f4f6',
-                      borderRadius: '8px',
-                      display: 'flex',
+                <div key={item.id}>
+                  {/* Main Row */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '160px 1.5fr 100px 100px 140px 100px 140px 120px',
+                      gap: '8px',
+                      padding: '14px 16px',
+                      borderBottom: isExpanded ? 'none' : '1px solid #e5e7eb',
+                      backgroundColor: isExpanded ? '#eff6ff' : 'white',
+                      transition: 'background-color 0.15s',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '16px',
-                    }}>
-                      {categoryInfo.icon}
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isExpanded) e.currentTarget.style.backgroundColor = '#f9fafb';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isExpanded) e.currentTarget.style.backgroundColor = 'white';
+                    }}
+                  >
+                    {/* Reimbursement Number - Clickable to expand */}
+                    <div
+                      onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: 500,
+                        color: '#2563eb',
+                        fontFamily: 'monospace',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span style={{
+                        display: 'inline-block',
+                        transition: 'transform 0.2s',
+                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                        fontSize: '10px',
+                        color: '#6b7280',
+                      }}>▶</span>
+                      {reimbursementNo}
                     </div>
+
+                    {/* Description */}
                     <div style={{ minWidth: 0 }}>
                       <p style={{
                         fontSize: '14px',
@@ -487,43 +520,298 @@ export default function ReimbursementsPage() {
                         {item.items?.length || 0} 项费用
                       </p>
                     </div>
+
+                    {/* Submit Date */}
+                    <div style={{ fontSize: '13px', color: '#6b7280' }}>
+                      {formatDate(item.submittedAt || item.createdAt)}
+                    </div>
+
+                    {/* Status */}
+                    <div>
+                      <span style={{
+                        fontSize: '12px',
+                        fontWeight: 500,
+                        padding: '4px 10px',
+                        borderRadius: '9999px',
+                        backgroundColor: statusInfo.bgColor,
+                        color: statusInfo.color,
+                      }}>
+                        {statusInfo.label}
+                      </span>
+                    </div>
+
+                    {/* Original Amount */}
+                    <div style={{ textAlign: 'right' }}>
+                      <p style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>
+                        {currencySymbol}{originalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                      </p>
+                      <p style={{ fontSize: '11px', color: '#6b7280' }}>
+                        {hasMultipleCurrencies ? '多币种' : originalCurrency}
+                      </p>
+                    </div>
+
+                    {/* Exchange Rate */}
+                    <div style={{ textAlign: 'center', fontSize: '13px', color: '#6b7280' }}>
+                      {hasMultipleCurrencies ? '-' : avgExchangeRate.toFixed(4)}
+                    </div>
+
+                    {/* Reimbursement Amount (in base currency) */}
+                    <div style={{ textAlign: 'right' }}>
+                      <p style={{ fontSize: '14px', fontWeight: 600, color: '#16a34a' }}>
+                        ¥{item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                      </p>
+                      <p style={{ fontSize: '11px', color: '#6b7280' }}>CNY</p>
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{
+                      display: 'flex',
+                      gap: '8px',
+                      justifyContent: 'center',
+                    }} onClick={(e) => e.stopPropagation()}>
+                      {canWithdraw && (
+                        <button
+                          onClick={(e) => handleWithdraw(item.id, e)}
+                          disabled={actionLoading === item.id}
+                          style={{
+                            padding: '4px 10px',
+                            fontSize: '12px',
+                            color: '#d97706',
+                            backgroundColor: 'white',
+                            border: '1px solid #d97706',
+                            borderRadius: '4px',
+                            cursor: actionLoading === item.id ? 'not-allowed' : 'pointer',
+                            opacity: actionLoading === item.id ? 0.5 : 1,
+                          }}
+                        >
+                          {actionLoading === item.id ? '...' : '撤销'}
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button
+                          onClick={(e) => handleDelete(item.id, e)}
+                          disabled={actionLoading === item.id}
+                          style={{
+                            padding: '4px 10px',
+                            fontSize: '12px',
+                            color: '#dc2626',
+                            backgroundColor: 'white',
+                            border: '1px solid #dc2626',
+                            borderRadius: '4px',
+                            cursor: actionLoading === item.id ? 'not-allowed' : 'pointer',
+                            opacity: actionLoading === item.id ? 0.5 : 1,
+                          }}
+                        >
+                          {actionLoading === item.id ? '...' : '删除'}
+                        </button>
+                      )}
+                      {!canWithdraw && !canDelete && (
+                        <span style={{ fontSize: '12px', color: '#9ca3af' }}>-</span>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{
-                      fontSize: '13px',
-                      color: '#374151',
-                      padding: '4px 8px',
-                      backgroundColor: '#f3f4f6',
-                      borderRadius: '4px',
+
+                  {/* Expanded Detail Panel */}
+                  {isExpanded && (
+                    <div style={{
+                      backgroundColor: '#f8fafc',
+                      borderBottom: '1px solid #e5e7eb',
+                      padding: '16px',
                     }}>
-                      {categoryInfo.label}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', fontSize: '13px', color: '#6b7280' }}>
-                    {formatDate(item.submittedAt || item.createdAt)}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      padding: '4px 10px',
-                      borderRadius: '9999px',
-                      backgroundColor: statusInfo.bgColor,
-                      color: statusInfo.color,
-                    }}>
-                      {statusInfo.label}
-                    </span>
-                  </div>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'flex-end',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#111827',
-                  }}>
-                    ¥{item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                  </div>
+                      {expandLoading && !expandedData && (
+                        <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>
+                          加载中...
+                        </div>
+                      )}
+
+                      {expandedData && expandedData.id === item.id && (
+                        <div>
+                          {/* Detail Header */}
+                          <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '12px',
+                          }}>
+                            <h4 style={{ fontSize: '14px', fontWeight: 600, color: '#374151' }}>
+                              费用明细 ({expandedData.items?.length || 0} 项)
+                            </h4>
+                            {expandedData.status === 'draft' && (
+                              <Link
+                                href={`/dashboard/reimbursements/${expandedData.id}/edit`}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: '12px',
+                                  color: '#2563eb',
+                                  backgroundColor: 'white',
+                                  border: '1px solid #2563eb',
+                                  borderRadius: '4px',
+                                  textDecoration: 'none',
+                                }}
+                              >
+                                编辑
+                              </Link>
+                            )}
+                          </div>
+
+                          {/* Line Items Table */}
+                          {expandedData.items && expandedData.items.length > 0 ? (
+                            <div style={{
+                              backgroundColor: 'white',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '8px',
+                              overflow: 'hidden',
+                            }}>
+                              {/* Items Header */}
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: '2fr 1fr 120px 100px 120px',
+                                gap: '12px',
+                                padding: '10px 14px',
+                                backgroundColor: '#f9fafb',
+                                borderBottom: '1px solid #e5e7eb',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                color: '#6b7280',
+                                textTransform: 'uppercase',
+                              }}>
+                                <div>费用项目</div>
+                                <div>类别</div>
+                                <div style={{ textAlign: 'right' }}>原币金额</div>
+                                <div style={{ textAlign: 'center' }}>汇率</div>
+                                <div style={{ textAlign: 'right' }}>折算金额</div>
+                              </div>
+
+                              {/* Items Rows */}
+                              {expandedData.items.map((lineItem, idx) => {
+                                const catInfo = categoryLabels[lineItem.category] || categoryLabels.other;
+                                const itemCurrency = lineItem.currency || 'CNY';
+                                const itemSymbol = currencySymbols[itemCurrency] || itemCurrency;
+                                const exchangeRate = itemCurrency === 'CNY' ? 1 : (lineItem.amountInBaseCurrency && lineItem.amount > 0 ? lineItem.amountInBaseCurrency / lineItem.amount : 0.14);
+                                const convertedAmount = lineItem.amountInBaseCurrency || lineItem.amount * exchangeRate;
+
+                                return (
+                                  <div
+                                    key={lineItem.id}
+                                    style={{
+                                      display: 'grid',
+                                      gridTemplateColumns: '2fr 1fr 120px 100px 120px',
+                                      gap: '12px',
+                                      padding: '12px 14px',
+                                      borderBottom: idx < (expandedData.items?.length || 0) - 1 ? '1px solid #f3f4f6' : 'none',
+                                      alignItems: 'center',
+                                    }}
+                                  >
+                                    {/* Item Description */}
+                                    <div>
+                                      <p style={{ fontSize: '13px', fontWeight: 500, color: '#111827' }}>
+                                        {lineItem.description || catInfo.label}
+                                      </p>
+                                      {lineItem.vendor && (
+                                        <p style={{ fontSize: '11px', color: '#6b7280' }}>
+                                          {lineItem.vendor}
+                                        </p>
+                                      )}
+                                      {lineItem.receiptUrl && (
+                                        <p
+                                          style={{
+                                            fontSize: '11px',
+                                            color: '#2563eb',
+                                            marginTop: '2px',
+                                            cursor: 'pointer',
+                                          }}
+                                          onClick={() => setPreviewImage(lineItem.receiptUrl || null)}
+                                        >
+                                          📎 查看凭证
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    {/* Category */}
+                                    <div>
+                                      <span style={{
+                                        fontSize: '12px',
+                                        color: '#374151',
+                                        padding: '3px 8px',
+                                        backgroundColor: '#f3f4f6',
+                                        borderRadius: '4px',
+                                      }}>
+                                        {catInfo.icon} {catInfo.label}
+                                      </span>
+                                    </div>
+
+                                    {/* Original Amount */}
+                                    <div style={{ textAlign: 'right' }}>
+                                      <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>
+                                        {itemSymbol}{lineItem.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                                      </p>
+                                      <p style={{ fontSize: '10px', color: '#6b7280' }}>{itemCurrency}</p>
+                                    </div>
+
+                                    {/* Exchange Rate */}
+                                    <div style={{ textAlign: 'center', fontSize: '12px', color: '#6b7280' }}>
+                                      {exchangeRate.toFixed(4)}
+                                    </div>
+
+                                    {/* Converted Amount */}
+                                    <div style={{ textAlign: 'right' }}>
+                                      <p style={{ fontSize: '13px', fontWeight: 600, color: '#16a34a' }}>
+                                        ¥{convertedAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                                      </p>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+
+                              {/* Total Row */}
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: '2fr 1fr 120px 100px 120px',
+                                gap: '12px',
+                                padding: '12px 14px',
+                                backgroundColor: '#f9fafb',
+                                borderTop: '1px solid #e5e7eb',
+                                alignItems: 'center',
+                              }}>
+                                <div style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>
+                                  合计
+                                </div>
+                                <div></div>
+                                <div></div>
+                                <div></div>
+                                <div style={{ textAlign: 'right' }}>
+                                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#16a34a' }}>
+                                    ¥{expandedData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <p style={{ fontSize: '13px', color: '#6b7280', textAlign: 'center', padding: '20px' }}>
+                              暂无明细
+                            </p>
+                          )}
+
+                          {/* Reject Reason */}
+                          {expandedData.status === 'rejected' && expandedData.rejectReason && (
+                            <div style={{
+                              backgroundColor: '#fee2e2',
+                              borderRadius: '8px',
+                              padding: '12px',
+                              marginTop: '12px',
+                            }}>
+                              <p style={{ fontSize: '12px', fontWeight: 500, color: '#dc2626', marginBottom: '4px' }}>
+                                拒绝原因
+                              </p>
+                              <p style={{ fontSize: '13px', color: '#991b1b' }}>
+                                {expandedData.rejectReason}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -531,448 +819,6 @@ export default function ReimbursementsPage() {
         </div>
       </div>
 
-      {/* Detail Panel */}
-      {selectedId && (
-        <div style={{
-          width: '480px',
-          flexShrink: 0,
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-        }}>
-          {/* Panel Header */}
-          <div style={{
-            padding: '16px 20px',
-            borderBottom: '1px solid #e5e7eb',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}>
-            <div>
-              <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>Application Details</h3>
-              <p style={{ fontSize: '12px', color: '#6b7280' }}>ID: #{detailData?.id?.slice(0, 8).toUpperCase() || selectedId.slice(0, 8).toUpperCase()}</p>
-            </div>
-            <button
-              onClick={() => setSelectedId(null)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#6b7280',
-                cursor: 'pointer',
-                fontSize: '20px',
-                padding: '4px',
-              }}
-            >
-              ×
-            </button>
-          </div>
-
-          {/* Panel Content */}
-          <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
-            {detailLoading && !detailData && (
-              <div style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>
-                加载中...
-              </div>
-            )}
-
-            {!detailLoading && !detailData && (
-              <div style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>
-                无法加载详情
-              </div>
-            )}
-
-            {detailData && (
-              <>
-                {/* Title & Status Card */}
-                <div style={{
-                  backgroundColor: '#f9fafb',
-                  borderRadius: '8px',
-                  padding: '16px',
-                  marginBottom: '16px',
-                  borderLeft: '4px solid',
-                  borderLeftColor: statusLabels[detailData.status]?.color || '#6b7280',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', flex: 1 }}>
-                      {detailData.title}
-                    </h2>
-                    <span style={{
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      padding: '4px 12px',
-                      borderRadius: '4px',
-                      backgroundColor: statusLabels[detailData.status]?.bgColor || '#f3f4f6',
-                      color: statusLabels[detailData.status]?.color || '#6b7280',
-                      textTransform: 'uppercase',
-                      flexShrink: 0,
-                      marginLeft: '12px',
-                    }}>
-                      {statusLabels[detailData.status]?.label || detailData.status}
-                    </span>
-                  </div>
-                  <p style={{ fontSize: '12px', color: '#6b7280' }}>
-                    {detailData.status === 'draft' ? '创建于' : '提交于'} {formatFullDate(detailData.submittedAt || detailData.createdAt)}
-                  </p>
-                </div>
-
-                {/* Divider */}
-                <div style={{ height: '1px', backgroundColor: '#e5e7eb', margin: '16px 0' }} />
-
-                {/* Amounts Side by Side */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '24px',
-                  marginBottom: '20px',
-                }}>
-                  <div>
-                    <p style={{ fontSize: '11px', fontWeight: 500, color: '#6b7280', textTransform: 'uppercase', marginBottom: '4px' }}>
-                      TOTAL CLAIMED
-                    </p>
-                    <p style={{ fontSize: '20px', fontWeight: 700, color: '#111827' }}>
-                      ¥{detailData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                  <div>
-                    <p style={{ fontSize: '11px', fontWeight: 500, color: '#6b7280', textTransform: 'uppercase', marginBottom: '4px' }}>
-                      CONVERTED (USD)
-                    </p>
-                    <p style={{ fontSize: '20px', fontWeight: 700, color: '#0369a1' }}>
-                      ${(detailData.totalAmountInBaseCurrency || detailData.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Line Items Table */}
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                    <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>
-                      Line Items
-                    </h4>
-                    <span style={{
-                      fontSize: '11px',
-                      backgroundColor: '#e5e7eb',
-                      color: '#374151',
-                      padding: '2px 8px',
-                      borderRadius: '10px',
-                      fontWeight: 500,
-                    }}>
-                      {detailData.items?.length || 0}
-                    </span>
-                  </div>
-
-                  {detailData.items && detailData.items.length > 0 ? (
-                    <div style={{
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                      overflow: 'hidden',
-                    }}>
-                      {/* Table Header */}
-                      <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1.8fr 1fr 0.8fr 1fr',
-                        gap: '8px',
-                        padding: '10px 12px',
-                        backgroundColor: '#f9fafb',
-                        borderBottom: '1px solid #e5e7eb',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        color: '#6b7280',
-                        textTransform: 'uppercase',
-                      }}>
-                        <div>ITEM DETAILS</div>
-                        <div style={{ textAlign: 'right' }}>RECEIPT AMT</div>
-                        <div style={{ textAlign: 'right' }}>EXCH. RATE</div>
-                        <div style={{ textAlign: 'right' }}>CONVERTED</div>
-                      </div>
-
-                      {/* Table Rows */}
-                      {detailData.items.map((item, index) => {
-                        const catInfo = categoryLabels[item.category] || categoryLabels.other;
-                        const exchangeRate = item.currency === 'USD' ? 1 : (item.amountInBaseCurrency && item.amount > 0 ? item.amountInBaseCurrency / item.amount : 0.14);
-                        const convertedAmount = item.amountInBaseCurrency || item.amount * exchangeRate;
-
-                        return (
-                          <div
-                            key={item.id}
-                            style={{
-                              display: 'grid',
-                              gridTemplateColumns: '1.8fr 1fr 0.8fr 1fr',
-                              gap: '8px',
-                              padding: '12px',
-                              borderBottom: index < (detailData.items?.length || 0) - 1 ? '1px solid #e5e7eb' : 'none',
-                              borderLeft: '3px solid',
-                              borderLeftColor: index % 2 === 0 ? '#f59e0b' : '#10b981',
-                              alignItems: 'flex-start',
-                            }}
-                          >
-                            {/* Item Details */}
-                            <div>
-                              <p style={{
-                                fontSize: '13px',
-                                fontWeight: 600,
-                                color: '#111827',
-                                marginBottom: '2px',
-                              }}>
-                                {item.description || catInfo.label}
-                              </p>
-                              <p style={{ fontSize: '11px', color: '#6b7280' }}>
-                                {catInfo.label} {item.vendor ? `· ${item.vendor}` : ''}
-                              </p>
-                              {item.receiptUrl && (
-                                <p
-                                  style={{
-                                    fontSize: '11px',
-                                    color: '#2563eb',
-                                    marginTop: '4px',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                  }}
-                                  onClick={() => setPreviewImage(item.receiptUrl || null)}
-                                >
-                                  📎 receipt.jpg
-                                </p>
-                              )}
-                            </div>
-
-                            {/* Receipt Amount */}
-                            <div style={{ textAlign: 'right' }}>
-                              <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>
-                                {item.currency === 'USD' ? '$' : '¥'}{item.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                              </p>
-                              <p style={{ fontSize: '10px', color: '#6b7280' }}>
-                                {item.currency}
-                              </p>
-                            </div>
-
-                            {/* Exchange Rate */}
-                            <div style={{ textAlign: 'right' }}>
-                              <p style={{ fontSize: '12px', color: '#6b7280' }}>
-                                {exchangeRate.toFixed(4)}
-                              </p>
-                            </div>
-
-                            {/* Converted Amount */}
-                            <div style={{ textAlign: 'right' }}>
-                              <p style={{ fontSize: '13px', fontWeight: 600, color: '#0369a1' }}>
-                                ${convertedAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p style={{ fontSize: '13px', color: '#6b7280', textAlign: 'center', padding: '20px' }}>
-                      暂无明细
-                    </p>
-                  )}
-                </div>
-
-                {/* Reject Reason */}
-                {detailData.status === 'rejected' && detailData.rejectReason && (
-                  <div style={{
-                    backgroundColor: '#fee2e2',
-                    borderRadius: '8px',
-                    padding: '12px',
-                    marginBottom: '20px',
-                  }}>
-                    <p style={{ fontSize: '12px', fontWeight: 500, color: '#dc2626', marginBottom: '4px' }}>
-                      拒绝原因
-                    </p>
-                    <p style={{ fontSize: '13px', color: '#991b1b' }}>
-                      {detailData.rejectReason}
-                    </p>
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {/* Draft actions */}
-                  {detailData.status === 'draft' && (
-                    <>
-                      <div style={{ display: 'flex', gap: '12px' }}>
-                        <Link
-                          href={`/dashboard/reimbursements/${detailData.id}/edit`}
-                          style={{
-                            flex: 1,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: '10px 16px',
-                            backgroundColor: 'white',
-                            color: '#2563eb',
-                            border: '1px solid #2563eb',
-                            borderRadius: '8px',
-                            textDecoration: 'none',
-                            fontSize: '14px',
-                            fontWeight: 500,
-                          }}
-                        >
-                          编辑
-                        </Link>
-                        <button
-                          onClick={handleSubmit}
-                          disabled={actionLoading}
-                          style={{
-                            flex: 1,
-                            padding: '10px 16px',
-                            background: actionLoading ? '#9ca3af' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '8px',
-                            fontSize: '14px',
-                            fontWeight: 500,
-                            cursor: actionLoading ? 'not-allowed' : 'pointer',
-                          }}
-                        >
-                          {actionLoading ? '处理中...' : '提交审批'}
-                        </button>
-                      </div>
-                      <button
-                        onClick={handleDelete}
-                        disabled={actionLoading}
-                        style={{
-                          width: '100%',
-                          padding: '10px 16px',
-                          backgroundColor: 'white',
-                          color: '#dc2626',
-                          border: '1px solid #dc2626',
-                          borderRadius: '8px',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                          cursor: actionLoading ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        删除草稿
-                      </button>
-                    </>
-                  )}
-
-                  {/* Pending actions */}
-                  {detailData.status === 'pending' && (
-                    <>
-                      <div style={{
-                        padding: '12px',
-                        backgroundColor: '#fef3c7',
-                        borderRadius: '8px',
-                        textAlign: 'center',
-                      }}>
-                        <p style={{ fontSize: '13px', color: '#92400e' }}>
-                          等待审批中...
-                        </p>
-                      </div>
-                      <button
-                        onClick={handleWithdraw}
-                        disabled={actionLoading}
-                        style={{
-                          width: '100%',
-                          padding: '10px 16px',
-                          backgroundColor: 'white',
-                          color: '#d97706',
-                          border: '1px solid #d97706',
-                          borderRadius: '8px',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                          cursor: actionLoading ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        {actionLoading ? '处理中...' : '撤回申请'}
-                      </button>
-                    </>
-                  )}
-
-                  {/* Under review */}
-                  {detailData.status === 'under_review' && (
-                    <div style={{
-                      padding: '12px',
-                      backgroundColor: '#dbeafe',
-                      borderRadius: '8px',
-                      textAlign: 'center',
-                    }}>
-                      <p style={{ fontSize: '13px', color: '#1e40af' }}>
-                        审核中，请等待...
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Approved */}
-                  {detailData.status === 'approved' && (
-                    <div style={{
-                      padding: '12px',
-                      backgroundColor: '#dcfce7',
-                      borderRadius: '8px',
-                      textAlign: 'center',
-                    }}>
-                      <p style={{ fontSize: '13px', color: '#166534' }}>
-                        已批准，等待付款
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Rejected - can resubmit */}
-                  {detailData.status === 'rejected' && (
-                    <Link
-                      href={`/dashboard/reimbursements/new`}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '10px 16px',
-                        backgroundColor: 'white',
-                        color: '#2563eb',
-                        border: '1px solid #2563eb',
-                        borderRadius: '8px',
-                        textDecoration: 'none',
-                        fontSize: '14px',
-                        fontWeight: 500,
-                      }}
-                    >
-                      重新提交
-                    </Link>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Download Button - Fixed at Bottom */}
-          {detailData && (
-            <div style={{
-              padding: '16px 20px',
-              borderTop: '1px solid #e5e7eb',
-            }}>
-              <button
-                onClick={() => {
-                  alert('PDF 导出功能开发中...');
-                }}
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  backgroundColor: 'white',
-                  color: '#374151',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                }}
-              >
-                Download Full Report PDF
-              </button>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Image Preview Modal */}
       {previewImage && (
