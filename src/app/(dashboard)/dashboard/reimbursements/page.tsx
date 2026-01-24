@@ -9,6 +9,7 @@ interface ReimbursementItem {
   description: string;
   amount: number;
   currency: string;
+  amountInBaseCurrency?: number;
   date: string;
   vendor?: string;
   receiptUrl?: string;
@@ -19,6 +20,7 @@ interface Reimbursement {
   title: string;
   description?: string;
   totalAmount: number;
+  totalAmountInBaseCurrency?: number;
   baseCurrency: string;
   status: 'draft' | 'pending' | 'under_review' | 'approved' | 'rejected' | 'processing' | 'paid' | 'cancelled';
   submittedAt?: string;
@@ -532,7 +534,7 @@ export default function ReimbursementsPage() {
       {/* Detail Panel */}
       {selectedId && (
         <div style={{
-          width: '400px',
+          width: '480px',
           flexShrink: 0,
           backgroundColor: 'white',
           borderRadius: '12px',
@@ -548,9 +550,11 @@ export default function ReimbursementsPage() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            backgroundColor: '#f9fafb',
           }}>
-            <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>报销详情</h3>
+            <div>
+              <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>Application Details</h3>
+              <p style={{ fontSize: '12px', color: '#6b7280' }}>ID: #{detailData?.id?.slice(0, 8).toUpperCase() || selectedId.slice(0, 8).toUpperCase()}</p>
+            </div>
             <button
               onClick={() => setSelectedId(null)}
               style={{
@@ -558,7 +562,7 @@ export default function ReimbursementsPage() {
                 border: 'none',
                 color: '#6b7280',
                 cursor: 'pointer',
-                fontSize: '18px',
+                fontSize: '20px',
                 padding: '4px',
               }}
             >
@@ -582,96 +586,182 @@ export default function ReimbursementsPage() {
 
             {detailData && (
               <>
-                {/* Title & Status */}
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#111827', flex: 1 }}>
+                {/* Title & Status Card */}
+                <div style={{
+                  backgroundColor: '#f9fafb',
+                  borderRadius: '8px',
+                  padding: '16px',
+                  marginBottom: '16px',
+                  borderLeft: '4px solid',
+                  borderLeftColor: statusLabels[detailData.status]?.color || '#6b7280',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', flex: 1 }}>
                       {detailData.title}
                     </h2>
                     <span style={{
-                      fontSize: '12px',
-                      fontWeight: 500,
-                      padding: '4px 10px',
-                      borderRadius: '9999px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      padding: '4px 12px',
+                      borderRadius: '4px',
                       backgroundColor: statusLabels[detailData.status]?.bgColor || '#f3f4f6',
                       color: statusLabels[detailData.status]?.color || '#6b7280',
+                      textTransform: 'uppercase',
                       flexShrink: 0,
                       marginLeft: '12px',
                     }}>
                       {statusLabels[detailData.status]?.label || detailData.status}
                     </span>
                   </div>
-                  <p style={{ fontSize: '13px', color: '#6b7280' }}>
+                  <p style={{ fontSize: '12px', color: '#6b7280' }}>
                     {detailData.status === 'draft' ? '创建于' : '提交于'} {formatFullDate(detailData.submittedAt || detailData.createdAt)}
                   </p>
                 </div>
 
-                {/* Amount */}
+                {/* Divider */}
+                <div style={{ height: '1px', backgroundColor: '#e5e7eb', margin: '16px 0' }} />
+
+                {/* Amounts Side by Side */}
                 <div style={{
-                  backgroundColor: '#f9fafb',
-                  borderRadius: '8px',
-                  padding: '16px',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '24px',
                   marginBottom: '20px',
                 }}>
-                  <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>报销金额</p>
-                  <p style={{ fontSize: '28px', fontWeight: 700, color: '#111827' }}>
-                    ¥{detailData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                  </p>
+                  <div>
+                    <p style={{ fontSize: '11px', fontWeight: 500, color: '#6b7280', textTransform: 'uppercase', marginBottom: '4px' }}>
+                      TOTAL CLAIMED
+                    </p>
+                    <p style={{ fontSize: '20px', fontWeight: 700, color: '#111827' }}>
+                      ¥{detailData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: '11px', fontWeight: 500, color: '#6b7280', textTransform: 'uppercase', marginBottom: '4px' }}>
+                      CONVERTED (USD)
+                    </p>
+                    <p style={{ fontSize: '20px', fontWeight: 700, color: '#0369a1' }}>
+                      ${(detailData.totalAmountInBaseCurrency || detailData.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
                 </div>
 
-                {/* Line Items */}
+                {/* Line Items Table */}
                 <div style={{ marginBottom: '20px' }}>
-                  <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '12px' }}>
-                    费用明细 ({detailData.items?.length || 0})
-                  </h4>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                    <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>
+                      Line Items
+                    </h4>
+                    <span style={{
+                      fontSize: '11px',
+                      backgroundColor: '#e5e7eb',
+                      color: '#374151',
+                      padding: '2px 8px',
+                      borderRadius: '10px',
+                      fontWeight: 500,
+                    }}>
+                      {detailData.items?.length || 0}
+                    </span>
+                  </div>
+
                   {detailData.items && detailData.items.length > 0 ? (
                     <div style={{
                       border: '1px solid #e5e7eb',
                       borderRadius: '8px',
                       overflow: 'hidden',
                     }}>
+                      {/* Table Header */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1.8fr 1fr 0.8fr 1fr',
+                        gap: '8px',
+                        padding: '10px 12px',
+                        backgroundColor: '#f9fafb',
+                        borderBottom: '1px solid #e5e7eb',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        color: '#6b7280',
+                        textTransform: 'uppercase',
+                      }}>
+                        <div>ITEM DETAILS</div>
+                        <div style={{ textAlign: 'right' }}>RECEIPT AMT</div>
+                        <div style={{ textAlign: 'right' }}>EXCH. RATE</div>
+                        <div style={{ textAlign: 'right' }}>CONVERTED</div>
+                      </div>
+
+                      {/* Table Rows */}
                       {detailData.items.map((item, index) => {
                         const catInfo = categoryLabels[item.category] || categoryLabels.other;
+                        const exchangeRate = item.currency === 'USD' ? 1 : (item.amountInBaseCurrency && item.amount > 0 ? item.amountInBaseCurrency / item.amount : 0.14);
+                        const convertedAmount = item.amountInBaseCurrency || item.amount * exchangeRate;
+
                         return (
                           <div
                             key={item.id}
                             style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1.8fr 1fr 0.8fr 1fr',
+                              gap: '8px',
                               padding: '12px',
                               borderBottom: index < (detailData.items?.length || 0) - 1 ? '1px solid #e5e7eb' : 'none',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '12px',
+                              borderLeft: '3px solid',
+                              borderLeftColor: index % 2 === 0 ? '#f59e0b' : '#10b981',
+                              alignItems: 'flex-start',
                             }}
                           >
-                            <div style={{
-                              width: '32px',
-                              height: '32px',
-                              backgroundColor: '#f3f4f6',
-                              borderRadius: '6px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: '14px',
-                            }}>
-                              {catInfo.icon}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
+                            {/* Item Details */}
+                            <div>
                               <p style={{
                                 fontSize: '13px',
-                                fontWeight: 500,
+                                fontWeight: 600,
                                 color: '#111827',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
+                                marginBottom: '2px',
                               }}>
                                 {item.description || catInfo.label}
                               </p>
                               <p style={{ fontSize: '11px', color: '#6b7280' }}>
-                                {catInfo.label} · {formatDate(item.date)}
+                                {catInfo.label} {item.vendor ? `· ${item.vendor}` : ''}
+                              </p>
+                              {item.receiptUrl && (
+                                <p
+                                  style={{
+                                    fontSize: '11px',
+                                    color: '#2563eb',
+                                    marginTop: '4px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                  }}
+                                  onClick={() => setPreviewImage(item.receiptUrl || null)}
+                                >
+                                  📎 receipt.jpg
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Receipt Amount */}
+                            <div style={{ textAlign: 'right' }}>
+                              <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>
+                                {item.currency === 'USD' ? '$' : '¥'}{item.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                              </p>
+                              <p style={{ fontSize: '10px', color: '#6b7280' }}>
+                                {item.currency}
                               </p>
                             </div>
-                            <div style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>
-                              ¥{item.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+
+                            {/* Exchange Rate */}
+                            <div style={{ textAlign: 'right' }}>
+                              <p style={{ fontSize: '12px', color: '#6b7280' }}>
+                                {exchangeRate.toFixed(4)}
+                              </p>
+                            </div>
+
+                            {/* Converted Amount */}
+                            <div style={{ textAlign: 'right' }}>
+                              <p style={{ fontSize: '13px', fontWeight: 600, color: '#0369a1' }}>
+                                ${convertedAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                              </p>
                             </div>
                           </div>
                         );
@@ -683,64 +773,6 @@ export default function ReimbursementsPage() {
                     </p>
                   )}
                 </div>
-
-                {/* Attachments */}
-                {detailData.items?.some(item => item.receiptUrl) && (
-                  <div style={{ marginBottom: '20px' }}>
-                    <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '12px' }}>
-                      附件凭证
-                    </h4>
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(3, 1fr)',
-                      gap: '8px',
-                    }}>
-                      {detailData.items?.filter(item => item.receiptUrl).map((item, index) => (
-                        <div
-                          key={`receipt-${item.id}-${index}`}
-                          onClick={() => setPreviewImage(item.receiptUrl || null)}
-                          style={{
-                            position: 'relative',
-                            paddingBottom: '100%',
-                            backgroundColor: '#f3f4f6',
-                            borderRadius: '8px',
-                            overflow: 'hidden',
-                            cursor: 'pointer',
-                            border: '1px solid #e5e7eb',
-                          }}
-                        >
-                          <img
-                            src={item.receiptUrl}
-                            alt={`凭证 ${index + 1}`}
-                            style={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              width: '100%',
-                              height: '100%',
-                              objectFit: 'cover',
-                            }}
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                          <div style={{
-                            position: 'absolute',
-                            bottom: '4px',
-                            right: '4px',
-                            backgroundColor: 'rgba(0,0,0,0.6)',
-                            color: 'white',
-                            fontSize: '10px',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                          }}>
-                            点击放大
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 {/* Reject Reason */}
                 {detailData.status === 'rejected' && detailData.rejectReason && (
@@ -908,6 +940,37 @@ export default function ReimbursementsPage() {
               </>
             )}
           </div>
+
+          {/* Download Button - Fixed at Bottom */}
+          {detailData && (
+            <div style={{
+              padding: '16px 20px',
+              borderTop: '1px solid #e5e7eb',
+            }}>
+              <button
+                onClick={() => {
+                  alert('PDF 导出功能开发中...');
+                }}
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  backgroundColor: 'white',
+                  color: '#374151',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                }}
+              >
+                Download Full Report PDF
+              </button>
+            </div>
+          )}
         </div>
       )}
 
