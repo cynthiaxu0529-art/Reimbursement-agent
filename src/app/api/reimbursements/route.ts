@@ -186,18 +186,31 @@ export async function POST(request: NextRequest) {
     // 创建费用明细
     if (items.length > 0) {
       await db.insert(reimbursementItems).values(
-        items.map((item: any) => ({
-          reimbursementId: reimbursement.id,
-          category: item.category,
-          description: item.description || '',
-          amount: parseFloat(item.amount) || 0,
-          currency: item.currency || 'CNY',
-          amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
-          date: new Date(item.date),
-          location: item.location || null,
-          vendor: item.vendor || null,
-          receiptUrl: item.receiptUrl || null,
-        }))
+        items.map((item: any) => {
+          const itemData: any = {
+            reimbursementId: reimbursement.id,
+            category: item.category,
+            description: item.description || '',
+            amount: parseFloat(item.amount) || 0,
+            currency: item.currency || 'CNY',
+            amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
+            date: new Date(item.date),
+            location: item.location || null,
+            vendor: item.vendor || null,
+            receiptUrl: item.receiptUrl || null,
+          };
+          // Add hotel-specific fields
+          if (item.checkInDate) {
+            itemData.checkInDate = new Date(item.checkInDate);
+          }
+          if (item.checkOutDate) {
+            itemData.checkOutDate = new Date(item.checkOutDate);
+          }
+          if (item.nights) {
+            itemData.nights = item.nights;
+          }
+          return itemData;
+        })
       );
     }
 
