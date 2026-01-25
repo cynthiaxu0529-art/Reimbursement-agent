@@ -53,6 +53,9 @@ interface LineItem {
   checkInDate?: string;
   checkOutDate?: string;
   nights?: number;
+  // Receipt attachment
+  receiptUrl?: string;
+  receiptFileName?: string;
 }
 
 // 支持的币种
@@ -302,6 +305,8 @@ export default function NewReimbursementPage() {
         seatClass: ocrData.seatClass || '',
         exchangeRate: rate,
         amountInUSD: amount > 0 ? parseFloat((amount * rate).toFixed(2)) : undefined,
+        receiptUrl: ocrData.receiptUrl || '',
+        receiptFileName: ocrData.receiptFileName || '',
       });
     }
 
@@ -381,10 +386,13 @@ export default function NewReimbursementPage() {
     if (imageFiles.length > 0) {
       setIsRecognizing(true);
 
-      // 收集所有 OCR 结果
+      // 收集所有 OCR 结果，包含预览 URL
       const ocrResults: any[] = [];
 
-      for (const imageFile of imageFiles) {
+      for (let i = 0; i < imageFiles.length; i++) {
+        const imageFile = imageFiles[i];
+        const previewUrl = URL.createObjectURL(imageFile);
+
         try {
           const base64 = await fileToBase64(imageFile);
           const mimeType = imageFile.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
@@ -397,7 +405,12 @@ export default function NewReimbursementPage() {
 
           const result = await response.json();
           if (result.success && result.data) {
-            ocrResults.push(result.data);
+            // 将预览 URL 和文件名附加到 OCR 结果
+            ocrResults.push({
+              ...result.data,
+              receiptUrl: previewUrl,
+              receiptFileName: imageFile.name,
+            });
           }
         } catch (error) {
           console.error('OCR error:', error);
@@ -518,6 +531,8 @@ export default function NewReimbursementPage() {
           checkInDate: item.checkInDate,
           checkOutDate: item.checkOutDate,
           nights: item.nights,
+          // Include receipt attachment
+          receiptUrl: item.receiptUrl || '',
         };
       });
 
