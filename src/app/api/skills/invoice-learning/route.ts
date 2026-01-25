@@ -5,8 +5,8 @@ import { auditLogs } from '@/lib/db/schema';
 
 export const dynamic = 'force-dynamic';
 
-// 支持的国家列表及其发票规则
-export const SUPPORTED_COUNTRIES: Record<string, {
+// 支持的国家列表及其发票规则（不能导出，Next.js Route 只允许导出特定字段）
+const SUPPORTED_COUNTRIES: Record<string, {
   name: string;
   officialInvoiceRequired: boolean;
   invoiceFeatures: string[];
