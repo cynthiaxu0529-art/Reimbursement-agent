@@ -185,26 +185,41 @@ export async function POST(request: NextRequest) {
 
     // 创建费用明细
     if (items.length > 0) {
+      // 解析日期，支持多种格式
+      const parseDate = (dateStr: string): Date => {
+        if (!dateStr) return new Date();
+        // 尝试直接解析 ISO 格式 (YYYY-MM-DD)
+        const isoDate = new Date(dateStr);
+        if (!isNaN(isoDate.getTime())) return isoDate;
+        // 尝试解析 YYYY/MM/DD 格式
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+          return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        }
+        return new Date();
+      };
+
       await db.insert(reimbursementItems).values(
         items.map((item: any) => {
           const itemData: any = {
             reimbursementId: reimbursement.id,
             category: item.category,
-            description: item.description || '',
+            description: item.description || item.category || '费用',
             amount: parseFloat(item.amount) || 0,
             currency: item.currency || 'CNY',
+            exchangeRate: item.exchangeRate || null,
             amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
-            date: new Date(item.date),
+            date: parseDate(item.date),
             location: item.location || null,
             vendor: item.vendor || null,
             receiptUrl: item.receiptUrl || null,
           };
           // Add hotel-specific fields
           if (item.checkInDate) {
-            itemData.checkInDate = new Date(item.checkInDate);
+            itemData.checkInDate = parseDate(item.checkInDate);
           }
           if (item.checkOutDate) {
-            itemData.checkOutDate = new Date(item.checkOutDate);
+            itemData.checkOutDate = parseDate(item.checkOutDate);
           }
           if (item.nights) {
             itemData.nights = item.nights;
