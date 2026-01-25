@@ -40,6 +40,16 @@ export interface ParsedReceipt {
   trainNumber?: string;    // 车次号
   flightNumber?: string;   // 航班号
   seatClass?: string;      // 座位等级
+  // 票据验证字段
+  documentCountry?: string;       // 票据所属国家
+  isOfficialInvoice?: boolean;    // 是否为正式发票（非收据/水单）
+  invoiceValidation?: {
+    hasInvoiceCode: boolean;      // 是否有发票代码
+    hasCheckCode: boolean;        // 是否有校验码
+    hasTaxNumber: boolean;        // 是否有税号
+    hasQRCode: boolean;           // 是否有二维码
+    suggestedAction?: string;     // 建议操作
+  };
 }
 
 export type ReceiptType =
@@ -182,6 +192,10 @@ export class ReceiptOCRAgent {
         trainNumber: parsed.trainNumber,
         flightNumber: parsed.flightNumber,
         seatClass: parsed.seatClass,
+        // 票据验证字段
+        documentCountry: parsed.documentCountry || 'CN',
+        isOfficialInvoice: parsed.isOfficialInvoice ?? this.inferIsOfficialInvoice(parsed),
+        invoiceValidation: parsed.invoiceValidation,
       };
     } catch {
       // 如果 JSON 解析失败，返回低置信度结果
@@ -279,6 +293,35 @@ export class ReceiptOCRAgent {
   }
 
   /**
+   * 推断是否为正式发票
+   */
+  private inferIsOfficialInvoice(parsed: Record<string, unknown>): boolean {
+    const type = this.mapReceiptType(parsed.type as string);
+
+    // 火车票和机票行程单可直接报销
+    if (type === 'train_ticket' || type === 'flight_itinerary') {
+      return true;
+    }
+
+    // 增值税发票是正式发票
+    if (type === 'vat_invoice' || type === 'vat_special') {
+      return true;
+    }
+
+    // 酒店水单不是正式发票
+    if (type === 'hotel_receipt') {
+      // 检查是否有发票代码（正式发票的特征）
+      if (parsed.invoiceNumber && (parsed.invoiceNumber as string).length >= 8) {
+        return true;
+      }
+      return false;
+    }
+
+    // 其他类型根据是否有发票号码判断
+    return !!parsed.invoiceNumber;
+  }
+
+  /**
    * 验证发票真伪（调用税务接口）
    */
   async verifyInvoice(
@@ -315,7 +358,7 @@ const OCR_PROMPT = `请仔细分析这张票据/发票图片，提取以下信�
   "type": "票据类型（vat_invoice/vat_special/flight_itinerary/train_ticket/hotel_receipt/taxi_receipt/ride_hailing/restaurant/general_receipt）",
   "vendor": "商家/开票单位名称（火车票填写'中国铁路'，机票填写航空公司名称）",
   "amount": 金额数字（不含货币符号）,
-  "currency": "货币类型（CNY/USD/EUR等）",
+  "currency": "货币类型（CNY/USD/EUR/JPY/HKD等）",
   "date": "日期（YYYY-MM-DD格式）",
   "invoiceNumber": "发票号码",
   "taxNumber": "纳税人识别号",
@@ -333,16 +376,33 @@ const OCR_PROMPT = `请仔细分析这张票据/发票图片，提取以下信�
     }
   ],
   "confidence": 识别置信度（0-1之间的数字）,
-  "rawText": "图片中识别出的原始文本"
+  "rawText": "图片中识别出的原始文本",
+  "documentCountry": "票据所属国家（CN/US/JP/HK/TW/EU等）",
+  "isOfficialInvoice": 是否为正式发票（true/false）,
+  "invoiceValidation": {
+    "hasInvoiceCode": 是否有发票代码（中国发票特有，20位数字）,
+    "hasCheckCode": 是否有校验码/验证码,
+    "hasTaxNumber": 是否有纳税人识别号,
+    "hasQRCode": 是否有二维码,
+    "suggestedAction": "建议操作（如：'可用于报销'/'需补充正式发票'/'建议核验发票真伪'）"
+  }
 }
+
+票据类型判断规则：
+- 中国增值税发票：有发票代码(10/12位)、发票号码(8位)、校验码、二维码 → isOfficialInvoice=true
+- 中国火车票：12306电子客票、纸质车票 → isOfficialInvoice=true（可直接报销）
+- 中国机票行程单：航空运输电子客票行程单 → isOfficialInvoice=true（可直接报销）
+- 酒店水单/结算单：只有消费明细，无发票代码 → isOfficialInvoice=false，suggestedAction="需补充正式发票"
+- 美国Receipt：商家收据，无统一格式 → isOfficialInvoice=true（美国收据即可报销）
+- 日本領収書：有登録番号(T+13位)为合规发票 → isOfficialInvoice=true
+- 香港收据：无统一发票制度，收据即可 → isOfficialInvoice=true
 
 注意事项：
 1. 如果某个字段无法识别，使用 null
 2. 金额应该是数字类型，不要包含货币符号
 3. 日期使用 YYYY-MM-DD 格式
-4. 对于机票行程单，务必提取：航班号、出发地、目的地、舱位等级、票价
-5. 对于火车票，务必提取：车次、出发站、到达站、座位等级、票价
-6. 置信度根据图片清晰度和识别准确性估算
+4. 重点判断是否为正式发票还是仅为消费凭证/水单
+5. 对于中国酒店住宿，水单不能直接报销，需要正式增值税发票
 
 请用 JSON 代码块返回结果：
 \`\`\`json

@@ -16,6 +16,16 @@ interface ReimbursementItem {
   date: string;
   receiptUrl?: string;
   vendor?: string;
+  // 票据验证信息
+  isOfficialInvoice?: boolean;
+  documentCountry?: string;
+  invoiceValidation?: {
+    hasInvoiceCode: boolean;
+    hasCheckCode: boolean;
+    hasTaxNumber: boolean;
+    hasQRCode: boolean;
+    suggestedAction?: string;
+  };
 }
 
 // Risk alert interface
@@ -218,27 +228,47 @@ const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): Risk
     }
   }
 
-  // Check for missing attachments - only alert if there's no receipt at all
+  // Check for missing or invalid attachments
   item.items?.forEach((expense) => {
+    const catLabel = categoryLabels[expense.category]?.label || expense.category;
+
+    // No receipt at all
     if (!expense.receiptUrl && expense.amount > 100) {
       alerts.push({
         id: `risk-${expense.id}-attachment`,
         type: 'missing_attachment',
         level: 'low',
         itemId: expense.id,
-        message: `${categoryLabels[expense.category]?.label || expense.category}费用缺少发票附件`,
+        message: `${catLabel}费用缺少发票附件`,
       });
+      return; // Skip other checks if no receipt
     }
-    // Special check for hotel - may need invoice even if has receipt
-    if (expense.category === 'hotel' && expense.receiptUrl && expense.amount > 500) {
-      // Check if it looks like just a hotel receipt (水单) vs invoice
-      alerts.push({
-        id: `risk-${expense.id}-invoice-check`,
-        type: 'missing_attachment',
-        level: 'low',
-        itemId: expense.id,
-        message: `酒店住宿请确认是否有正规发票（非水单）`,
-      });
+
+    // Has receipt but need to check if it's official invoice
+    if (expense.receiptUrl) {
+      // If we have validation info from OCR
+      if (expense.isOfficialInvoice === false) {
+        const action = expense.invoiceValidation?.suggestedAction || '需补充正式发票';
+        alerts.push({
+          id: `risk-${expense.id}-unofficial`,
+          type: 'missing_attachment',
+          level: 'medium',
+          itemId: expense.id,
+          message: `${catLabel}：${action}`,
+        });
+      }
+      // Special check for hotel in China - always verify if official
+      else if (expense.category === 'hotel' && expense.amount > 500 && expense.documentCountry === 'CN') {
+        if (expense.isOfficialInvoice !== true) {
+          alerts.push({
+            id: `risk-${expense.id}-invoice-check`,
+            type: 'missing_attachment',
+            level: 'low',
+            itemId: expense.id,
+            message: `酒店住宿请确认是否有正规增值税发票（非水单）`,
+          });
+        }
+      }
     }
   });
 
