@@ -256,6 +256,8 @@ export class FluxPayClient {
         completedAt: data.completed_at ? new Date(data.completed_at) : undefined,
         recipient: {
           name: data.recipient.name,
+          walletAddress: data.recipient.wallet_address || '',
+          chain: data.recipient.chain || 'base',
           bankName: data.recipient.bank_name,
           accountNumber: data.recipient.account_number,
         },
