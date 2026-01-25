@@ -218,7 +218,7 @@ const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): Risk
     }
   }
 
-  // Always check for missing attachments
+  // Check for missing attachments - only alert if there's no receipt at all
   item.items?.forEach((expense) => {
     if (!expense.receiptUrl && expense.amount > 100) {
       alerts.push({
@@ -227,6 +227,17 @@ const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): Risk
         level: 'low',
         itemId: expense.id,
         message: `${categoryLabels[expense.category]?.label || expense.category}费用缺少发票附件`,
+      });
+    }
+    // Special check for hotel - may need invoice even if has receipt
+    if (expense.category === 'hotel' && expense.receiptUrl && expense.amount > 500) {
+      // Check if it looks like just a hotel receipt (水单) vs invoice
+      alerts.push({
+        id: `risk-${expense.id}-invoice-check`,
+        type: 'missing_attachment',
+        level: 'low',
+        itemId: expense.id,
+        message: `酒店住宿请确认是否有正规发票（非水单）`,
       });
     }
   });
