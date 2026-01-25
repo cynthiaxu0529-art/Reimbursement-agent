@@ -396,6 +396,8 @@ const OCR_PROMPT = `请仔细分析这张票据/发票图片，提取以下信�
 - 美国Receipt：商家收据，无统一格式 → isOfficialInvoice=true（美国收据即可报销）
 - 日本領収書：有登録番号(T+13位)为合规发票 → isOfficialInvoice=true
 - 香港收据：无统一发票制度，收据即可 → isOfficialInvoice=true
+- 新加坡Tax Invoice：有GST Registration Number(格式M+8位数字+字母，如M12345678A) → isOfficialInvoice=true
+- 新加坡收据：无GST号码的普通收据也可报销 → isOfficialInvoice=true
 
 注意事项：
 1. 如果某个字段无法识别，使用 null
