@@ -213,6 +213,11 @@ export default function ReimbursementsPage() {
     pending: reimbursements.filter(r => r.status === 'pending' || r.status === 'under_review').length,
     approved: reimbursements.filter(r => r.status === 'approved' || r.status === 'paid').length,
     totalAmount: reimbursements.reduce((sum, r) => sum + r.totalAmount, 0),
+    totalAmountUSD: reimbursements.reduce((sum, r) => {
+      // 优先使用已转换的美元金额，否则用默认汇率
+      const usdAmount = r.totalAmountInBaseCurrency || r.totalAmount * 0.14;
+      return sum + usdAmount;
+    }, 0),
   };
 
   const formatDate = (dateStr: string) => {
@@ -316,8 +321,11 @@ export default function ReimbursementsPage() {
           border: '1px solid #e5e7eb',
         }}>
           <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>报销总额</p>
-          <p style={{ fontSize: '24px', fontWeight: 700, color: '#2563eb' }}>
+          <p style={{ fontSize: '24px', fontWeight: 700, color: '#2563eb', marginBottom: '4px' }}>
             ¥{stats.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+          </p>
+          <p style={{ fontSize: '16px', fontWeight: 600, color: '#0369a1' }}>
+            ${stats.totalAmountUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </p>
         </div>
       </div>
