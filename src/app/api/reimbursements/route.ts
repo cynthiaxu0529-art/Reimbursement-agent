@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
     // 构建查询条件
     let conditions: any[] = [];
 
-    if (role === 'approver' && session.user.tenantId) {
-      // 审批人模式：查看同租户的报销（排除自己的）
+    if ((role === 'approver' || role === 'finance') && session.user.tenantId) {
+      // 审批人/财务模式：查看同租户的报销
       conditions.push(eq(reimbursements.tenantId, session.user.tenantId));
     } else {
       // 员工模式：只看自己的
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
       offset: (page - 1) * pageSize,
       with: {
         items: true,
-        user: role === 'approver' ? {
+        user: (role === 'approver' || role === 'finance') ? {
           columns: {
             id: true,
             name: true,
