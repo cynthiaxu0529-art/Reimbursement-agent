@@ -646,10 +646,10 @@ export default function ApprovalsPage() {
                     </p>
                   </div>
 
-                  {/* Reimbursement Amount */}
+                  {/* Reimbursement Amount (USD) */}
                   <div className="text-right">
                     <p className="text-[13px] font-semibold text-green-600">
-                      ¥{item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                      ${(item.totalAmountInBaseCurrency || item.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </p>
                   </div>
 
@@ -726,7 +726,7 @@ export default function ApprovalsPage() {
                                 <div>类别</div>
                                 <div className="text-right">原币金额</div>
                                 <div className="text-center">汇率</div>
-                                <div className="text-right">折算金额</div>
+                                <div className="text-right">美元金额</div>
                                 <div></div>
                               </div>
 
@@ -786,10 +786,10 @@ export default function ApprovalsPage() {
                                       {exchangeRate.toFixed(4)}
                                     </div>
 
-                                    {/* Converted Amount */}
+                                    {/* Converted Amount (USD) */}
                                     <div className="text-right">
                                       <p className="text-[13px] font-semibold text-green-600">
-                                        ¥{convertedAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                                        ${(lineItem.amountInBaseCurrency || lineItem.amount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                       </p>
                                     </div>
 
@@ -811,11 +811,15 @@ export default function ApprovalsPage() {
                               <div className="grid grid-cols-[2fr_1fr_120px_100px_120px_40px] gap-3 px-3.5 py-3 bg-gray-50 border-t items-center">
                                 <div className="text-[13px] font-semibold text-gray-700">合计</div>
                                 <div></div>
-                                <div></div>
+                                <div className="text-right">
+                                  <p className="text-[13px] font-semibold text-gray-700">
+                                    ¥{expandedData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                                  </p>
+                                </div>
                                 <div></div>
                                 <div className="text-right">
                                   <p className="text-sm font-bold text-green-600">
-                                    ¥{expandedData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                                    ${(expandedData.totalAmountInBaseCurrency || expandedData.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                   </p>
                                 </div>
                                 <div></div>
