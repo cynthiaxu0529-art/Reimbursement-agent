@@ -21,8 +21,12 @@ export interface PaymentRequest {
 
 export interface PaymentRecipient {
   name: string;
-  bankName: string;
-  accountNumber: string;
+  // Crypto wallet (Base chain)
+  walletAddress: string;
+  chain?: string; // default: 'base'
+  // Legacy bank account fields (optional)
+  bankName?: string;
+  accountNumber?: string;
   branchName?: string;
   swiftCode?: string;
   routingNumber?: string;
@@ -177,13 +181,11 @@ export class FluxPayClient {
         body: JSON.stringify({
           amount: request.amount,
           currency: request.currency,
+          chain: request.recipient.chain || 'base', // FluxPay uses Base chain
           recipient: {
             name: request.recipient.name,
-            bank_name: request.recipient.bankName,
-            account_number: request.recipient.accountNumber,
-            branch_name: request.recipient.branchName,
-            swift_code: request.recipient.swiftCode,
-            routing_number: request.recipient.routingNumber,
+            wallet_address: request.recipient.walletAddress,
+            chain: request.recipient.chain || 'base',
           },
           description: request.description,
           reference_id: request.reimbursementId,
@@ -401,19 +403,26 @@ export class PaymentService {
   }
 
   /**
-   * 验证收款人信息
+   * 验证收款人信息（钱包地址）
    */
   private validateRecipient(recipient: PaymentRecipient): boolean {
     if (!recipient.name || recipient.name.trim().length === 0) {
       return false;
     }
-    if (!recipient.bankName || recipient.bankName.trim().length === 0) {
-      return false;
-    }
-    if (!recipient.accountNumber || recipient.accountNumber.trim().length === 0) {
+    // 验证钱包地址格式 (Base chain uses Ethereum-compatible addresses)
+    if (!recipient.walletAddress || !this.isValidWalletAddress(recipient.walletAddress)) {
       return false;
     }
     return true;
+  }
+
+  /**
+   * 验证钱包地址格式 (EVM compatible)
+   */
+  private isValidWalletAddress(address: string): boolean {
+    // Ethereum/Base address format: 0x followed by 40 hex characters
+    const evmAddressRegex = /^0x[a-fA-F0-9]{40}$/;
+    return evmAddressRegex.test(address);
   }
 
   /**

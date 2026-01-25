@@ -376,35 +376,32 @@ async function triggerPayment(reimbursement: any, userId: string) {
       return { success: false, error: 'FluxPay 未配置' };
     }
 
-    // 检查用户银行账户
-    const bankAccount = user.bankAccount as {
-      name?: string;
-      bankName?: string;
-      accountNumber?: string;
-      branchName?: string;
+    // 检查用户钱包地址（FluxPay 使用 Base 链）
+    const walletInfo = user.bankAccount as {
+      walletAddress?: string;
+      chain?: string;
     } | null;
 
-    if (!bankAccount?.accountNumber) {
-      console.log('User bank account not configured, skipping payment');
+    if (!walletInfo?.walletAddress) {
+      console.log('User wallet not configured, skipping payment');
       return {
         success: false,
-        error: '用户未配置银行账户',
-        message: '请在个人设置中添加银行账户信息',
+        error: '用户未配置钱包地址',
+        message: '请在个人设置中添加 Base 链钱包地址',
       };
     }
 
-    // 创建支付请求
+    // 创建支付请求（FluxPay Base 链）
     const paymentService = createPaymentService();
     const result = await paymentService.processReimbursementPayment(
       reimbursement.id,
       userId,
       reimbursement.totalAmount,
-      reimbursement.baseCurrency || 'CNY',
+      reimbursement.baseCurrency || 'USD', // FluxPay on Base uses stablecoins
       {
-        name: bankAccount.name || user.name,
-        bankName: bankAccount.bankName || '',
-        accountNumber: bankAccount.accountNumber,
-        branchName: bankAccount.branchName,
+        name: user.name || 'User',
+        walletAddress: walletInfo.walletAddress,
+        chain: walletInfo.chain || 'base',
       },
       `报销付款 - ${reimbursement.title}`
     );

@@ -370,23 +370,31 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="mt-4 pt-4 border-t">
-                  <h4 className="text-sm font-semibold text-gray-900 mb-4">💰 钱包地址（用于报销打款）</h4>
+                  <h4 className="text-sm font-semibold text-gray-900 mb-4">💰 钱包地址（FluxPay 打款）</h4>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">钱包地址</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Base 链钱包地址
+                      <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                        Base Chain
+                      </span>
+                    </label>
                     <input
                       type="text"
                       value={profile.walletAddress}
                       onChange={(e) => setProfile({ ...profile, walletAddress: e.target.value })}
-                      placeholder="例如：0x1234...abcd"
+                      placeholder="0x..."
                       disabled={!isEditingProfile}
-                      className={`w-full px-3 py-2.5 border rounded-lg text-sm ${
+                      className={`w-full px-3 py-2.5 border rounded-lg text-sm font-mono ${
                         isEditingProfile
                           ? 'border-gray-300'
                           : 'bg-gray-50 cursor-not-allowed'
                       }`}
                     />
-                    <p className="text-xs text-gray-500 mt-1">
-                      请填写您的加密货币钱包地址，用于接收报销款项
+                    <p className="text-xs text-gray-500 mt-1.5">
+                      请填写您在 <span className="font-semibold text-blue-600">Base 链</span> 上的钱包地址（以 0x 开头的 42 位地址），用于接收报销款项
+                    </p>
+                    <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                      <span>⚠️</span> 请确保使用 Base 链钱包，否则可能无法收到款项
                     </p>
                   </div>
                 </div>
