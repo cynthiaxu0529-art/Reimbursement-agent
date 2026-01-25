@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, payments } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { createPaymentService } from '@/lib/mcp/fluxpay-client';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -335,9 +336,16 @@ export async function PATCH(
       .where(eq(reimbursements.id, id))
       .returning();
 
+    // 如果审批通过，自动发起支付
+    let paymentResult = null;
+    if (newStatus === 'approved') {
+      paymentResult = await triggerPayment(updated, existing.userId);
+    }
+
     return NextResponse.json({
       success: true,
       data: updated,
+      payment: paymentResult,
     });
   } catch (error) {
     console.error('Update reimbursement status error:', error);
@@ -345,5 +353,88 @@ export async function PATCH(
       { error: '更新报销单状态失败' },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * 触发 FluxPay 支付
+ */
+async function triggerPayment(reimbursement: any, userId: string) {
+  try {
+    // 获取用户银行账户信息
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!user) {
+      return { success: false, error: '用户不存在' };
+    }
+
+    // 检查是否配置了 FluxPay
+    if (!process.env.FLUXPAY_API_KEY) {
+      console.log('FluxPay not configured, skipping automatic payment');
+      return { success: false, error: 'FluxPay 未配置' };
+    }
+
+    // 检查用户钱包地址（FluxPay 使用 Base 链）
+    const walletInfo = user.bankAccount as {
+      walletAddress?: string;
+      chain?: string;
+    } | null;
+
+    if (!walletInfo?.walletAddress) {
+      console.log('User wallet not configured, skipping payment');
+      return {
+        success: false,
+        error: '用户未配置钱包地址',
+        message: '请在个人设置中添加 Base 链钱包地址',
+      };
+    }
+
+    // 创建支付请求（FluxPay Base 链）
+    const paymentService = createPaymentService();
+    const result = await paymentService.processReimbursementPayment(
+      reimbursement.id,
+      userId,
+      reimbursement.totalAmount,
+      reimbursement.baseCurrency || 'USD', // FluxPay on Base uses stablecoins
+      {
+        name: user.name || 'User',
+        walletAddress: walletInfo.walletAddress,
+        chain: walletInfo.chain || 'base',
+      },
+      `报销付款 - ${reimbursement.title}`
+    );
+
+    // 记录支付请求
+    if (result.transactionId) {
+      await db.insert(payments).values({
+        reimbursementId: reimbursement.id,
+        amount: reimbursement.totalAmount,
+        currency: reimbursement.baseCurrency || 'CNY',
+        transactionId: result.transactionId,
+        status: result.status,
+        paymentProvider: 'fluxpay',
+      });
+
+      // 更新报销单状态为处理中
+      await db
+        .update(reimbursements)
+        .set({ status: 'processing' })
+        .where(eq(reimbursements.id, reimbursement.id));
+    }
+
+    return {
+      success: result.success,
+      transactionId: result.transactionId,
+      status: result.status,
+      message: result.success ? '支付已发起' : result.error?.message,
+    };
+  } catch (error) {
+    console.error('Trigger payment error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '支付发起失败',
+    };
   }
 }

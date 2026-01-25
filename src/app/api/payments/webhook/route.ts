@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { db } from '@/lib/db';
+import { reimbursements, payments } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
@@ -95,14 +98,36 @@ function verifySignature(body: string, signature: string | null): boolean {
 async function handlePaymentCompleted(data: WebhookPayload['data']) {
   console.log('Payment completed:', data.transaction_id);
 
-  // TODO: 更新报销单状态为已付款
-  // await updateReimbursementStatus(data.reference_id, 'paid', {
-  //   transactionId: data.transaction_id,
-  //   paidAt: data.completed_at,
-  // });
+  const reimbursementId = data.reference_id;
 
-  // TODO: 发送通知给申请人
-  // await sendNotification(data.reference_id, 'payment_completed');
+  try {
+    // 更新支付记录状态
+    await db
+      .update(payments)
+      .set({
+        status: 'success',
+        paidAt: data.completed_at ? new Date(data.completed_at) : new Date(),
+      })
+      .where(eq(payments.transactionId, data.transaction_id));
+
+    // 更新报销单状态为已付款
+    await db
+      .update(reimbursements)
+      .set({
+        status: 'paid',
+        paidAt: data.completed_at ? new Date(data.completed_at) : new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(reimbursements.id, reimbursementId));
+
+    console.log(`Reimbursement ${reimbursementId} marked as paid`);
+
+    // TODO: 发送通知给申请人
+    // await sendNotification(reimbursementId, 'payment_completed');
+  } catch (error) {
+    console.error('Failed to update payment status:', error);
+    throw error;
+  }
 }
 
 /**
@@ -111,14 +136,35 @@ async function handlePaymentCompleted(data: WebhookPayload['data']) {
 async function handlePaymentFailed(data: WebhookPayload['data']) {
   console.log('Payment failed:', data.transaction_id, data.failed_reason);
 
-  // TODO: 更新报销单状态
-  // await updateReimbursementStatus(data.reference_id, 'payment_failed', {
-  //   transactionId: data.transaction_id,
-  //   failedReason: data.failed_reason,
-  // });
+  const reimbursementId = data.reference_id;
 
-  // TODO: 发送通知给财务和申请人
-  // await sendNotification(data.reference_id, 'payment_failed');
+  try {
+    // 更新支付记录状态
+    await db
+      .update(payments)
+      .set({
+        status: 'failed',
+        errorMessage: data.failed_reason || '支付失败',
+      })
+      .where(eq(payments.transactionId, data.transaction_id));
+
+    // 将报销单状态改回已批准（可以重新发起支付）
+    await db
+      .update(reimbursements)
+      .set({
+        status: 'approved',
+        updatedAt: new Date(),
+      })
+      .where(eq(reimbursements.id, reimbursementId));
+
+    console.log(`Reimbursement ${reimbursementId} payment failed, status reverted to approved`);
+
+    // TODO: 发送通知给财务和申请人
+    // await sendNotification(reimbursementId, 'payment_failed');
+  } catch (error) {
+    console.error('Failed to handle payment failure:', error);
+    throw error;
+  }
 }
 
 /**
@@ -127,8 +173,29 @@ async function handlePaymentFailed(data: WebhookPayload['data']) {
 async function handlePaymentCancelled(data: WebhookPayload['data']) {
   console.log('Payment cancelled:', data.transaction_id);
 
-  // TODO: 更新报销单状态
-  // await updateReimbursementStatus(data.reference_id, 'approved', {
-  //   transactionId: null,
-  // });
+  const reimbursementId = data.reference_id;
+
+  try {
+    // 更新支付记录状态
+    await db
+      .update(payments)
+      .set({
+        status: 'cancelled',
+      })
+      .where(eq(payments.transactionId, data.transaction_id));
+
+    // 将报销单状态改回已批准
+    await db
+      .update(reimbursements)
+      .set({
+        status: 'approved',
+        updatedAt: new Date(),
+      })
+      .where(eq(reimbursements.id, reimbursementId));
+
+    console.log(`Reimbursement ${reimbursementId} payment cancelled`);
+  } catch (error) {
+    console.error('Failed to handle payment cancellation:', error);
+    throw error;
+  }
 }

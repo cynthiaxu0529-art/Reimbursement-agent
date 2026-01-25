@@ -486,6 +486,73 @@ export function createSmartCategorizerSkill(tenantId: string): Skill {
 }
 
 /**
+ * 创建发票学习收集 Skill
+ * 收集发票样本数据用于模型改进
+ */
+export function createInvoiceLearnerSkill(tenantId: string): Skill {
+  return {
+    id: 'builtin_invoice_learner',
+    tenantId,
+    name: '发票样本学习',
+    description: '收集发票识别结果用于持续改进识别准确率',
+    category: SkillCategory.AI_ENHANCEMENT,
+    version: '1.0.0',
+    isActive: true,
+    isBuiltIn: true,
+    triggers: [
+      { type: SkillTrigger.ON_RECEIPT_UPLOAD },
+    ],
+    executor: {
+      type: 'javascript',
+      code: `
+        // 收集发票识别结果用于学习
+        const receipt = context.receipt;
+        if (!receipt) return { collected: false };
+
+        const sample = {
+          tenantId: context.tenant.id,
+          country: receipt.documentCountry || 'CN',
+          type: receipt.type,
+          category: receipt.category,
+          isOfficialInvoice: receipt.isOfficialInvoice,
+          invoiceValidation: receipt.invoiceValidation,
+          confidence: receipt.confidence,
+          vendor: receipt.vendor,
+          amount: receipt.amount,
+          currency: receipt.currency,
+          // 用于训练的特征
+          features: {
+            hasInvoiceCode: receipt.invoiceValidation?.hasInvoiceCode,
+            hasCheckCode: receipt.invoiceValidation?.hasCheckCode,
+            hasTaxNumber: receipt.invoiceValidation?.hasTaxNumber,
+            hasQRCode: receipt.invoiceValidation?.hasQRCode,
+          },
+          collectedAt: new Date().toISOString(),
+        };
+
+        // 异步发送到学习服务（不阻塞主流程）
+        fetch('/api/skills/invoice-learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sample),
+        }).catch(console.error);
+
+        return {
+          collected: true,
+          country: sample.country,
+          type: sample.type,
+        };
+      `,
+    },
+    permissions: [
+      { resource: 'receipt', actions: ['read'] },
+    ],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+/**
  * 获取所有内置 Skills
  */
 export function getBuiltInSkills(tenantId: string): Skill[] {
@@ -493,6 +560,7 @@ export function getBuiltInSkills(tenantId: string): Skill[] {
     createMileageCalculatorSkill(tenantId),
     createDuplicateDetectorSkill(tenantId),
     createSmartCategorizerSkill(tenantId),
+    createInvoiceLearnerSkill(tenantId),
   ];
 }
 
