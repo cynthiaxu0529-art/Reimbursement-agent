@@ -764,7 +764,13 @@ export default function ApprovalsPage() {
                                       </p>
                                       <p className="text-xs text-gray-500">{catInfo.label}</p>
                                     </div>
-                                    <button className="p-1.5 text-gray-400 hover:text-blue-600">
+                                    <button
+                                      className="p-1.5 text-gray-400 hover:text-blue-600"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setPreviewImage(lineItem.receiptUrl || null);
+                                      }}
+                                    >
                                       👁
                                     </button>
                                   </div>

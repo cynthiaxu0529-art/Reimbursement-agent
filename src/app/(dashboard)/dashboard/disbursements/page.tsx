@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -64,6 +65,7 @@ const generateFormId = (createdAt: string, id: string): string => {
 };
 
 export default function DisbursementsPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'ready' | 'processing' | 'history'>('ready');
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,6 +77,17 @@ export default function DisbursementsPage() {
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [roleChecked, setRoleChecked] = useState(false);
+
+  // 检查用户角色，非财务角色重定向
+  useEffect(() => {
+    const savedRole = localStorage.getItem('userRole');
+    if (savedRole !== 'finance') {
+      router.push('/dashboard');
+    } else {
+      setRoleChecked(true);
+    }
+  }, [router]);
 
   // 获取 FluxPay 钱包余额
   useEffect(() => {
@@ -242,6 +255,15 @@ export default function DisbursementsPage() {
       year: 'numeric', month: 'short', day: 'numeric'
     });
   };
+
+  // 等待角色检查完成
+  if (!roleChecked) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-100px)]">
+        <div className="text-gray-500">验证权限...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-100px)]">
@@ -642,7 +664,13 @@ export default function DisbursementsPage() {
                                     {categoryLabels[lineItem.category]?.label || '其他'}
                                   </p>
                                 </div>
-                                <button className="text-gray-400 hover:text-blue-600">
+                                <button
+                                  className="text-gray-400 hover:text-blue-600"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setPreviewImage(lineItem.receiptUrl || null);
+                                  }}
+                                >
                                   👁
                                 </button>
                               </div>
