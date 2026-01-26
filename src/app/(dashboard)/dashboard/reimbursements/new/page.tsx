@@ -506,7 +506,8 @@ export default function NewReimbursementPage() {
       if (result.success) {
         router.push('/dashboard/reimbursements');
       } else {
-        alert(result.error || '提交失败，请重试');
+        const errMsg = result.detail ? `${result.error}\n详情: ${result.detail}` : result.error;
+        alert(errMsg || '提交失败，请重试');
         setIsSubmitting(false);
       }
     } catch (error) {

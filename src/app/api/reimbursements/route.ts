@@ -213,10 +213,12 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('Create reimbursement error:', error);
-    // 返回更详细的错误信息以便调试
-    const errorMessage = error?.message || '创建报销单失败';
+    // 返回详细的错误信息以便调试
     return NextResponse.json(
-      { error: errorMessage.includes('duplicate') ? '报销单已存在' : '创建报销单失败，请检查数据格式' },
+      {
+        error: `创建失败: ${error?.message || '未知错误'}`,
+        detail: error?.detail || error?.code || null
+      },
       { status: 500 }
     );
   }
