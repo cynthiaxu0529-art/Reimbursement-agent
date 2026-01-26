@@ -38,6 +38,24 @@ interface RiskAlert {
   percentage?: number;
 }
 
+interface ApprovalChainStep {
+  id: string;
+  stepOrder: number;
+  stepType: string;
+  stepName: string;
+  approverId?: string;
+  approverRole?: string;
+  status: 'pending' | 'approved' | 'rejected' | 'skipped';
+  comment?: string;
+  completedAt?: string;
+  approver?: {
+    id: string;
+    name: string;
+    email: string;
+    avatar?: string;
+  };
+}
+
 interface Reimbursement {
   id: string;
   title: string;
@@ -56,6 +74,8 @@ interface Reimbursement {
     department?: string;
   };
   riskAlerts?: RiskAlert[];
+  approvalChain?: ApprovalChainStep[];
+  canApprove?: boolean;
 }
 
 const categoryLabels: Record<string, { label: string; icon: string }> = {
@@ -681,6 +701,55 @@ export default function ApprovalsPage() {
                                 </div>
                               ))}
                             </div>
+                          </div>
+                        )}
+
+                        {/* Approval Chain */}
+                        {expandedData.approvalChain && expandedData.approvalChain.length > 0 && (
+                          <div className="mb-5 p-4 bg-blue-50 rounded-xl border border-blue-200">
+                            <h4 className="text-sm font-semibold text-blue-700 mb-3 flex items-center gap-2">
+                              📋 审批流程
+                            </h4>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {expandedData.approvalChain.map((step, idx) => {
+                                const isCurrentStep = step.status === 'pending' &&
+                                  expandedData.approvalChain?.slice(0, idx).every(s => s.status === 'approved' || s.status === 'skipped');
+                                const statusConfig = {
+                                  pending: { bg: 'bg-gray-100', text: 'text-gray-600', icon: '⏳' },
+                                  approved: { bg: 'bg-green-100', text: 'text-green-700', icon: '✅' },
+                                  rejected: { bg: 'bg-red-100', text: 'text-red-700', icon: '❌' },
+                                  skipped: { bg: 'bg-gray-100', text: 'text-gray-400', icon: '⏭️' },
+                                };
+                                const config = statusConfig[step.status] || statusConfig.pending;
+
+                                return (
+                                  <div key={step.id} className="flex items-center gap-2">
+                                    <div className={`px-3 py-2 rounded-lg ${config.bg} ${isCurrentStep ? 'ring-2 ring-blue-500' : ''}`}>
+                                      <div className="flex items-center gap-2">
+                                        <span>{config.icon}</span>
+                                        <div>
+                                          <p className={`text-sm font-medium ${config.text}`}>{step.stepName}</p>
+                                          {step.approver && (
+                                            <p className="text-xs text-gray-500">{step.approver.name}</p>
+                                          )}
+                                          {step.completedAt && (
+                                            <p className="text-xs text-gray-400">
+                                              {new Date(step.completedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {idx < (expandedData.approvalChain?.length || 0) - 1 && (
+                                      <span className="text-gray-300">→</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {expandedData.canApprove && (
+                              <p className="mt-3 text-sm text-blue-600 font-medium">✨ 当前轮到您审批</p>
+                            )}
                           </div>
                         )}
 
