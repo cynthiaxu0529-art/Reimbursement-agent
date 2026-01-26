@@ -72,6 +72,30 @@ export default function DisbursementsPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // 获取 FluxPay 钱包余额
+  useEffect(() => {
+    const fetchBalance = async () => {
+      try {
+        const response = await fetch('/api/payments/balance');
+        const result = await response.json();
+        if (result.success) {
+          setWalletBalance(result.balance);
+          setBalanceWarning(result.warning || null);
+        } else {
+          setWalletBalance(0);
+          setBalanceWarning(result.error || 'FluxPay 连接失败');
+        }
+      } catch (error) {
+        setWalletBalance(0);
+        setBalanceWarning('无法获取余额');
+      }
+    };
+    fetchBalance();
+  }, []);
 
   useEffect(() => {
     fetchReimbursements();
@@ -98,6 +122,7 @@ export default function DisbursementsPage() {
 
   const processPayment = async (id: string) => {
     setProcessing(id);
+    setErrorMessage(null);
     try {
       const response = await fetch(`/api/payments/process`, {
         method: 'POST',
@@ -111,13 +136,20 @@ export default function DisbursementsPage() {
         setReimbursements(prev => prev.filter(r => r.id !== id));
         setSelectedIds(prev => prev.filter(sid => sid !== id));
         setExpandedId(null);
+        setErrorMessage(null);
         alert('付款已发起，正在通过 FluxPay 处理');
       } else {
-        alert(result.error || '付款处理失败');
+        // 显示详细的错误信息
+        const errorMsg = result.message || result.error || '付款处理失败';
+        const errorDetails = result.details ? `\n详情: ${result.details}` : '';
+        setErrorMessage(`${errorMsg}${errorDetails}`);
+        alert(`付款失败: ${errorMsg}${errorDetails}`);
       }
     } catch (error) {
       console.error('Payment error:', error);
-      alert('付款处理失败');
+      const msg = error instanceof Error ? error.message : '网络错误';
+      setErrorMessage(`付款处理失败: ${msg}`);
+      alert(`付款处理失败: ${msg}`);
     } finally {
       setProcessing(null);
     }
@@ -242,16 +274,42 @@ export default function DisbursementsPage() {
         </div>
       </div>
 
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-700 flex items-center gap-2">
+            <span>⚠️</span>
+            {errorMessage}
+          </p>
+        </div>
+      )}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-4 gap-4 mb-6">
-        <Card className="p-4 border-l-4 border-l-blue-500">
+        <Card className={`p-4 border-l-4 ${walletBalance !== null && walletBalance >= totalPayable ? 'border-l-blue-500' : 'border-l-red-500'}`}>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-gray-500 mb-1">可用余额</p>
-              <p className="text-2xl font-bold text-gray-900">$85,430.50</p>
-              <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                <span>✓</span> 余额充足
-              </p>
+              <p className="text-xs text-gray-500 mb-1">可用余额 (FluxPay)</p>
+              {walletBalance === null ? (
+                <p className="text-2xl font-bold text-gray-400">加载中...</p>
+              ) : (
+                <p className="text-2xl font-bold text-gray-900">
+                  ${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                </p>
+              )}
+              {balanceWarning ? (
+                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                  <span>⚠️</span> {balanceWarning}
+                </p>
+              ) : walletBalance !== null && walletBalance >= totalPayable ? (
+                <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                  <span>✓</span> 余额充足
+                </p>
+              ) : walletBalance !== null ? (
+                <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                  <span>⚠️</span> 余额不足
+                </p>
+              ) : null}
             </div>
             <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-xl">
               🏦
