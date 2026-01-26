@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users, payments } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { reimbursements, reimbursementItems, users, payments, approvalChain } from '@/lib/db/schema';
+import { eq, and, asc } from 'drizzle-orm';
 import { createPaymentService } from '@/lib/mcp/fluxpay-client';
+import {
+  generateApprovalChain,
+  processApprovalAction,
+  getApprovalChain,
+  canUserApprove,
+} from '@/lib/approval/approval-chain-service';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -59,6 +65,22 @@ export async function GET(
       return NextResponse.json({ error: '无权查看此报销单' }, { status: 403 });
     }
 
+    // 获取审批链
+    let approvalChainData = null;
+    try {
+      approvalChainData = await getApprovalChain(id);
+    } catch {
+      // 审批链可能不存在（旧的报销单）
+    }
+
+    // 检查当前用户是否可以审批
+    let canApprove = false;
+    try {
+      canApprove = await canUserApprove(id, session.user.id);
+    } catch {
+      // 忽略错误
+    }
+
     // Transform data to include submitter info
     const transformedData = {
       ...reimbursement,
@@ -69,6 +91,8 @@ export async function GET(
         department: reimbursement.user.department,
       } : undefined,
       user: undefined, // Remove the raw user object
+      approvalChain: approvalChainData,
+      canApprove,
     };
 
     return NextResponse.json({
@@ -198,9 +222,36 @@ export async function PUT(
       );
     }
 
+    // 如果提交报销单，生成审批链
+    let generatedChain = null;
+    if (newStatus === 'pending' && existing.tenantId) {
+      try {
+        // 删除旧的审批链（如果有）
+        await db
+          .delete(approvalChain)
+          .where(eq(approvalChain.reimbursementId, id));
+
+        // 获取费用类别列表
+        const categories = items?.map((item: any) => item.category) || [];
+
+        // 生成新的审批链
+        generatedChain = await generateApprovalChain({
+          reimbursementId: id,
+          userId: session.user.id,
+          tenantId: existing.tenantId,
+          totalAmount: usdTotal,
+          categories,
+        });
+      } catch (error) {
+        console.error('生成审批链失败:', error);
+        // 即使审批链生成失败，也继续提交（使用默认审批流程）
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: updated,
+      approvalChain: generatedChain,
     });
   } catch (error) {
     console.error('Update reimbursement error:', error);
@@ -283,7 +334,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { status: newStatus, rejectReason, comment } = body;
+    const { status: newStatus, rejectReason, comment, useApprovalChain } = body;
 
     // 查找报销单
     const existing = await db.query.reimbursements.findFirst({
@@ -299,7 +350,51 @@ export async function PATCH(
       return NextResponse.json({ error: '无权操作此报销单' }, { status: 403 });
     }
 
-    // 验证状态转换
+    // 检查是否存在审批链
+    const existingChain = await db.query.approvalChain.findMany({
+      where: eq(approvalChain.reimbursementId, id),
+      orderBy: [asc(approvalChain.stepOrder)],
+    });
+
+    // 如果存在审批链且请求使用审批链，使用多级审批逻辑
+    if (existingChain.length > 0 && (useApprovalChain !== false) && (newStatus === 'approved' || newStatus === 'rejected')) {
+      try {
+        const action = newStatus === 'approved' ? 'approve' : 'reject';
+        const result = await processApprovalAction(
+          id,
+          session.user.id,
+          action,
+          comment || rejectReason
+        );
+
+        // 获取更新后的报销单
+        const updated = await db.query.reimbursements.findFirst({
+          where: eq(reimbursements.id, id),
+        });
+
+        // 如果所有审批都通过，自动发起支付
+        let paymentResult = null;
+        if (result.completed && result.approved && updated) {
+          paymentResult = await triggerPayment(updated, existing.userId);
+        }
+
+        // 获取最新的审批链
+        const updatedChain = await getApprovalChain(id);
+
+        return NextResponse.json({
+          success: true,
+          data: updated,
+          approvalChain: updatedChain,
+          approvalResult: result,
+          payment: paymentResult,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : '审批操作失败';
+        return NextResponse.json({ error: errorMessage }, { status: 400 });
+      }
+    }
+
+    // 传统审批流程（无审批链）
     const validTransitions: Record<string, string[]> = {
       pending: ['approved', 'rejected', 'under_review'],
       under_review: ['approved', 'rejected'],
@@ -315,7 +410,7 @@ export async function PATCH(
     }
 
     // 更新报销单状态
-    const updateData: any = {
+    const updateData: Record<string, unknown> = {
       status: newStatus,
       updatedAt: new Date(),
     };
