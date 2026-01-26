@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 
 // 员工导航
@@ -47,6 +47,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [role, setRole] = useState<UserRole>('employee');
   const [showRoleMenu, setShowRoleMenu] = useState(false);
 
@@ -58,11 +59,48 @@ export default function DashboardLayout({
     }
   }, []);
 
-  // 切换角色
+  // 检查当前页面是否对当前角色可访问，如果不是则跳转
+  useEffect(() => {
+    // 员工不能访问审批、付款等页面
+    if (role === 'employee') {
+      if (pathname.startsWith('/dashboard/approvals') || pathname.startsWith('/dashboard/disbursements') || pathname.startsWith('/dashboard/team')) {
+        router.push('/dashboard/reimbursements');
+      }
+    }
+    // 审批人不能访问员工的报销页面和付款页面
+    else if (role === 'approver') {
+      if (pathname.startsWith('/dashboard/reimbursements') || pathname.startsWith('/dashboard/disbursements') || pathname.startsWith('/dashboard/trips') || pathname.startsWith('/dashboard/chat')) {
+        router.push('/dashboard/approvals');
+      }
+    }
+    // 财务不能访问员工报销页面和审批页面
+    else if (role === 'finance') {
+      if (pathname.startsWith('/dashboard/reimbursements') || pathname.startsWith('/dashboard/approvals') || pathname.startsWith('/dashboard/trips') || pathname.startsWith('/dashboard/chat')) {
+        router.push('/dashboard/disbursements');
+      }
+    }
+    // 管理员可以访问大部分页面，但不能访问员工报销提交相关页面
+    else if (role === 'admin') {
+      if (pathname.startsWith('/dashboard/reimbursements') || pathname.startsWith('/dashboard/trips') || pathname.startsWith('/dashboard/chat')) {
+        router.push('/dashboard/approvals');
+      }
+    }
+  }, [role, pathname, router]);
+
+  // 切换角色时跳转到对应的默认页面
   const switchRole = (newRole: UserRole) => {
     setRole(newRole);
     localStorage.setItem('userRole', newRole);
     setShowRoleMenu(false);
+
+    // 跳转到对应角色的默认页面
+    if (newRole === 'employee') {
+      router.push('/dashboard/reimbursements');
+    } else if (newRole === 'approver' || newRole === 'admin') {
+      router.push('/dashboard/approvals');
+    } else if (newRole === 'finance') {
+      router.push('/dashboard/disbursements');
+    }
   };
 
   const navigation = role === 'employee' ? employeeNavigation : role === 'approver' ? approverNavigation : role === 'finance' ? financeNavigation : adminNavigation;

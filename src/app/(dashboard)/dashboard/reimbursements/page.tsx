@@ -672,17 +672,27 @@ export default function ReimbursementsPage() {
                               <div style={{ color: '#111827' }}>
                                 {lineItem.description || catInfo.label}
                                 {lineItem.receiptUrl && (
-                                  <span
+                                  <button
+                                    type="button"
                                     style={{
                                       marginLeft: '6px',
                                       fontSize: '11px',
                                       color: '#2563eb',
-                                      cursor: 'pointer'
+                                      cursor: 'pointer',
+                                      background: 'none',
+                                      border: 'none',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      backgroundColor: '#eff6ff',
                                     }}
-                                    onClick={() => setPreviewImage(lineItem.receiptUrl || null)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      e.preventDefault();
+                                      setPreviewImage(lineItem.receiptUrl || null);
+                                    }}
                                   >
                                     📎 查看凭证
-                                  </span>
+                                  </button>
                                 )}
                               </div>
                               <div>
