@@ -30,7 +30,16 @@ const adminNavigation = [
   { name: '设置', href: '/dashboard/settings', icon: '⚙️' },
 ];
 
-type UserRole = 'employee' | 'approver' | 'admin';
+// 财务导航
+const financeNavigation = [
+  { name: '仪表盘', href: '/dashboard', icon: '📊' },
+  { name: '付款处理', href: '/dashboard/disbursements', icon: '💳' },
+  { name: '付款历史', href: '/dashboard/disbursements/history', icon: '📋' },
+  { name: '汇率设置', href: '/dashboard/settings/exchange-rates', icon: '💱' },
+  { name: '设置', href: '/dashboard/settings', icon: '⚙️' },
+];
+
+type UserRole = 'employee' | 'approver' | 'admin' | 'finance';
 
 export default function DashboardLayout({
   children,
@@ -44,7 +53,7 @@ export default function DashboardLayout({
   // 从 localStorage 读取角色
   useEffect(() => {
     const savedRole = localStorage.getItem('userRole') as UserRole;
-    if (savedRole && (savedRole === 'employee' || savedRole === 'approver' || savedRole === 'admin')) {
+    if (savedRole && (savedRole === 'employee' || savedRole === 'approver' || savedRole === 'admin' || savedRole === 'finance')) {
       setRole(savedRole);
     }
   }, []);
@@ -56,9 +65,9 @@ export default function DashboardLayout({
     setShowRoleMenu(false);
   };
 
-  const navigation = role === 'employee' ? employeeNavigation : role === 'approver' ? approverNavigation : adminNavigation;
-  const roleLabel = role === 'employee' ? '员工' : role === 'approver' ? '审批人' : '管理员';
-  const roleColor = role === 'employee' ? '#2563eb' : role === 'approver' ? '#7c3aed' : '#dc2626';
+  const navigation = role === 'employee' ? employeeNavigation : role === 'approver' ? approverNavigation : role === 'finance' ? financeNavigation : adminNavigation;
+  const roleLabel = role === 'employee' ? '员工' : role === 'approver' ? '审批人' : role === 'finance' ? '财务' : '管理员';
+  const roleColor = role === 'employee' ? '#2563eb' : role === 'approver' ? '#7c3aed' : role === 'finance' ? '#059669' : '#dc2626';
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
@@ -225,6 +234,34 @@ export default function DashboardLayout({
                     <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>管理公司设置和团队</div>
                   </div>
                   {role === 'admin' && <span style={{ marginLeft: 'auto', color: '#dc2626' }}>✓</span>}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('finance'); }}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.625rem 0.875rem',
+                    backgroundColor: role === 'finance' ? '#ecfdf5' : 'white',
+                    border: 'none',
+                    borderTop: '1px solid #e5e7eb',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    textAlign: 'left'
+                  }}
+                >
+                  <span style={{
+                    width: '8px',
+                    height: '8px',
+                    backgroundColor: '#059669',
+                    borderRadius: '50%'
+                  }} />
+                  <div>
+                    <div style={{ fontWeight: 500, color: '#374151' }}>财务</div>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>处理付款和打款</div>
+                  </div>
+                  {role === 'finance' && <span style={{ marginLeft: 'auto', color: '#059669' }}>✓</span>}
                 </button>
               </div>
             )}
