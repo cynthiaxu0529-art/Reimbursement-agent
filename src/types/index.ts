@@ -162,12 +162,128 @@ export interface ApprovalWorkflowConfig {
   enabled: boolean;
   levels: ApprovalLevel[];
   autoApproveBelow?: number;              // 低于此金额自动批准
+  useHierarchy?: boolean;                 // 是否使用层级审批（直属上级→部门负责人→财务）
 }
 
 export interface ApprovalLevel {
   order: number;
   role: UserRoleType;
   amountThreshold?: number;               // 超过此金额需要此级别审批
+}
+
+// ----------------------------------------------------------------------------
+// Department & Approval Chain Types
+// ----------------------------------------------------------------------------
+
+/**
+ * 部门
+ */
+export interface Department {
+  id: string;
+  tenantId: string;
+  name: string;
+  code?: string;                          // 部门编码
+  description?: string;
+  parentId?: string;                      // 上级部门
+  managerId?: string;                     // 部门负责人
+  approverIds: string[];                  // 部门审批人列表
+  level: number;                          // 部门层级
+  sortOrder: number;                      // 排序顺序
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  // 扩展字段（查询时填充）
+  parent?: Department;
+  children?: Department[];
+  manager?: User;
+  memberCount?: number;
+}
+
+/**
+ * 审批步骤状态
+ */
+export const ApprovalStepStatus = {
+  PENDING: 'pending',                     // 待审批
+  APPROVED: 'approved',                   // 已通过
+  REJECTED: 'rejected',                   // 已拒绝
+  SKIPPED: 'skipped',                     // 跳过
+} as const;
+
+export type ApprovalStepStatusType = typeof ApprovalStepStatus[keyof typeof ApprovalStepStatus];
+
+/**
+ * 审批步骤类型
+ */
+export const ApprovalStepType = {
+  MANAGER: 'manager',                     // 直属上级
+  DEPARTMENT: 'department',               // 部门负责人
+  PARENT_DEPARTMENT: 'parent_department', // 上级部门负责人
+  ROLE: 'role',                           // 指定角色（如财务）
+  AMOUNT_THRESHOLD: 'amount_threshold',   // 金额阈值触发
+  SPECIFIC_USER: 'specific_user',         // 指定审批人
+} as const;
+
+export type ApprovalStepTypeValue = typeof ApprovalStepType[keyof typeof ApprovalStepType];
+
+/**
+ * 审批链步骤
+ */
+export interface ApprovalChainStep {
+  id: string;
+  reimbursementId: string;
+  stepOrder: number;                      // 步骤顺序
+  stepType: ApprovalStepTypeValue;        // 步骤类型
+  stepName: string;                       // 步骤名称
+  approverId?: string;                    // 审批人ID
+  approverRole?: string;                  // 审批人角色
+  departmentId?: string;                  // 关联部门
+  status: ApprovalStepStatusType;
+  comment?: string;                       // 审批意见
+  amountThreshold?: number;               // 金额阈值
+  assignedAt: Date;
+  completedAt?: Date;
+  // 扩展字段（查询时填充）
+  approver?: User;
+  department?: Department;
+}
+
+/**
+ * 审批规则条件
+ */
+export interface ApprovalRuleCondition {
+  minAmount?: number;                     // 最小金额
+  maxAmount?: number;                     // 最大金额
+  categories?: string[];                  // 适用类别
+  departments?: string[];                 // 适用部门ID
+}
+
+/**
+ * 审批规则步骤定义
+ */
+export interface ApprovalRuleStep {
+  order: number;
+  type: ApprovalStepTypeValue;
+  name: string;
+  role?: string;                          // 当 type 为 role 时使用
+  userId?: string;                        // 当 type 为 specific_user 时使用
+  amountThreshold?: number;               // 当 type 为 amount_threshold 时使用
+}
+
+/**
+ * 审批规则
+ */
+export interface ApprovalRule {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string;
+  priority: number;                       // 优先级
+  conditions: ApprovalRuleCondition;      // 触发条件
+  approvalSteps: ApprovalRuleStep[];      // 审批步骤
+  isActive: boolean;
+  isDefault: boolean;                     // 是否为默认规则
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface ExpenseCategoryConfig {
@@ -209,7 +325,8 @@ export interface User {
   name: string;
   avatar?: string;
   role: UserRoleType;
-  department?: string;
+  department?: string;                    // 旧字段，保留兼容
+  departmentId?: string;                  // 新字段：关联部门表
   managerId?: string;                     // 直属上级
   bankAccount?: BankAccount;
   preferences: UserPreferences;
