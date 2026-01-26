@@ -237,10 +237,10 @@ export async function DELETE(
       return NextResponse.json({ error: '报销单不存在' }, { status: 404 });
     }
 
-    // 只有草稿状态可以删除
-    if (existing.status !== 'draft') {
+    // 只有草稿和已拒绝状态可以删除
+    if (existing.status !== 'draft' && existing.status !== 'rejected') {
       return NextResponse.json(
-        { error: '只有草稿状态的报销单可以删除' },
+        { error: '只有草稿或已拒绝状态的报销单可以删除' },
         { status: 400 }
       );
     }
