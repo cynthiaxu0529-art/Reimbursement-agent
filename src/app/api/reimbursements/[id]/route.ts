@@ -303,6 +303,7 @@ export async function PATCH(
     const validTransitions: Record<string, string[]> = {
       pending: ['approved', 'rejected', 'under_review'],
       under_review: ['approved', 'rejected'],
+      approved: ['rejected', 'processing'],  // 财务可以拒绝已批准的报销单
       draft: ['pending'],
     };
 

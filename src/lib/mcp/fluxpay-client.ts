@@ -162,8 +162,15 @@ export class FluxPayClient {
   private baseUrl: string;
 
   constructor(apiKey?: string, baseUrl?: string) {
-    this.apiKey = apiKey || process.env.FLUXPAY_API_KEY || '';
-    this.baseUrl = baseUrl || process.env.FLUXPAY_ENDPOINT || 'https://api.fluxpay.com';
+    // 清理环境变量中可能存在的引号字符
+    const envApiKey = (process.env.FLUXPAY_API_KEY || '').replace(/^["']|["']$/g, '');
+    const envBaseUrl = (process.env.FLUXPAY_ENDPOINT || '').replace(/^["']|["']$/g, '');
+
+    this.apiKey = apiKey || envApiKey || '';
+    this.baseUrl = baseUrl || envBaseUrl || 'https://api.fluxpay.com';
+
+    // 确保 baseUrl 末尾没有斜杠
+    this.baseUrl = this.baseUrl.replace(/\/+$/, '');
   }
 
   /**
