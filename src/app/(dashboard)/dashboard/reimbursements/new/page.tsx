@@ -49,6 +49,13 @@ interface LineItem {
   seatClass?: string;
   exchangeRate?: number;
   amountInUSD?: number;
+  // Hotel specific fields
+  checkInDate?: string;
+  checkOutDate?: string;
+  nights?: number;
+  // Receipt attachment
+  receiptUrl?: string;
+  receiptFileName?: string;
 }
 
 // 支持的币种
@@ -298,6 +305,8 @@ export default function NewReimbursementPage() {
         seatClass: ocrData.seatClass || '',
         exchangeRate: rate,
         amountInUSD: amount > 0 ? parseFloat((amount * rate).toFixed(2)) : undefined,
+        receiptUrl: ocrData.receiptUrl || '',
+        receiptFileName: ocrData.receiptFileName || '',
       });
     }
 
@@ -377,10 +386,13 @@ export default function NewReimbursementPage() {
     if (imageFiles.length > 0) {
       setIsRecognizing(true);
 
-      // 收集所有 OCR 结果
+      // 收集所有 OCR 结果，包含预览 URL
       const ocrResults: any[] = [];
 
-      for (const imageFile of imageFiles) {
+      for (let i = 0; i < imageFiles.length; i++) {
+        const imageFile = imageFiles[i];
+        const previewUrl = URL.createObjectURL(imageFile);
+
         try {
           const base64 = await fileToBase64(imageFile);
           const mimeType = imageFile.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
@@ -393,7 +405,12 @@ export default function NewReimbursementPage() {
 
           const result = await response.json();
           if (result.success && result.data) {
-            ocrResults.push(result.data);
+            // 将预览 URL 和文件名附加到 OCR 结果
+            ocrResults.push({
+              ...result.data,
+              receiptUrl: previewUrl,
+              receiptFileName: imageFile.name,
+            });
           }
         } catch (error) {
           console.error('OCR error:', error);
@@ -462,6 +479,23 @@ export default function NewReimbursementPage() {
     0
   );
 
+  // 计算住宿晚数
+  const calculateNights = (checkIn: string, checkOut: string): number => {
+    const checkInDate = new Date(checkIn);
+    const checkOutDate = new Date(checkOut);
+    const diffTime = checkOutDate.getTime() - checkInDate.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays > 0 ? diffDays : 1;
+  };
+
+  // 更新酒店入住信息
+  const updateHotelDates = (id: string, checkIn: string, checkOut: string) => {
+    const nights = calculateNights(checkIn, checkOut);
+    setLineItems(lineItems.map(item =>
+      item.id === id ? { ...item, checkInDate: checkIn, checkOutDate: checkOut, nights, date: checkIn } : item
+    ));
+  };
+
   const handleSubmit = async (isDraft: boolean) => {
     if (!description) {
       alert('请填写报销说明');
@@ -479,15 +513,26 @@ export default function NewReimbursementPage() {
         if ((item.category === 'train' || item.category === 'flight') && item.departure && item.destination) {
           itemDesc = `${item.departure} → ${item.destination}${item.trainNumber ? ` (${item.trainNumber})` : ''}${item.flightNumber ? ` (${item.flightNumber})` : ''}${item.seatClass ? ` ${item.seatClass}` : ''}`;
         }
+        // Add hotel stay info to description
+        if (item.category === 'hotel' && item.checkInDate && item.checkOutDate) {
+          const nights = item.nights || calculateNights(item.checkInDate, item.checkOutDate);
+          itemDesc = `${item.description || item.vendor || '酒店住宿'} (${item.checkInDate} 至 ${item.checkOutDate}, ${nights}晚)`;
+        }
         return {
           category: item.category,
           description: itemDesc,
           amount: item.amount,
           currency: item.currency,
-          date: item.date,
+          date: item.checkInDate || item.date, // Use check-in date for hotels
           vendor: item.vendor || '',
           exchangeRate: item.exchangeRate || 1,
           amountInBaseCurrency: item.amountInUSD || parseFloat(item.amount) || 0,
+          // Include hotel stay period for policy checking
+          checkInDate: item.checkInDate,
+          checkOutDate: item.checkOutDate,
+          nights: item.nights,
+          // Include receipt attachment
+          receiptUrl: item.receiptUrl || '',
         };
       });
 
@@ -1078,6 +1123,93 @@ export default function NewReimbursementPage() {
                               </>
                             )}
                           </select>
+                        </div>
+                      )}
+
+                      {/* Extra fields for hotel */}
+                      {item.category === 'hotel' && (
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(3, 1fr)',
+                          gap: '8px',
+                          padding: '10px 12px',
+                          backgroundColor: '#f0fdf4',
+                          borderBottom: index < lineItems.length - 1 ? '1px solid #e5e7eb' : 'none',
+                        }}>
+                          <div>
+                            <label style={{ fontSize: '11px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>
+                              入住日期
+                            </label>
+                            <input
+                              type="date"
+                              value={item.checkInDate || item.date || ''}
+                              onChange={(e) => {
+                                const checkIn = e.target.value;
+                                const checkOut = item.checkOutDate || '';
+                                if (checkOut) {
+                                  updateHotelDates(item.id, checkIn, checkOut);
+                                } else {
+                                  updateLineItem(item.id, 'checkInDate', checkIn);
+                                  updateLineItem(item.id, 'date', checkIn);
+                                }
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '6px 10px',
+                                border: '1px solid #e5e7eb',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                backgroundColor: 'white',
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>
+                              离店日期
+                            </label>
+                            <input
+                              type="date"
+                              value={item.checkOutDate || ''}
+                              min={item.checkInDate || item.date}
+                              onChange={(e) => {
+                                const checkOut = e.target.value;
+                                const checkIn = item.checkInDate || item.date || '';
+                                if (checkIn) {
+                                  updateHotelDates(item.id, checkIn, checkOut);
+                                } else {
+                                  updateLineItem(item.id, 'checkOutDate', checkOut);
+                                }
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '6px 10px',
+                                border: '1px solid #e5e7eb',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                backgroundColor: 'white',
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>
+                              入住晚数
+                            </label>
+                            <div style={{
+                              padding: '6px 10px',
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              backgroundColor: '#f9fafb',
+                              color: item.nights ? '#111827' : '#9ca3af',
+                            }}>
+                              {item.nights ? `${item.nights} 晚` : '自动计算'}
+                              {item.nights && item.amountInUSD ? (
+                                <span style={{ marginLeft: '8px', color: '#0369a1', fontWeight: 500 }}>
+                                  (${(item.amountInUSD / item.nights).toFixed(0)}/晚)
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>

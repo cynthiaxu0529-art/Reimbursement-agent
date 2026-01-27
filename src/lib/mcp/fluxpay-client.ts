@@ -21,8 +21,12 @@ export interface PaymentRequest {
 
 export interface PaymentRecipient {
   name: string;
-  bankName: string;
-  accountNumber: string;
+  // Crypto wallet (Base chain)
+  walletAddress: string;
+  chain?: string; // default: 'base'
+  // Legacy bank account fields (optional)
+  bankName?: string;
+  accountNumber?: string;
   branchName?: string;
   swiftCode?: string;
   routingNumber?: string;
@@ -158,8 +162,15 @@ export class FluxPayClient {
   private baseUrl: string;
 
   constructor(apiKey?: string, baseUrl?: string) {
-    this.apiKey = apiKey || process.env.FLUXPAY_API_KEY || '';
-    this.baseUrl = baseUrl || process.env.FLUXPAY_ENDPOINT || 'https://api.fluxpay.com';
+    // 清理环境变量中可能存在的引号字符
+    const envApiKey = (process.env.FLUXPAY_API_KEY || '').replace(/^["']|["']$/g, '');
+    const envBaseUrl = (process.env.FLUXPAY_ENDPOINT || '').replace(/^["']|["']$/g, '');
+
+    this.apiKey = apiKey || envApiKey || '';
+    this.baseUrl = baseUrl || envBaseUrl || 'https://api.fluxpay.com';
+
+    // 确保 baseUrl 末尾没有斜杠
+    this.baseUrl = this.baseUrl.replace(/\/+$/, '');
   }
 
   /**
@@ -177,13 +188,11 @@ export class FluxPayClient {
         body: JSON.stringify({
           amount: request.amount,
           currency: request.currency,
+          chain: request.recipient.chain || 'base', // FluxPay uses Base chain
           recipient: {
             name: request.recipient.name,
-            bank_name: request.recipient.bankName,
-            account_number: request.recipient.accountNumber,
-            branch_name: request.recipient.branchName,
-            swift_code: request.recipient.swiftCode,
-            routing_number: request.recipient.routingNumber,
+            wallet_address: request.recipient.walletAddress,
+            chain: request.recipient.chain || 'base',
           },
           description: request.description,
           reference_id: request.reimbursementId,
@@ -254,6 +263,8 @@ export class FluxPayClient {
         completedAt: data.completed_at ? new Date(data.completed_at) : undefined,
         recipient: {
           name: data.recipient.name,
+          walletAddress: data.recipient.wallet_address || '',
+          chain: data.recipient.chain || 'base',
           bankName: data.recipient.bank_name,
           accountNumber: data.recipient.account_number,
         },
@@ -336,6 +347,41 @@ export class FluxPayClient {
       return false;
     }
   }
+
+  /**
+   * 获取钱包余额
+   */
+  async getBalance(): Promise<{ success: boolean; balance?: number; currency?: string; error?: string }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/v1/balance`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        return {
+          success: false,
+          error: error.message || '获取余额失败',
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        balance: data.available_balance || data.balance || 0,
+        currency: data.currency || 'USD',
+      };
+    } catch (error) {
+      console.error('Get balance error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : '获取余额失败',
+      };
+    }
+  }
 }
 
 // ============================================================================
@@ -401,19 +447,26 @@ export class PaymentService {
   }
 
   /**
-   * 验证收款人信息
+   * 验证收款人信息（钱包地址）
    */
   private validateRecipient(recipient: PaymentRecipient): boolean {
     if (!recipient.name || recipient.name.trim().length === 0) {
       return false;
     }
-    if (!recipient.bankName || recipient.bankName.trim().length === 0) {
-      return false;
-    }
-    if (!recipient.accountNumber || recipient.accountNumber.trim().length === 0) {
+    // 验证钱包地址格式 (Base chain uses Ethereum-compatible addresses)
+    if (!recipient.walletAddress || !this.isValidWalletAddress(recipient.walletAddress)) {
       return false;
     }
     return true;
+  }
+
+  /**
+   * 验证钱包地址格式 (EVM compatible)
+   */
+  private isValidWalletAddress(address: string): boolean {
+    // Ethereum/Base address format: 0x followed by 40 hex characters
+    const evmAddressRegex = /^0x[a-fA-F0-9]{40}$/;
+    return evmAddressRegex.test(address);
   }
 
   /**

@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { reimbursements, reimbursementItems, users, payments, approvalChain } from '@/lib/db/schema';
+import { eq, and, asc } from 'drizzle-orm';
+import { createPaymentService } from '@/lib/mcp/fluxpay-client';
+import {
+  generateApprovalChain,
+  processApprovalAction,
+  getApprovalChain,
+  canUserApprove,
+} from '@/lib/approval/approval-chain-service';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -58,6 +65,22 @@ export async function GET(
       return NextResponse.json({ error: '无权查看此报销单' }, { status: 403 });
     }
 
+    // 获取审批链
+    let approvalChainData = null;
+    try {
+      approvalChainData = await getApprovalChain(id);
+    } catch {
+      // 审批链可能不存在（旧的报销单）
+    }
+
+    // 检查当前用户是否可以审批
+    let canApprove = false;
+    try {
+      canApprove = await canUserApprove(id, session.user.id);
+    } catch {
+      // 忽略错误
+    }
+
     // Transform data to include submitter info
     const transformedData = {
       ...reimbursement,
@@ -68,6 +91,8 @@ export async function GET(
         department: reimbursement.user.department,
       } : undefined,
       user: undefined, // Remove the raw user object
+      approvalChain: approvalChainData,
+      canApprove,
     };
 
     return NextResponse.json({
@@ -197,9 +222,36 @@ export async function PUT(
       );
     }
 
+    // 如果提交报销单，生成审批链
+    let generatedChain = null;
+    if (newStatus === 'pending' && existing.tenantId) {
+      try {
+        // 删除旧的审批链（如果有）
+        await db
+          .delete(approvalChain)
+          .where(eq(approvalChain.reimbursementId, id));
+
+        // 获取费用类别列表
+        const categories = items?.map((item: any) => item.category) || [];
+
+        // 生成新的审批链
+        generatedChain = await generateApprovalChain({
+          reimbursementId: id,
+          userId: session.user.id,
+          tenantId: existing.tenantId,
+          totalAmount: usdTotal,
+          categories,
+        });
+      } catch (error) {
+        console.error('生成审批链失败:', error);
+        // 即使审批链生成失败，也继续提交（使用默认审批流程）
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: updated,
+      approvalChain: generatedChain,
     });
   } catch (error) {
     console.error('Update reimbursement error:', error);
@@ -236,10 +288,10 @@ export async function DELETE(
       return NextResponse.json({ error: '报销单不存在' }, { status: 404 });
     }
 
-    // 只有草稿状态可以删除
-    if (existing.status !== 'draft') {
+    // 只有草稿和已拒绝状态可以删除
+    if (existing.status !== 'draft' && existing.status !== 'rejected') {
       return NextResponse.json(
-        { error: '只有草稿状态的报销单可以删除' },
+        { error: '只有草稿或已拒绝状态的报销单可以删除' },
         { status: 400 }
       );
     }
@@ -282,7 +334,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { status: newStatus, rejectReason, comment } = body;
+    const { status: newStatus, rejectReason, comment, useApprovalChain } = body;
 
     // 查找报销单
     const existing = await db.query.reimbursements.findFirst({
@@ -298,10 +350,55 @@ export async function PATCH(
       return NextResponse.json({ error: '无权操作此报销单' }, { status: 403 });
     }
 
-    // 验证状态转换
+    // 检查是否存在审批链
+    const existingChain = await db.query.approvalChain.findMany({
+      where: eq(approvalChain.reimbursementId, id),
+      orderBy: [asc(approvalChain.stepOrder)],
+    });
+
+    // 如果存在审批链且请求使用审批链，使用多级审批逻辑
+    if (existingChain.length > 0 && (useApprovalChain !== false) && (newStatus === 'approved' || newStatus === 'rejected')) {
+      try {
+        const action = newStatus === 'approved' ? 'approve' : 'reject';
+        const result = await processApprovalAction(
+          id,
+          session.user.id,
+          action,
+          comment || rejectReason
+        );
+
+        // 获取更新后的报销单
+        const updated = await db.query.reimbursements.findFirst({
+          where: eq(reimbursements.id, id),
+        });
+
+        // 如果所有审批都通过，自动发起支付
+        let paymentResult = null;
+        if (result.completed && result.approved && updated) {
+          paymentResult = await triggerPayment(updated, existing.userId);
+        }
+
+        // 获取最新的审批链
+        const updatedChain = await getApprovalChain(id);
+
+        return NextResponse.json({
+          success: true,
+          data: updated,
+          approvalChain: updatedChain,
+          approvalResult: result,
+          payment: paymentResult,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : '审批操作失败';
+        return NextResponse.json({ error: errorMessage }, { status: 400 });
+      }
+    }
+
+    // 传统审批流程（无审批链）
     const validTransitions: Record<string, string[]> = {
       pending: ['approved', 'rejected', 'under_review'],
       under_review: ['approved', 'rejected'],
+      approved: ['rejected', 'processing'],  // 财务可以拒绝已批准的报销单
       draft: ['pending'],
     };
 
@@ -313,7 +410,7 @@ export async function PATCH(
     }
 
     // 更新报销单状态
-    const updateData: any = {
+    const updateData: Record<string, unknown> = {
       status: newStatus,
       updatedAt: new Date(),
     };
@@ -335,9 +432,16 @@ export async function PATCH(
       .where(eq(reimbursements.id, id))
       .returning();
 
+    // 如果审批通过，自动发起支付
+    let paymentResult = null;
+    if (newStatus === 'approved') {
+      paymentResult = await triggerPayment(updated, existing.userId);
+    }
+
     return NextResponse.json({
       success: true,
       data: updated,
+      payment: paymentResult,
     });
   } catch (error) {
     console.error('Update reimbursement status error:', error);
@@ -345,5 +449,88 @@ export async function PATCH(
       { error: '更新报销单状态失败' },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * 触发 FluxPay 支付
+ */
+async function triggerPayment(reimbursement: any, userId: string) {
+  try {
+    // 获取用户银行账户信息
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!user) {
+      return { success: false, error: '用户不存在' };
+    }
+
+    // 检查是否配置了 FluxPay
+    if (!process.env.FLUXPAY_API_KEY) {
+      console.log('FluxPay not configured, skipping automatic payment');
+      return { success: false, error: 'FluxPay 未配置' };
+    }
+
+    // 检查用户钱包地址（FluxPay 使用 Base 链）
+    const walletInfo = user.bankAccount as {
+      walletAddress?: string;
+      chain?: string;
+    } | null;
+
+    if (!walletInfo?.walletAddress) {
+      console.log('User wallet not configured, skipping payment');
+      return {
+        success: false,
+        error: '用户未配置钱包地址',
+        message: '请在个人设置中添加 Base 链钱包地址',
+      };
+    }
+
+    // 创建支付请求（FluxPay Base 链）
+    const paymentService = createPaymentService();
+    const result = await paymentService.processReimbursementPayment(
+      reimbursement.id,
+      userId,
+      reimbursement.totalAmount,
+      reimbursement.baseCurrency || 'USD', // FluxPay on Base uses stablecoins
+      {
+        name: user.name || 'User',
+        walletAddress: walletInfo.walletAddress,
+        chain: walletInfo.chain || 'base',
+      },
+      `报销付款 - ${reimbursement.title}`
+    );
+
+    // 记录支付请求
+    if (result.transactionId) {
+      await db.insert(payments).values({
+        reimbursementId: reimbursement.id,
+        amount: reimbursement.totalAmount,
+        currency: reimbursement.baseCurrency || 'CNY',
+        transactionId: result.transactionId,
+        status: result.status,
+        paymentProvider: 'fluxpay',
+      });
+
+      // 更新报销单状态为处理中
+      await db
+        .update(reimbursements)
+        .set({ status: 'processing' })
+        .where(eq(reimbursements.id, reimbursement.id));
+    }
+
+    return {
+      success: result.success,
+      transactionId: result.transactionId,
+      status: result.status,
+      message: result.success ? '支付已发起' : result.error?.message,
+    };
+  } catch (error) {
+    console.error('Trigger payment error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '支付发起失败',
+    };
   }
 }

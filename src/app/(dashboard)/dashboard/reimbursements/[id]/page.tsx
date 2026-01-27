@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -15,6 +15,16 @@ interface ReimbursementItem {
   vendor?: string;
 }
 
+interface PayoutInfo {
+  payoutId?: string;
+  status?: string;
+  approvalUrl?: string;
+  txHash?: string;
+  amountUSDC?: number;
+  toAddress?: string;
+  initiatedAt?: string;
+}
+
 interface Reimbursement {
   id: string;
   title: string;
@@ -22,6 +32,7 @@ interface Reimbursement {
   createdAt: string;
   submittedAt?: string;
   totalAmount: number;
+  totalAmountInBaseCurrency?: number;
   baseCurrency: string;
   tripId?: string;
   tripName?: string;
@@ -39,6 +50,7 @@ interface Reimbursement {
     user: string;
     time: string;
   }>;
+  aiSuggestions?: any[];
 }
 
 const statusColors: Record<string, { bg: string; text: string; label: string }> = {
@@ -47,9 +59,19 @@ const statusColors: Record<string, { bg: string; text: string; label: string }> 
   under_review: { bg: '#dbeafe', text: '#2563eb', label: '审核中' },
   approved: { bg: '#dcfce7', text: '#16a34a', label: '已批准' },
   rejected: { bg: '#fee2e2', text: '#dc2626', label: '已拒绝' },
-  processing: { bg: '#ede9fe', text: '#7c3aed', label: '处理中' },
+  processing: { bg: '#ede9fe', text: '#7c3aed', label: '打款处理中' },
   paid: { bg: '#d1fae5', text: '#059669', label: '已付款' },
   cancelled: { bg: '#f3f4f6', text: '#9ca3af', label: '已取消' },
+};
+
+const payoutStatusLabels: Record<string, { label: string; color: string }> = {
+  pending_authorization: { label: '等待审批', color: '#d97706' },
+  authorized: { label: '已授权', color: '#2563eb' },
+  signed: { label: '已签名', color: '#7c3aed' },
+  broadcasting: { label: '广播中', color: '#7c3aed' },
+  succeeded: { label: '打款成功', color: '#059669' },
+  failed: { label: '打款失败', color: '#dc2626' },
+  expired: { label: '已过期', color: '#9ca3af' },
 };
 
 const categoryIcons: Record<string, string> = {
@@ -78,23 +100,42 @@ const categoryLabels: Record<string, string> = {
   other: '其他',
 };
 
-export default function ReimbursementDetailPage({ params }: { params: { id: string } }) {
+export default function ReimbursementDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const router = useRouter();
   const [reimbursement, setReimbursement] = useState<Reimbursement | null>(null);
   const [loading, setLoading] = useState(true);
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showPayoutModal, setShowPayoutModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [payoutInfo, setPayoutInfo] = useState<PayoutInfo | null>(null);
+  const [payoutLoading, setPayoutLoading] = useState(false);
+  const [userRole, setUserRole] = useState<string>('');
 
   // 从 API 获取报销详情
   useEffect(() => {
     const fetchReimbursement = async () => {
       try {
-        const response = await fetch(`/api/reimbursements/${params.id}`);
+        const response = await fetch(`/api/reimbursements/${id}`);
         const result = await response.json();
         if (result.success && result.data) {
           setReimbursement(result.data);
+          // 从 aiSuggestions 中提取 payout 信息
+          const suggestions = result.data.aiSuggestions || [];
+          const latestPayout = suggestions
+            .filter((s: any) => s.type === 'fluxa_payout_initiated')
+            .pop();
+          if (latestPayout) {
+            setPayoutInfo({
+              payoutId: latestPayout.payoutId,
+              status: latestPayout.status,
+              approvalUrl: latestPayout.approvalUrl,
+              amountUSDC: latestPayout.amountUSDC,
+              initiatedAt: latestPayout.initiatedAt,
+            });
+          }
         }
       } catch (error) {
         console.error('Failed to fetch reimbursement:', error);
@@ -103,13 +144,26 @@ export default function ReimbursementDetailPage({ params }: { params: { id: stri
       }
     };
 
+    const fetchUserRole = async () => {
+      try {
+        const response = await fetch('/api/settings/profile');
+        const result = await response.json();
+        if (result.success && result.data) {
+          setUserRole(result.data.role || 'employee');
+        }
+      } catch (error) {
+        console.error('Failed to fetch user role:', error);
+      }
+    };
+
     fetchReimbursement();
-  }, [params.id]);
+    fetchUserRole();
+  }, [id]);
 
   const handleApprove = async () => {
     setProcessing(true);
     try {
-      const response = await fetch(`/api/reimbursements/${params.id}`, {
+      const response = await fetch(`/api/reimbursements/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'approved' }),
@@ -132,7 +186,7 @@ export default function ReimbursementDetailPage({ params }: { params: { id: stri
   const handleReject = async () => {
     setProcessing(true);
     try {
-      const response = await fetch(`/api/reimbursements/${params.id}`, {
+      const response = await fetch(`/api/reimbursements/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'rejected', rejectReason }),
@@ -149,6 +203,72 @@ export default function ReimbursementDetailPage({ params }: { params: { id: stri
       alert('操作失败');
     } finally {
       setProcessing(false);
+    }
+  };
+
+  // 发起 Fluxa Payout
+  const handleInitiatePayout = async () => {
+    setPayoutLoading(true);
+    try {
+      const response = await fetch('/api/payments/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reimbursementId: id }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        setPayoutInfo({
+          payoutId: result.payoutId,
+          status: result.status,
+          approvalUrl: result.approvalUrl,
+          amountUSDC: result.amountUSDC,
+          toAddress: result.toAddress,
+        });
+        setShowPayoutModal(false);
+        // 刷新报销单信息
+        const refreshResponse = await fetch(`/api/reimbursements/${id}`);
+        const refreshResult = await refreshResponse.json();
+        if (refreshResult.success && refreshResult.data) {
+          setReimbursement(refreshResult.data);
+        }
+      } else {
+        alert(result.message || result.error?.message || '发起打款失败');
+      }
+    } catch (error) {
+      console.error('Payout error:', error);
+      alert('发起打款失败');
+    } finally {
+      setPayoutLoading(false);
+    }
+  };
+
+  // 查询 Payout 状态
+  const handleCheckPayoutStatus = async () => {
+    if (!payoutInfo?.payoutId) return;
+    setPayoutLoading(true);
+    try {
+      const response = await fetch(`/api/payments/status/${payoutInfo.payoutId}`);
+      const result = await response.json();
+      if (result.success) {
+        setPayoutInfo({
+          ...payoutInfo,
+          status: result.status,
+          txHash: result.txHash,
+          approvalUrl: result.approvalUrl,
+        });
+        // 如果状态变为成功或失败，刷新报销单
+        if (result.isTerminal) {
+          const refreshResponse = await fetch(`/api/reimbursements/${id}`);
+          const refreshResult = await refreshResponse.json();
+          if (refreshResult.success && refreshResult.data) {
+            setReimbursement(refreshResult.data);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Check status error:', error);
+    } finally {
+      setPayoutLoading(false);
     }
   };
 
@@ -181,6 +301,9 @@ export default function ReimbursementDetailPage({ params }: { params: { id: stri
 
   const status = statusColors[reimbursement.status] || statusColors.draft;
   const isPending = reimbursement.status === 'pending' || reimbursement.status === 'under_review';
+  const isApproved = reimbursement.status === 'approved';
+  const isProcessing = reimbursement.status === 'processing';
+  const canInitiatePayout = isApproved && ['finance', 'admin', 'super_admin'].includes(userRole);
 
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto' }}>
@@ -225,28 +348,47 @@ export default function ReimbursementDetailPage({ params }: { params: { id: stri
           </p>
         </div>
 
-        {isPending && (
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {isPending && (
+            <>
+              <button
+                onClick={() => setShowRejectModal(true)}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: 'white',
+                  color: '#dc2626',
+                  border: '1px solid #dc2626',
+                  borderRadius: '0.5rem',
+                  fontSize: '0.875rem',
+                  fontWeight: 500,
+                  cursor: 'pointer'
+                }}
+              >
+                拒绝
+              </button>
+              <button
+                onClick={() => setShowApproveModal(true)}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '0.5rem',
+                  fontSize: '0.875rem',
+                  fontWeight: 500,
+                  cursor: 'pointer'
+                }}
+              >
+                批准
+              </button>
+            </>
+          )}
+          {canInitiatePayout && (
             <button
-              onClick={() => setShowRejectModal(true)}
+              onClick={() => setShowPayoutModal(true)}
               style={{
                 padding: '0.5rem 1rem',
-                backgroundColor: 'white',
-                color: '#dc2626',
-                border: '1px solid #dc2626',
-                borderRadius: '0.5rem',
-                fontSize: '0.875rem',
-                fontWeight: 500,
-                cursor: 'pointer'
-              }}
-            >
-              拒绝
-            </button>
-            <button
-              onClick={() => setShowApproveModal(true)}
-              style={{
-                padding: '0.5rem 1rem',
-                background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
                 color: 'white',
                 border: 'none',
                 borderRadius: '0.5rem',
@@ -255,10 +397,10 @@ export default function ReimbursementDetailPage({ params }: { params: { id: stri
                 cursor: 'pointer'
               }}
             >
-              批准
+              💳 发起打款
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '1.5rem' }}>
@@ -278,6 +420,11 @@ export default function ReimbursementDetailPage({ params }: { params: { id: stri
                 <p style={{ fontSize: '2.5rem', fontWeight: 700, color: '#111827' }}>
                   ¥{reimbursement.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
                 </p>
+                {reimbursement.totalAmountInBaseCurrency && (
+                  <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                    ≈ ${reimbursement.totalAmountInBaseCurrency.toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC
+                  </p>
+                )}
               </div>
               <div style={{
                 width: '64px',
@@ -293,6 +440,122 @@ export default function ReimbursementDetailPage({ params }: { params: { id: stri
               </div>
             </div>
           </div>
+
+          {/* Payout Status Card - 只在处理中或有 payout 信息时显示 */}
+          {(isProcessing || payoutInfo) && (
+            <div style={{
+              backgroundColor: '#f5f3ff',
+              borderRadius: '0.75rem',
+              border: '1px solid #c4b5fd',
+              padding: '1.25rem',
+              marginBottom: '1.5rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#5b21b6' }}>
+                  💳 Fluxa 打款状态
+                </h3>
+                {payoutInfo?.payoutId && (
+                  <button
+                    onClick={handleCheckPayoutStatus}
+                    disabled={payoutLoading}
+                    style={{
+                      padding: '0.25rem 0.75rem',
+                      backgroundColor: 'white',
+                      color: '#5b21b6',
+                      border: '1px solid #c4b5fd',
+                      borderRadius: '0.375rem',
+                      fontSize: '0.75rem',
+                      cursor: payoutLoading ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {payoutLoading ? '查询中...' : '刷新状态'}
+                  </button>
+                )}
+              </div>
+
+              {payoutInfo && (
+                <div style={{ display: 'grid', gap: '0.75rem' }}>
+                  {/* 状态 */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '0.875rem', color: '#6b7280', minWidth: '80px' }}>状态:</span>
+                    <span style={{
+                      padding: '0.125rem 0.5rem',
+                      borderRadius: '9999px',
+                      fontSize: '0.75rem',
+                      fontWeight: 500,
+                      backgroundColor: 'white',
+                      color: payoutStatusLabels[payoutInfo.status || '']?.color || '#6b7280'
+                    }}>
+                      {payoutStatusLabels[payoutInfo.status || '']?.label || payoutInfo.status}
+                    </span>
+                  </div>
+
+                  {/* 金额 */}
+                  {payoutInfo.amountUSDC && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.875rem', color: '#6b7280', minWidth: '80px' }}>打款金额:</span>
+                      <span style={{ fontSize: '0.875rem', fontWeight: 500, color: '#111827' }}>
+                        ${payoutInfo.amountUSDC.toFixed(2)} USDC
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 收款地址 */}
+                  {payoutInfo.toAddress && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.875rem', color: '#6b7280', minWidth: '80px' }}>收款地址:</span>
+                      <span style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: '#111827' }}>
+                        {payoutInfo.toAddress.slice(0, 6)}...{payoutInfo.toAddress.slice(-4)}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 交易哈希 */}
+                  {payoutInfo.txHash && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.875rem', color: '#6b7280', minWidth: '80px' }}>交易哈希:</span>
+                      <a
+                        href={`https://basescan.org/tx/${payoutInfo.txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: '#2563eb', textDecoration: 'none' }}
+                      >
+                        {payoutInfo.txHash.slice(0, 10)}...{payoutInfo.txHash.slice(-8)}
+                      </a>
+                    </div>
+                  )}
+
+                  {/* 审批链接 - 仅在等待审批时显示 */}
+                  {payoutInfo.approvalUrl && payoutInfo.status === 'pending_authorization' && (
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <a
+                        href={payoutInfo.approvalUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          padding: '0.5rem 1rem',
+                          background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
+                          color: 'white',
+                          borderRadius: '0.5rem',
+                          fontSize: '0.875rem',
+                          fontWeight: 500,
+                          textDecoration: 'none'
+                        }}
+                      >
+                        🔐 前往钱包审批
+                      </a>
+                      <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                        请点击上方按钮在 Fluxa 钱包中完成打款审批
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Expense Items */}
           <div style={{
@@ -439,6 +702,7 @@ export default function ReimbursementDetailPage({ params }: { params: { id: stri
                 {reimbursement.status === 'pending' ? '⏳' :
                  reimbursement.status === 'approved' ? '✅' :
                  reimbursement.status === 'rejected' ? '❌' :
+                 reimbursement.status === 'processing' ? '💳' :
                  reimbursement.status === 'paid' ? '💰' : '📄'}
               </span>
               <span style={{ fontWeight: 500, color: status.text }}>
@@ -575,6 +839,87 @@ export default function ReimbursementDetailPage({ params }: { params: { id: stri
                 }}
               >
                 {processing ? '处理中...' : '确认拒绝'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payout Modal */}
+      {showPayoutModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 50
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '0.75rem',
+            padding: '1.5rem',
+            width: '100%',
+            maxWidth: '450px'
+          }}>
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+              💳 发起 Fluxa 打款
+            </h3>
+            <p style={{ color: '#6b7280', marginBottom: '1rem' }}>
+              将通过 Fluxa 钱包向员工发起 USDC 打款
+            </p>
+
+            <div style={{
+              backgroundColor: '#f5f3ff',
+              borderRadius: '0.5rem',
+              padding: '1rem',
+              marginBottom: '1rem'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                <span style={{ color: '#6b7280' }}>报销金额:</span>
+                <span style={{ fontWeight: 500 }}>¥{reimbursement.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#6b7280' }}>打款金额:</span>
+                <span style={{ fontWeight: 600, color: '#5b21b6' }}>
+                  ≈ ${(reimbursement.totalAmountInBaseCurrency || reimbursement.totalAmount * 0.14).toFixed(2)} USDC
+                </span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '1rem' }}>
+              发起后，您将获得一个审批链接，需要在 Fluxa 钱包中完成最终审批才能打款。
+            </p>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowPayoutModal(false)}
+                disabled={payoutLoading}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: 'white',
+                  color: '#6b7280',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '0.5rem',
+                  cursor: payoutLoading ? 'not-allowed' : 'pointer'
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleInitiatePayout}
+                disabled={payoutLoading}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: payoutLoading ? '#9ca3af' : 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '0.5rem',
+                  cursor: payoutLoading ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {payoutLoading ? '处理中...' : '确认发起打款'}
               </button>
             </div>
           </div>

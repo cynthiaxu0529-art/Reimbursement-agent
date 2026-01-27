@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
     // 构建查询条件
     let conditions: any[] = [];
 
-    if (role === 'approver' && session.user.tenantId) {
-      // 审批人模式：查看同租户的报销（排除自己的）
+    if ((role === 'approver' || role === 'finance') && session.user.tenantId) {
+      // 审批人/财务模式：查看同租户的报销
       conditions.push(eq(reimbursements.tenantId, session.user.tenantId));
     } else {
       // 员工模式：只看自己的
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
       offset: (page - 1) * pageSize,
       with: {
         items: true,
-        user: role === 'approver' ? {
+        user: (role === 'approver' || role === 'finance') ? {
           columns: {
             id: true,
             name: true,
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
     // 检查用户是否有公司
     if (!session.user.tenantId) {
       return NextResponse.json(
-        { error: '请先创建或加入公司' },
+        { error: '请先在设置中创建或加入公司，才能提交报销' },
         { status: 400 }
       );
     }
@@ -155,23 +155,32 @@ export async function POST(request: NextRequest) {
       0
     );
 
+    // 构建报销单数据（不包含 undefined 值）
+    const reimbursementData: any = {
+      tenantId: session.user.tenantId,
+      userId: session.user.id,
+      title,
+      description: description || null,
+      totalAmount,
+      totalAmountInBaseCurrency: usdTotal,
+      baseCurrency: 'USD',
+      status: submitStatus === 'pending' ? 'pending' : 'draft',
+      autoCollected: false,
+      sourceType: 'manual',
+    };
+
+    // 只有当有值时才添加这些字段
+    if (tripId) {
+      reimbursementData.tripId = tripId;
+    }
+    if (submitStatus === 'pending') {
+      reimbursementData.submittedAt = new Date();
+    }
+
     // 创建报销单
     const [reimbursement] = await db
       .insert(reimbursements)
-      .values({
-        tenantId: session.user.tenantId,
-        userId: session.user.id,
-        tripId: tripId || undefined,
-        title,
-        description,
-        totalAmount,
-        totalAmountInBaseCurrency: usdTotal,
-        baseCurrency: 'USD',
-        status: submitStatus === 'pending' ? 'pending' : 'draft',
-        autoCollected: false,
-        sourceType: 'manual',
-        submittedAt: submitStatus === 'pending' ? new Date() : undefined,
-      })
+      .values(reimbursementData)
       .returning();
 
     // 创建费用明细
@@ -191,19 +200,32 @@ export async function POST(request: NextRequest) {
       };
 
       await db.insert(reimbursementItems).values(
-        items.map((item: any) => ({
-          reimbursementId: reimbursement.id,
-          category: item.category,
-          description: item.description || item.category || '费用',
-          amount: parseFloat(item.amount) || 0,
-          currency: item.currency || 'CNY',
-          exchangeRate: item.exchangeRate || null,
-          amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
-          date: parseDate(item.date),
-          location: item.location || null,
-          vendor: item.vendor || null,
-          receiptUrl: item.receiptUrl || null,
-        }))
+        items.map((item: any) => {
+          const itemData: any = {
+            reimbursementId: reimbursement.id,
+            category: item.category,
+            description: item.description || item.category || '费用',
+            amount: parseFloat(item.amount) || 0,
+            currency: item.currency || 'CNY',
+            exchangeRate: item.exchangeRate || null,
+            amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
+            date: parseDate(item.date),
+            location: item.location || null,
+            vendor: item.vendor || null,
+            receiptUrl: item.receiptUrl || null,
+          };
+          // Add hotel-specific fields
+          if (item.checkInDate) {
+            itemData.checkInDate = parseDate(item.checkInDate);
+          }
+          if (item.checkOutDate) {
+            itemData.checkOutDate = parseDate(item.checkOutDate);
+          }
+          if (item.nights) {
+            itemData.nights = item.nights;
+          }
+          return itemData;
+        })
       );
     }
 

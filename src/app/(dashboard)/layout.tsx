@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 
 // 员工导航
@@ -30,7 +30,16 @@ const adminNavigation = [
   { name: '设置', href: '/dashboard/settings', icon: '⚙️' },
 ];
 
-type UserRole = 'employee' | 'approver' | 'admin';
+// 财务导航
+const financeNavigation = [
+  { name: '仪表盘', href: '/dashboard', icon: '📊' },
+  { name: '付款处理', href: '/dashboard/disbursements', icon: '💳' },
+  { name: '付款历史', href: '/dashboard/disbursements/history', icon: '📋' },
+  { name: '汇率设置', href: '/dashboard/settings/exchange-rates', icon: '💱' },
+  { name: '设置', href: '/dashboard/settings', icon: '⚙️' },
+];
+
+type UserRole = 'employee' | 'approver' | 'admin' | 'finance';
 
 export default function DashboardLayout({
   children,
@@ -38,27 +47,98 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [role, setRole] = useState<UserRole>('employee');
   const [showRoleMenu, setShowRoleMenu] = useState(false);
 
-  // 从 localStorage 读取角色
+  // 初始化：从数据库获取角色，同步到 localStorage
   useEffect(() => {
-    const savedRole = localStorage.getItem('userRole') as UserRole;
-    if (savedRole && (savedRole === 'employee' || savedRole === 'approver' || savedRole === 'admin')) {
-      setRole(savedRole);
-    }
+    const initRole = async () => {
+      try {
+        const response = await fetch('/api/settings/role');
+        const result = await response.json();
+        if (result.success && result.role) {
+          // 数据库角色到前端角色的映射
+          const dbToFrontend: Record<string, UserRole> = {
+            employee: 'employee',
+            manager: 'approver',
+            finance: 'finance',
+            admin: 'admin',
+            super_admin: 'admin',
+          };
+          const frontendRole = dbToFrontend[result.role] || 'employee';
+          setRole(frontendRole);
+          localStorage.setItem('userRole', frontendRole);
+        }
+      } catch {
+        // 降级：从 localStorage 读取
+        const savedRole = localStorage.getItem('userRole') as UserRole;
+        if (savedRole && ['employee', 'approver', 'admin', 'finance'].includes(savedRole)) {
+          setRole(savedRole);
+        }
+      }
+    };
+    initRole();
   }, []);
 
-  // 切换角色
-  const switchRole = (newRole: UserRole) => {
+  // 检查当前页面是否对当前角色可访问，如果不是则跳转
+  useEffect(() => {
+    // 员工不能访问审批、付款等页面
+    if (role === 'employee') {
+      if (pathname.startsWith('/dashboard/approvals') || pathname.startsWith('/dashboard/disbursements') || pathname.startsWith('/dashboard/team')) {
+        router.push('/dashboard/reimbursements');
+      }
+    }
+    // 审批人不能访问员工的报销页面和付款页面
+    else if (role === 'approver') {
+      if (pathname.startsWith('/dashboard/reimbursements') || pathname.startsWith('/dashboard/disbursements') || pathname.startsWith('/dashboard/trips') || pathname.startsWith('/dashboard/chat')) {
+        router.push('/dashboard/approvals');
+      }
+    }
+    // 财务不能访问员工报销页面和审批页面
+    else if (role === 'finance') {
+      if (pathname.startsWith('/dashboard/reimbursements') || pathname.startsWith('/dashboard/approvals') || pathname.startsWith('/dashboard/trips') || pathname.startsWith('/dashboard/chat')) {
+        router.push('/dashboard/disbursements');
+      }
+    }
+    // 管理员可以访问大部分页面，但不能访问员工报销提交相关页面
+    else if (role === 'admin') {
+      if (pathname.startsWith('/dashboard/reimbursements') || pathname.startsWith('/dashboard/trips') || pathname.startsWith('/dashboard/chat')) {
+        router.push('/dashboard/approvals');
+      }
+    }
+  }, [role, pathname, router]);
+
+  // 切换角色：同步到数据库 + localStorage，然后跳转
+  const switchRole = async (newRole: UserRole) => {
     setRole(newRole);
     localStorage.setItem('userRole', newRole);
     setShowRoleMenu(false);
+
+    // 同步到数据库
+    try {
+      await fetch('/api/settings/role', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+    } catch (error) {
+      console.error('Failed to sync role:', error);
+    }
+
+    // 跳转到对应角色的默认页面
+    if (newRole === 'employee') {
+      router.push('/dashboard/reimbursements');
+    } else if (newRole === 'approver' || newRole === 'admin') {
+      router.push('/dashboard/approvals');
+    } else if (newRole === 'finance') {
+      router.push('/dashboard/disbursements');
+    }
   };
 
-  const navigation = role === 'employee' ? employeeNavigation : role === 'approver' ? approverNavigation : adminNavigation;
-  const roleLabel = role === 'employee' ? '员工' : role === 'approver' ? '审批人' : '管理员';
-  const roleColor = role === 'employee' ? '#2563eb' : role === 'approver' ? '#7c3aed' : '#dc2626';
+  const navigation = role === 'employee' ? employeeNavigation : role === 'approver' ? approverNavigation : role === 'finance' ? financeNavigation : adminNavigation;
+  const roleLabel = role === 'employee' ? '员工' : role === 'approver' ? '审批人' : role === 'finance' ? '财务' : '管理员';
+  const roleColor = role === 'employee' ? '#2563eb' : role === 'approver' ? '#7c3aed' : role === 'finance' ? '#059669' : '#dc2626';
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
@@ -225,6 +305,34 @@ export default function DashboardLayout({
                     <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>管理公司设置和团队</div>
                   </div>
                   {role === 'admin' && <span style={{ marginLeft: 'auto', color: '#dc2626' }}>✓</span>}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('finance'); }}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.625rem 0.875rem',
+                    backgroundColor: role === 'finance' ? '#ecfdf5' : 'white',
+                    border: 'none',
+                    borderTop: '1px solid #e5e7eb',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    textAlign: 'left'
+                  }}
+                >
+                  <span style={{
+                    width: '8px',
+                    height: '8px',
+                    backgroundColor: '#059669',
+                    borderRadius: '50%'
+                  }} />
+                  <div>
+                    <div style={{ fontWeight: 500, color: '#374151' }}>财务</div>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>处理付款和打款</div>
+                  </div>
+                  {role === 'finance' && <span style={{ marginLeft: 'auto', color: '#059669' }}>✓</span>}
                 </button>
               </div>
             )}

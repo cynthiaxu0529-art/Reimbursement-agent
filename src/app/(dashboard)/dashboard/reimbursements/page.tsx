@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -84,6 +84,9 @@ export default function ReimbursementsPage() {
   const [expandLoading, setExpandLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [itemActionLoading, setItemActionLoading] = useState<string | null>(null);
+  const [uploadingItemId, setUploadingItemId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refreshList = async () => {
     try {
@@ -204,6 +207,98 @@ export default function ReimbursementsPage() {
     }
   };
 
+  // Delete individual expense item
+  const handleDeleteItem = async (reimbursementId: string, itemId: string) => {
+    if (!confirm('确定要删除这项费用吗？')) return;
+    setItemActionLoading(itemId);
+    try {
+      const response = await fetch(`/api/reimbursements/${reimbursementId}/items/${itemId}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      if (result.success) {
+        // Update expandedData to remove the item
+        if (expandedData && expandedData.id === reimbursementId) {
+          const updatedItems = expandedData.items.filter(i => i.id !== itemId);
+          const newTotalAmount = updatedItems.reduce((sum, i) => sum + i.amount, 0);
+          const newTotalAmountInBaseCurrency = updatedItems.reduce(
+            (sum, i) => sum + (i.amountInBaseCurrency || i.amount),
+            0
+          );
+          setExpandedData({
+            ...expandedData,
+            items: updatedItems,
+            totalAmount: newTotalAmount,
+            totalAmountInBaseCurrency: newTotalAmountInBaseCurrency,
+          });
+        }
+        await refreshList();
+      } else {
+        alert(result.error || '删除失败');
+      }
+    } catch (error) {
+      alert('删除失败');
+    } finally {
+      setItemActionLoading(null);
+    }
+  };
+
+  // Handle file upload for receipt
+  const handleFileUpload = async (file: File, reimbursementId: string, itemId: string) => {
+    setUploadingItemId(itemId);
+    try {
+      // Convert file to base64
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result as string;
+
+        // Update the item with the new receipt
+        const response = await fetch(`/api/reimbursements/${reimbursementId}/items/${itemId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ receiptUrl: base64 }),
+        });
+        const result = await response.json();
+
+        if (result.success) {
+          // Update expandedData with the new receipt
+          if (expandedData && expandedData.id === reimbursementId) {
+            setExpandedData({
+              ...expandedData,
+              items: expandedData.items.map(i =>
+                i.id === itemId ? { ...i, receiptUrl: base64 } : i
+              ),
+            });
+          }
+        } else {
+          alert(result.error || '上传失败');
+        }
+        setUploadingItemId(null);
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      alert('上传失败');
+      setUploadingItemId(null);
+    }
+  };
+
+  // Trigger file input for a specific item
+  const triggerFileUpload = (reimbursementId: string, itemId: string) => {
+    setUploadingItemId(itemId);
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,.pdf';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        handleFileUpload(file, reimbursementId, itemId);
+      } else {
+        setUploadingItemId(null);
+      }
+    };
+    input.click();
+  };
+
   const filteredReimbursements = reimbursements.filter(r =>
     !search || r.title.toLowerCase().includes(search.toLowerCase())
   );
@@ -213,6 +308,11 @@ export default function ReimbursementsPage() {
     pending: reimbursements.filter(r => r.status === 'pending' || r.status === 'under_review').length,
     approved: reimbursements.filter(r => r.status === 'approved' || r.status === 'paid').length,
     totalAmount: reimbursements.reduce((sum, r) => sum + r.totalAmount, 0),
+    totalAmountUSD: reimbursements.reduce((sum, r) => {
+      // 优先使用已转换的美元金额，否则用默认汇率
+      const usdAmount = r.totalAmountInBaseCurrency || r.totalAmount * 0.14;
+      return sum + usdAmount;
+    }, 0),
   };
 
   const formatDate = (dateStr: string) => {
@@ -316,8 +416,11 @@ export default function ReimbursementsPage() {
           border: '1px solid #e5e7eb',
         }}>
           <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>报销总额</p>
-          <p style={{ fontSize: '24px', fontWeight: 700, color: '#2563eb' }}>
+          <p style={{ fontSize: '24px', fontWeight: 700, color: '#2563eb', marginBottom: '4px' }}>
             ¥{stats.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+          </p>
+          <p style={{ fontSize: '16px', fontWeight: 600, color: '#0369a1' }}>
+            ${stats.totalAmountUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </p>
         </div>
       </div>
@@ -581,20 +684,37 @@ export default function ReimbursementsPage() {
                       <span style={{ fontSize: '11px', color: '#6b7280' }}>-</span>
                     )}
                     {item.status === 'rejected' && (
-                      <Link
-                        href="/dashboard/reimbursements/new"
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: '11px',
-                          color: '#2563eb',
-                          backgroundColor: '#eff6ff',
-                          border: 'none',
-                          borderRadius: '4px',
-                          textDecoration: 'none',
-                        }}
-                      >
-                        重新提交
-                      </Link>
+                      <>
+                        <Link
+                          href="/dashboard/reimbursements/new"
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: '11px',
+                            color: '#2563eb',
+                            backgroundColor: '#eff6ff',
+                            border: 'none',
+                            borderRadius: '4px',
+                            textDecoration: 'none',
+                          }}
+                        >
+                          重新提交
+                        </Link>
+                        <button
+                          onClick={() => handleDelete(item.id)}
+                          disabled={isLoading}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: '11px',
+                            color: '#dc2626',
+                            backgroundColor: '#fee2e2',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: isLoading ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          删除
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -620,7 +740,9 @@ export default function ReimbursementsPage() {
                         {/* Detail Header */}
                         <div style={{
                           display: 'grid',
-                          gridTemplateColumns: '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr',
+                          gridTemplateColumns: (item.status === 'draft' || item.status === 'rejected')
+                            ? '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr 120px'
+                            : '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr',
                           gap: '8px',
                           padding: '10px 12px',
                           backgroundColor: '#f9fafb',
@@ -635,6 +757,9 @@ export default function ReimbursementsPage() {
                           <div style={{ textAlign: 'right' }}>原币金额</div>
                           <div style={{ textAlign: 'right' }}>汇率</div>
                           <div style={{ textAlign: 'right' }}>美元金额</div>
+                          {(item.status === 'draft' || item.status === 'rejected') && (
+                            <div style={{ textAlign: 'center' }}>操作</div>
+                          )}
                         </div>
 
                         {/* Detail Rows */}
@@ -645,13 +770,17 @@ export default function ReimbursementsPage() {
                               ? lineItem.amountInBaseCurrency / lineItem.amount
                               : 0.14);
                           const itemUsd = lineItem.amountInBaseCurrency || lineItem.amount * itemRate;
+                          const isItemLoading = itemActionLoading === lineItem.id || uploadingItemId === lineItem.id;
+                          const canEdit = item.status === 'draft' || item.status === 'rejected';
 
                           return (
                             <div
                               key={lineItem.id || idx}
                               style={{
                                 display: 'grid',
-                                gridTemplateColumns: '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr',
+                                gridTemplateColumns: canEdit
+                                  ? '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr 120px'
+                                  : '1.2fr 1.5fr 1fr 1.2fr 0.8fr 1fr',
                                 gap: '8px',
                                 padding: '10px 12px',
                                 borderBottom: idx < (expandedData.items?.length || 0) - 1 ? '1px solid #f3f4f6' : 'none',
@@ -664,17 +793,27 @@ export default function ReimbursementsPage() {
                               <div style={{ color: '#111827' }}>
                                 {lineItem.description || catInfo.label}
                                 {lineItem.receiptUrl && (
-                                  <span
+                                  <button
+                                    type="button"
                                     style={{
                                       marginLeft: '6px',
                                       fontSize: '11px',
                                       color: '#2563eb',
-                                      cursor: 'pointer'
+                                      cursor: 'pointer',
+                                      background: 'none',
+                                      border: 'none',
+                                      padding: '2px 6px',
+                                      borderRadius: '4px',
+                                      backgroundColor: '#eff6ff',
                                     }}
-                                    onClick={() => setPreviewImage(lineItem.receiptUrl || null)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      e.preventDefault();
+                                      setPreviewImage(lineItem.receiptUrl || null);
+                                    }}
                                   >
                                     📎 查看凭证
-                                  </span>
+                                  </button>
                                 )}
                               </div>
                               <div>
@@ -701,6 +840,50 @@ export default function ReimbursementsPage() {
                               <div style={{ textAlign: 'right', fontWeight: 600, color: '#0369a1' }}>
                                 ${itemUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                               </div>
+                              {canEdit && (
+                                <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      triggerFileUpload(item.id, lineItem.id);
+                                    }}
+                                    disabled={isItemLoading}
+                                    style={{
+                                      padding: '2px 6px',
+                                      fontSize: '10px',
+                                      color: '#2563eb',
+                                      backgroundColor: '#eff6ff',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      cursor: isItemLoading ? 'not-allowed' : 'pointer',
+                                      opacity: isItemLoading ? 0.6 : 1,
+                                    }}
+                                  >
+                                    {uploadingItemId === lineItem.id ? '上传中...' : (lineItem.receiptUrl ? '更换凭证' : '上传凭证')}
+                                  </button>
+                                  {expandedData.items.length > 1 && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteItem(item.id, lineItem.id);
+                                      }}
+                                      disabled={isItemLoading}
+                                      style={{
+                                        padding: '2px 6px',
+                                        fontSize: '10px',
+                                        color: '#dc2626',
+                                        backgroundColor: '#fee2e2',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        cursor: isItemLoading ? 'not-allowed' : 'pointer',
+                                        opacity: isItemLoading ? 0.6 : 1,
+                                      }}
+                                    >
+                                      删除
+                                    </button>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
