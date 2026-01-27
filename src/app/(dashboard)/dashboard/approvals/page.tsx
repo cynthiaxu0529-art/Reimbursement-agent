@@ -236,14 +236,10 @@ export default function ApprovalsPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 预览附件：PDF在新标签页打开，图片用弹窗预览
+  // 预览附件
   const handlePreviewReceipt = (url: string | null | undefined) => {
     if (!url) return;
-    if (url.match(/\.pdf($|\?)/i) || url.startsWith('data:application/pdf')) {
-      window.open(url, '_blank');
-    } else {
-      setPreviewImage(url);
-    }
+    setPreviewImage(url);
   };
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -831,7 +827,7 @@ export default function ApprovalsPage() {
                                     onClick={() => handlePreviewReceipt(lineItem.receiptUrl)}
                                   >
                                     <div className="w-10 h-10 rounded-lg bg-white border flex items-center justify-center overflow-hidden">
-                                      {lineItem.receiptUrl?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                                      {(lineItem.receiptUrl?.match(/\.(jpg|jpeg|png|gif|webp)$/i) || lineItem.receiptUrl?.startsWith('data:image/')) ? (
                                         <img src={lineItem.receiptUrl} alt="" className="w-full h-full object-cover" />
                                       ) : (
                                         <span className="text-xl">📄</span>
@@ -906,6 +902,10 @@ export default function ApprovalsPage() {
               src={previewImage}
               alt="凭证预览"
               className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+              onError={() => {
+                window.open(previewImage!, '_blank');
+                setPreviewImage(null);
+              }}
             />
             <button
               onClick={(e) => { e.stopPropagation(); setPreviewImage(null); }}

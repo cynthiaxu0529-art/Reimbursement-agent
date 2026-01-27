@@ -75,14 +75,10 @@ export default function DisbursementsPage() {
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 预览附件：PDF在新标签页打开，图片用弹窗预览
+  // 预览附件
   const handlePreviewReceipt = (url: string | null | undefined) => {
     if (!url) return;
-    if (url.match(/\.pdf($|\?)/i) || url.startsWith('data:application/pdf')) {
-      window.open(url, '_blank');
-    } else {
-      setPreviewImage(url);
-    }
+    setPreviewImage(url);
   };
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
@@ -660,7 +656,7 @@ export default function DisbursementsPage() {
                                 className="flex items-center gap-3 p-3 bg-white border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
                               >
                                 <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden">
-                                  {lineItem.receiptUrl?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                                  {(lineItem.receiptUrl?.match(/\.(jpg|jpeg|png|gif|webp)$/i) || lineItem.receiptUrl?.startsWith('data:image/')) ? (
                                     <img src={lineItem.receiptUrl} alt="" className="w-full h-full object-cover" />
                                   ) : (
                                     <span className="text-2xl">📄</span>
@@ -742,6 +738,10 @@ export default function DisbursementsPage() {
               src={previewImage}
               alt="凭证预览"
               className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+              onError={() => {
+                window.open(previewImage!, '_blank');
+                setPreviewImage(null);
+              }}
             />
             <button
               onClick={(e) => { e.stopPropagation(); setPreviewImage(null); }}

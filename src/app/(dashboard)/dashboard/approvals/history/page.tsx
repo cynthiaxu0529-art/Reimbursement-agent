@@ -86,14 +86,10 @@ export default function ApprovalHistoryPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 预览附件：PDF在新标签页打开，图片用弹窗预览
+  // 预览附件
   const handlePreviewReceipt = (url: string | null | undefined) => {
     if (!url) return;
-    if (url.match(/\.pdf($|\?)/i) || url.startsWith('data:application/pdf')) {
-      window.open(url, '_blank');
-    } else {
-      setPreviewImage(url);
-    }
+    setPreviewImage(url);
   };
   const [roleChecked, setRoleChecked] = useState(false);
 
@@ -448,7 +444,7 @@ export default function ApprovalHistoryPage() {
                               onClick={() => handlePreviewReceipt(item.receiptUrl)}
                               className="flex items-center gap-1 mt-1 text-xs text-blue-600 hover:text-blue-700"
                             >
-                              📄 {item.receiptFileName || 'receipt.pdf'}
+                              📎 {item.receiptFileName || '查看凭证'}
                             </button>
                           )}
                         </div>
@@ -511,6 +507,10 @@ export default function ApprovalHistoryPage() {
               src={previewImage}
               alt="凭证预览"
               className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+              onError={() => {
+                window.open(previewImage!, '_blank');
+                setPreviewImage(null);
+              }}
             />
             <button
               onClick={(e) => { e.stopPropagation(); setPreviewImage(null); }}
