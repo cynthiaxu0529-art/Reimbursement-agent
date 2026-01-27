@@ -8,7 +8,7 @@ import { DrizzleAdapter } from '@auth/drizzle-adapter';
 import Credentials from 'next-auth/providers/credentials';
 import Google from 'next-auth/providers/google';
 import bcrypt from 'bcryptjs';
-import { db } from '@/lib/db';
+import { db, getDb } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
@@ -21,7 +21,7 @@ const isBuilding = process.env.NODE_ENV === 'production' &&
 const authConfig = {
   // 只在有数据库连接时使用 adapter
   ...(process.env.POSTGRES_URL || process.env.DATABASE_URL
-    ? { adapter: DrizzleAdapter(db) }
+    ? { adapter: DrizzleAdapter(getDb()) }
     : {}),
   session: {
     strategy: 'jwt' as const,

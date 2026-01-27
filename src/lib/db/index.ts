@@ -10,7 +10,7 @@ import * as schema from './schema';
 // 延迟初始化，避免构建时报错
 let dbInstance: PostgresJsDatabase<typeof schema> | null = null;
 
-function getDb(): PostgresJsDatabase<typeof schema> {
+export function getDb(): PostgresJsDatabase<typeof schema> {
   if (!dbInstance) {
     const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
     if (!connectionString) {
