@@ -85,6 +85,16 @@ export default function ApprovalHistoryPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // 预览附件：PDF在新标签页打开，图片用弹窗预览
+  const handlePreviewReceipt = (url: string | null | undefined) => {
+    if (!url) return;
+    if (url.match(/\.pdf($|\?)/i)) {
+      window.open(url, '_blank');
+    } else {
+      setPreviewImage(url);
+    }
+  };
   const [roleChecked, setRoleChecked] = useState(false);
 
   // 检查用户角色
@@ -435,7 +445,7 @@ export default function ApprovalHistoryPage() {
                           )}
                           {item.receiptUrl && (
                             <button
-                              onClick={() => setPreviewImage(item.receiptUrl || null)}
+                              onClick={() => handlePreviewReceipt(item.receiptUrl)}
                               className="flex items-center gap-1 mt-1 text-xs text-blue-600 hover:text-blue-700"
                             >
                               📄 {item.receiptFileName || 'receipt.pdf'}
