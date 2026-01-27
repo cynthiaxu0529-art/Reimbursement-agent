@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 检查权限（只有财务或管理员可以发起付款）
-    const userRole = session.user.role;
+    const userRole = session.user.role || '';
     if (!['finance', 'admin', 'super_admin'].includes(userRole)) {
       return NextResponse.json({ error: '没有权限发起付款' }, { status: 403 });
     }
