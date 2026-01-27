@@ -51,12 +51,34 @@ export default function DashboardLayout({
   const [role, setRole] = useState<UserRole>('employee');
   const [showRoleMenu, setShowRoleMenu] = useState(false);
 
-  // 从 localStorage 读取角色
+  // 初始化：从数据库获取角色，同步到 localStorage
   useEffect(() => {
-    const savedRole = localStorage.getItem('userRole') as UserRole;
-    if (savedRole && (savedRole === 'employee' || savedRole === 'approver' || savedRole === 'admin' || savedRole === 'finance')) {
-      setRole(savedRole);
-    }
+    const initRole = async () => {
+      try {
+        const response = await fetch('/api/settings/role');
+        const result = await response.json();
+        if (result.success && result.role) {
+          // 数据库角色到前端角色的映射
+          const dbToFrontend: Record<string, UserRole> = {
+            employee: 'employee',
+            manager: 'approver',
+            finance: 'finance',
+            admin: 'admin',
+            super_admin: 'admin',
+          };
+          const frontendRole = dbToFrontend[result.role] || 'employee';
+          setRole(frontendRole);
+          localStorage.setItem('userRole', frontendRole);
+        }
+      } catch {
+        // 降级：从 localStorage 读取
+        const savedRole = localStorage.getItem('userRole') as UserRole;
+        if (savedRole && ['employee', 'approver', 'admin', 'finance'].includes(savedRole)) {
+          setRole(savedRole);
+        }
+      }
+    };
+    initRole();
   }, []);
 
   // 检查当前页面是否对当前角色可访问，如果不是则跳转
@@ -87,11 +109,22 @@ export default function DashboardLayout({
     }
   }, [role, pathname, router]);
 
-  // 切换角色时跳转到对应的默认页面
-  const switchRole = (newRole: UserRole) => {
+  // 切换角色：同步到数据库 + localStorage，然后跳转
+  const switchRole = async (newRole: UserRole) => {
     setRole(newRole);
     localStorage.setItem('userRole', newRole);
     setShowRoleMenu(false);
+
+    // 同步到数据库
+    try {
+      await fetch('/api/settings/role', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+    } catch (error) {
+      console.error('Failed to sync role:', error);
+    }
 
     // 跳转到对应角色的默认页面
     if (newRole === 'employee') {
