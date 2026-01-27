@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 验证费用项数据
+    // 验证每项费用的必填字段
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (!item.category) {
@@ -233,12 +233,14 @@ export async function POST(request: NextRequest) {
       success: true,
       data: reimbursement,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Create reimbursement error:', error);
-    // 提供更详细的错误信息
-    const errorMessage = error instanceof Error ? error.message : '未知错误';
+    // 返回详细的错误信息以便调试
     return NextResponse.json(
-      { error: `创建报销单失败: ${errorMessage}` },
+      {
+        error: `创建失败: ${error?.message || '未知错误'}`,
+        detail: error?.detail || error?.code || null
+      },
       { status: 500 }
     );
   }
