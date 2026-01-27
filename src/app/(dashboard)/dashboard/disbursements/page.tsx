@@ -260,6 +260,39 @@ export default function DisbursementsPage() {
     alert(`批量付款完成：${successCount} 笔成功${failCount > 0 ? `，${failCount} 笔失败` : ''}`);
   };
 
+  const processBatchReject = async () => {
+    if (selectedIds.length === 0) return;
+    const reason = prompt(`请输入批量驳回原因（共 ${selectedIds.length} 笔）：`);
+    if (!reason) return;
+
+    setBatchProcessing(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const id of selectedIds) {
+      try {
+        const response = await fetch(`/api/reimbursements/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'rejected', rejectReason: `财务批量驳回: ${reason}` }),
+        });
+        const result = await response.json();
+        if (result.success) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } catch {
+        failCount++;
+      }
+    }
+
+    setReimbursements(prev => prev.filter(r => !selectedIds.includes(r.id)));
+    setSelectedIds([]);
+    setBatchProcessing(false);
+    alert(`批量驳回完成：${successCount} 笔成功${failCount > 0 ? `，${failCount} 笔失败` : ''}`);
+  };
+
   const toggleSelect = (id: string) => {
     setSelectedIds(prev =>
       prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]
@@ -313,18 +346,33 @@ export default function DisbursementsPage() {
             <span className="mr-2">📊</span> 导出报表
           </Button>
           {selectedIds.length > 0 && (
-            <Button
-              onClick={processBatchPayment}
-              disabled={batchProcessing}
-              className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-md"
-            >
-              {batchProcessing ? '处理中...' : (
-                <>
-                  <span className="mr-2">💳</span>
-                  批量付款 ({selectedIds.length})
-                </>
-              )}
-            </Button>
+            <>
+              <Button
+                onClick={processBatchReject}
+                disabled={batchProcessing}
+                variant="outline"
+                className="text-red-600 border-red-200 hover:bg-red-50"
+              >
+                {batchProcessing ? '处理中...' : (
+                  <>
+                    <span className="mr-2">✕</span>
+                    批量驳回 ({selectedIds.length})
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={processBatchPayment}
+                disabled={batchProcessing}
+                className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-md"
+              >
+                {batchProcessing ? '处理中...' : (
+                  <>
+                    <span className="mr-2">💳</span>
+                    批量付款 ({selectedIds.length})
+                  </>
+                )}
+              </Button>
+            </>
           )}
         </div>
       </div>
