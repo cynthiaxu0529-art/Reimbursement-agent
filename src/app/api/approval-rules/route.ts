@@ -6,6 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
+
+export const dynamic = 'force-dynamic';
 import { db } from '@/lib/db';
 import { approvalRules, users } from '@/lib/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
@@ -69,7 +71,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 检查权限
-    if (!['admin', 'super_admin'].includes(user.role)) {
+    if (!['admin', 'super_admin', 'manager'].includes(user.role)) {
       return NextResponse.json({ error: '无权限创建审批规则' }, { status: 403 });
     }
 

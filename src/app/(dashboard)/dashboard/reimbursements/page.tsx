@@ -84,18 +84,6 @@ export default function ReimbursementsPage() {
   const [expandLoading, setExpandLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-
-  // 处理附件预览：PDF 在新标签页打开，图片在弹窗预览
-  const handlePreviewReceipt = (url: string | null | undefined) => {
-    if (!url) return;
-    const isPdf = url.toLowerCase().includes('.pdf') || url.startsWith('data:application/pdf');
-    if (isPdf) {
-      window.open(url, '_blank');
-    } else {
-      setPreviewImage(url);
-    }
-  };
-
   const [itemActionLoading, setItemActionLoading] = useState<string | null>(null);
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -821,7 +809,7 @@ export default function ReimbursementsPage() {
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       e.preventDefault();
-                                      handlePreviewReceipt(lineItem.receiptUrl);
+                                      setPreviewImage(lineItem.receiptUrl || null);
                                     }}
                                   >
                                     📎 查看凭证

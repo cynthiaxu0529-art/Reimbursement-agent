@@ -7,6 +7,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
+
+export const dynamic = 'force-dynamic';
 import { db } from '@/lib/db';
 import { departments, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -146,7 +148,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     // 检查权限
-    if (!['admin', 'super_admin'].includes(user.role)) {
+    if (!['admin', 'super_admin', 'manager'].includes(user.role)) {
       return NextResponse.json({ error: '无权限更新部门' }, { status: 403 });
     }
 
@@ -268,7 +270,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     // 检查权限
-    if (!['admin', 'super_admin'].includes(user.role)) {
+    if (!['admin', 'super_admin', 'manager'].includes(user.role)) {
       return NextResponse.json({ error: '无权限删除部门' }, { status: 403 });
     }
 

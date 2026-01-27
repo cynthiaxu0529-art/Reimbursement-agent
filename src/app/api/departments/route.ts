@@ -6,6 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
+
+export const dynamic = 'force-dynamic';
 import { db } from '@/lib/db';
 import { departments, users } from '@/lib/db/schema';
 import { eq, and, isNull, asc } from 'drizzle-orm';
@@ -152,8 +154,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '未找到租户信息' }, { status: 400 });
     }
 
-    // 检查权限（只有 admin 或 super_admin 可以创建部门）
-    if (!['admin', 'super_admin'].includes(user.role)) {
+    // 检查权限（admin、super_admin、manager 可以创建部门）
+    if (!['admin', 'super_admin', 'manager'].includes(user.role)) {
       return NextResponse.json({ error: '无权限创建部门' }, { status: 403 });
     }
 
