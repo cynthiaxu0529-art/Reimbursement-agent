@@ -8,7 +8,7 @@ import { DrizzleAdapter } from '@auth/drizzle-adapter';
 import Credentials from 'next-auth/providers/credentials';
 import Google from 'next-auth/providers/google';
 import bcrypt from 'bcryptjs';
-import { getDb } from '@/lib/db';
+import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
@@ -21,7 +21,7 @@ const isBuilding = process.env.NODE_ENV === 'production' &&
 const authConfig = {
   // 只在有数据库连接时使用 adapter
   ...(process.env.POSTGRES_URL || process.env.DATABASE_URL
-    ? { adapter: DrizzleAdapter(getDb()) }
+    ? { adapter: DrizzleAdapter(db) }
     : {}),
   session: {
     strategy: 'jwt' as const,
@@ -59,7 +59,6 @@ const authConfig = {
 
         try {
           // 查找用户
-          const db = getDb();
           const user = await db.query.users.findFirst({
             where: eq(users.email, email),
           });
@@ -100,7 +99,6 @@ const authConfig = {
 
         try {
           // 获取用户详细信息
-          const db = getDb();
           const dbUser = await db.query.users.findFirst({
             where: eq(users.id, token.id as string),
           });
