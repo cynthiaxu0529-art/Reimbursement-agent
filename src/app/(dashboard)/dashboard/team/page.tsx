@@ -110,6 +110,7 @@ export default function TeamPage() {
     department: '',
     departmentId: '',
     roles: [] as string[],
+    setAsDeptManager: false,
   });
 
   // 部门数据
@@ -240,6 +241,7 @@ export default function TeamPage() {
           department: inviteData.department,
           departmentId: inviteData.departmentId,
           roles: inviteData.roles,
+          setAsDeptManager: inviteData.setAsDeptManager,
           companyName: '您的公司',
         }),
       });
@@ -256,7 +258,7 @@ export default function TeamPage() {
         setPendingInvites([...pendingInvites, newInvite]);
         showMessage(`邀请邮件已成功发送至 ${inviteData.email}`, 'success');
         setShowInviteModal(false);
-        setInviteData({ name: '', email: '', department: '', departmentId: '', roles: [] });
+        setInviteData({ name: '', email: '', department: '', departmentId: '', roles: [], setAsDeptManager: false });
       } else {
         showMessage(result.error || '发送邀请失败，请重试', 'error');
       }
@@ -395,10 +397,20 @@ export default function TeamPage() {
     return flatDepts;
   };
 
-  // 获取可用的部门名称（硬编码 + 数据库）
-  const allDeptNames = departments.length > 0
-    ? [...new Set(departments.map(d => d.name))]
-    : ['技术部', '产品部', '运营部', '财务部', '人力资源部', '市场部', '管理层'];
+  // 获取扁平化的部门列表用于邀请成员的下拉选择
+  const flatDeptList = (() => {
+    const result: { id: string; name: string }[] = [];
+    const flatten = (depts: Department[], prefix = '') => {
+      depts.forEach(d => {
+        result.push({ id: d.id, name: prefix + d.name });
+        if (d.children?.length) {
+          flatten(d.children, prefix + '  ');
+        }
+      });
+    };
+    flatten(departments);
+    return result;
+  })();
 
   // 按部门分组成员
   const groupedMembers = members.reduce((acc, member) => {
@@ -923,16 +935,56 @@ export default function TeamPage() {
               <div>
                 <label style={labelStyle}>所属部门</label>
                 <select
-                  value={inviteData.department}
-                  onChange={(e) => setInviteData({ ...inviteData, department: e.target.value })}
+                  value={inviteData.departmentId}
+                  onChange={(e) => {
+                    const selectedDept = flatDeptList.find(d => d.id === e.target.value);
+                    setInviteData({
+                      ...inviteData,
+                      departmentId: e.target.value,
+                      department: selectedDept?.name.trim() || '',
+                      setAsDeptManager: e.target.value ? inviteData.setAsDeptManager : false,
+                    });
+                  }}
                   style={inputStyle}
                 >
                   <option value="">请选择部门</option>
-                  {allDeptNames.map((dept) => (
-                    <option key={dept} value={dept}>{dept}</option>
+                  {flatDeptList.map((dept) => (
+                    <option key={dept.id} value={dept.id}>{dept.name}</option>
                   ))}
                 </select>
+                {departments.length === 0 && (
+                  <p style={{ fontSize: '0.75rem', color: '#f59e0b', marginTop: '0.25rem' }}>
+                    暂无部门，请先在「部门管理」中创建部门
+                  </p>
+                )}
               </div>
+
+              {inviteData.departmentId && (
+                <div>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.75rem',
+                    border: inviteData.setAsDeptManager ? '2px solid #2563eb' : '1px solid #d1d5db',
+                    borderRadius: '0.5rem',
+                    cursor: 'pointer',
+                    backgroundColor: inviteData.setAsDeptManager ? '#eff6ff' : 'white',
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={inviteData.setAsDeptManager}
+                      onChange={(e) => setInviteData({ ...inviteData, setAsDeptManager: e.target.checked })}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 500, fontSize: '0.875rem', color: '#111827' }}>设为部门负责人</div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                        该成员将成为所选部门的负责人，负责审批该部门成员的报销单
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              )}
 
               <div>
                 <label style={labelStyle}>角色权限 <span style={{ color: '#dc2626' }}>*</span></label>
@@ -977,7 +1029,7 @@ export default function TeamPage() {
 
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
               <button
-                onClick={() => { setShowInviteModal(false); setInviteData({ name: '', email: '', department: '', departmentId: '', roles: [] }); }}
+                onClick={() => { setShowInviteModal(false); setInviteData({ name: '', email: '', department: '', departmentId: '', roles: [], setAsDeptManager: false }); }}
                 style={{ padding: '0.5rem 1rem', backgroundColor: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: '0.5rem', cursor: 'pointer' }}
               >
                 取消

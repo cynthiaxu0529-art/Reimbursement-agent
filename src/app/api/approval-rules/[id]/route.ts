@@ -78,7 +78,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     // 检查权限
-    if (!['admin', 'super_admin'].includes(user.role)) {
+    if (!['admin', 'super_admin', 'manager'].includes(user.role)) {
       return NextResponse.json({ error: '无权限更新审批规则' }, { status: 403 });
     }
 
@@ -157,7 +157,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     // 检查权限
-    if (!['admin', 'super_admin'].includes(user.role)) {
+    if (!['admin', 'super_admin', 'manager'].includes(user.role)) {
       return NextResponse.json({ error: '无权限删除审批规则' }, { status: 403 });
     }
 
