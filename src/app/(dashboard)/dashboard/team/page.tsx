@@ -607,47 +607,100 @@ export default function TeamPage() {
 
           {/* Members List */}
           {!loading && (
-            <div style={cardStyle}>
-              <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f8fafc' }}>
-                <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>
-                  {selectedDepartment === 'all' ? '所有成员' : selectedDepartment} ({filteredMembers.length} 人)
-                </h3>
-              </div>
-              <div>
-                {filteredMembers.map(member => (
-                  <div key={member.id} style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                      <div style={{
-                        width: '40px',
-                        height: '40px',
-                        backgroundColor: member.roles.includes('admin') ? '#dc2626' : member.roles.includes('finance') ? '#059669' : '#2563eb',
-                        borderRadius: '50%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}>
-                        <span style={{ color: 'white', fontWeight: 600 }}>{member.name[0]}</span>
-                      </div>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <p style={{ fontWeight: 500, color: '#111827' }}>{member.name}</p>
-                          {member.isExample && (
-                            <span style={{ padding: '0.125rem 0.375rem', backgroundColor: '#f3f4f6', borderRadius: '0.25rem', fontSize: '0.625rem', color: '#6b7280' }}>示例</span>
-                          )}
-                        </div>
-                        <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>{member.email}</p>
-                      </div>
+            <div style={{ display: 'grid', gap: '1rem' }}>
+              {selectedDepartment === 'all' ? (
+                // 全部视图：按部门分组显示
+                Object.entries(groupedMembers).map(([dept, deptMembers]) => (
+                  <div key={dept} style={cardStyle}>
+                    <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span>{dept === '未分配' ? '📋' : '🏢'}</span>
+                      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>
+                        {dept}
+                      </h3>
+                      <span style={{ fontSize: '0.875rem', color: '#6b7280', backgroundColor: '#f3f4f6', padding: '0.125rem 0.5rem', borderRadius: '0.25rem' }}>
+                        {deptMembers.length} 人
+                      </span>
                     </div>
-                    <div style={{ display: 'flex', gap: '0.25rem' }}>
-                      {member.roles.map(role => (
-                        <span key={role} style={{ padding: '0.25rem 0.5rem', backgroundColor: roleColors[role]?.bg || '#f3f4f6', color: roleColors[role]?.text || '#4b5563', borderRadius: '0.375rem', fontSize: '0.75rem', fontWeight: 500 }}>
-                          {roleLabels[role]}
-                        </span>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem', padding: '1rem 1.25rem' }}>
+                      {deptMembers.map(member => (
+                        <div key={member.id} style={{ padding: '1rem', border: '1px solid #e5e7eb', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <div style={{
+                            width: '44px',
+                            height: '44px',
+                            backgroundColor: member.roles.includes('admin') ? '#dc2626' : member.roles.includes('finance') ? '#059669' : '#2563eb',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                          }}>
+                            <span style={{ color: 'white', fontWeight: 600, fontSize: '1rem' }}>{member.name[0]}</span>
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <p style={{ fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.name}</p>
+                              {member.isExample && (
+                                <span style={{ padding: '0.125rem 0.375rem', backgroundColor: '#f3f4f6', borderRadius: '0.25rem', fontSize: '0.625rem', color: '#6b7280' }}>示例</span>
+                              )}
+                            </div>
+                            <p style={{ fontSize: '0.75rem', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.email}</p>
+                            <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.375rem', flexWrap: 'wrap' }}>
+                              {member.roles.map(role => (
+                                <span key={role} style={{ padding: '0.125rem 0.375rem', backgroundColor: roleColors[role]?.bg || '#f3f4f6', color: roleColors[role]?.text || '#4b5563', borderRadius: '0.25rem', fontSize: '0.625rem', fontWeight: 500 }}>
+                                  {roleLabels[role] || role}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>
-                ))}
-              </div>
+                ))
+              ) : (
+                // 单部门视图
+                <div style={cardStyle}>
+                  <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f8fafc' }}>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>
+                      {selectedDepartment} ({filteredMembers.length} 人)
+                    </h3>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem', padding: '1rem 1.25rem' }}>
+                    {filteredMembers.map(member => (
+                      <div key={member.id} style={{ padding: '1rem', border: '1px solid #e5e7eb', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div style={{
+                          width: '44px',
+                          height: '44px',
+                          backgroundColor: member.roles.includes('admin') ? '#dc2626' : member.roles.includes('finance') ? '#059669' : '#2563eb',
+                          borderRadius: '50%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}>
+                          <span style={{ color: 'white', fontWeight: 600, fontSize: '1rem' }}>{member.name[0]}</span>
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <p style={{ fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.name}</p>
+                            {member.isExample && (
+                              <span style={{ padding: '0.125rem 0.375rem', backgroundColor: '#f3f4f6', borderRadius: '0.25rem', fontSize: '0.625rem', color: '#6b7280' }}>示例</span>
+                            )}
+                          </div>
+                          <p style={{ fontSize: '0.75rem', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.email}</p>
+                          <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.375rem', flexWrap: 'wrap' }}>
+                            {member.roles.map(role => (
+                              <span key={role} style={{ padding: '0.125rem 0.375rem', backgroundColor: roleColors[role]?.bg || '#f3f4f6', color: roleColors[role]?.text || '#4b5563', borderRadius: '0.25rem', fontSize: '0.625rem', fontWeight: 500 }}>
+                                {roleLabels[role] || role}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
