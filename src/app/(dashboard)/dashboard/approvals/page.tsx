@@ -239,7 +239,7 @@ export default function ApprovalsPage() {
   // 预览附件：PDF在新标签页打开，图片用弹窗预览
   const handlePreviewReceipt = (url: string | null | undefined) => {
     if (!url) return;
-    if (url.match(/\.pdf($|\?)/i)) {
+    if (url.match(/\.pdf($|\?)/i) || url.startsWith('data:application/pdf')) {
       window.open(url, '_blank');
     } else {
       setPreviewImage(url);
