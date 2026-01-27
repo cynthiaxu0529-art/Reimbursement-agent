@@ -400,13 +400,23 @@ export const payments = pgTable('payments', {
   currency: text('currency').notNull(),
 
   transactionId: text('transaction_id'),
-  paymentProvider: text('payment_provider').notNull().default('fluxpay'),
+  paymentProvider: text('payment_provider').notNull().default('fluxa'),
 
   status: text('status').notNull().default('pending'),
   errorMessage: text('error_message'),
 
+  // Fluxa Payout 相关字段
+  payoutId: text('payout_id'),                    // Fluxa payout ID
+  approvalUrl: text('approval_url'),              // 财务审批 URL
+  payoutStatus: text('payout_status'),            // Fluxa 状态: pending_authorization, authorized, signed, broadcasting, succeeded, failed, expired
+  txHash: text('tx_hash'),                        // 区块链交易哈希
+  expiresAt: timestamp('expires_at'),             // 审批过期时间
+  toAddress: text('to_address'),                  // 收款钱包地址
+  initiatedBy: uuid('initiated_by'),              // 发起人 ID
+
   paidAt: timestamp('paid_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
 /**

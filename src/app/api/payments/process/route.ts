@@ -1,21 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, users } from '@/lib/db/schema';
+import { reimbursements, users, payments } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { createPaymentService } from '@/lib/mcp/fluxpay-client';
+import {
+  createFluxaPayoutService,
+  FluxaPayoutClient,
+} from '@/lib/fluxa-payout';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/payments/process
- * 财务处理付款 - 通过 FluxPay 发起打款
+ * 财务发起打款 - 通过 Fluxa Payout 创建付款请求
+ * 返回审批URL供财务在钱包中审批
  */
 export async function POST(request: NextRequest) {
   try {
     const session = await auth();
     if (!session?.user?.tenantId) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
+    }
+
+    // 检查权限（只有财务或管理员可以发起付款）
+    const userRole = session.user.role || '';
+    if (!['finance', 'admin', 'super_admin'].includes(userRole)) {
+      return NextResponse.json({ error: '没有权限发起付款' }, { status: 403 });
     }
 
     const { reimbursementId } = await request.json();
@@ -62,39 +72,78 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // 计算付款金额（使用美元）
+    // 验证钱包地址格式
+    const evmAddressRegex = /^0x[a-fA-F0-9]{40}$/;
+    if (!evmAddressRegex.test(walletInfo.walletAddress)) {
+      return NextResponse.json({
+        success: false,
+        error: '钱包地址格式无效',
+        message: '需要有效的 Base 链钱包地址 (0x开头的40位十六进制)',
+      }, { status: 400 });
+    }
+
+    // 计算付款金额（使用美元/USDC）
     const amountUSD = reimbursement.totalAmountInBaseCurrency ||
       Number(reimbursement.totalAmount) * 0.14;
 
-    // 调用 FluxPay 处理付款
-    const paymentService = createPaymentService();
-    const result = await paymentService.processReimbursementPayment(
+    // 初始化 Fluxa Payout 服务
+    const payoutService = createFluxaPayoutService();
+
+    // 检查配置
+    if (!payoutService.isConfigured()) {
+      return NextResponse.json({
+        success: false,
+        error: 'Fluxa 钱包未配置',
+        message: '请在环境变量中配置 FLUXA_AGENT_ID 和 FLUXA_AGENT_TOKEN',
+      }, { status: 500 });
+    }
+
+    // 发起 Fluxa Payout
+    const result = await payoutService.initiateReimbursementPayout(
       reimbursement.id,
-      user.id,
+      walletInfo.walletAddress,
       amountUSD,
-      'USD',
+      `报销付款 - ${reimbursement.title}`,
       {
-        name: user.name || 'User',
-        walletAddress: walletInfo.walletAddress,
-        chain: walletInfo.chain || 'base',
-      },
-      `报销付款 - ${reimbursement.title}`
+        userName: user.name,
+        userEmail: user.email,
+        reimbursementTitle: reimbursement.title,
+      }
     );
 
-    if (result.success) {
+    if (result.success && result.payoutId) {
+      // 创建支付记录
+      await db.insert(payments).values({
+        reimbursementId: reimbursement.id,
+        amount: amountUSD,
+        currency: 'USDC',
+        transactionId: result.payoutId,
+        paymentProvider: 'fluxa',
+        status: 'pending_authorization',
+        payoutId: result.payoutId,
+        approvalUrl: result.approvalUrl,
+        payoutStatus: result.status,
+        expiresAt: result.expiresAt ? new Date(result.expiresAt * 1000) : null,
+        toAddress: walletInfo.walletAddress,
+        initiatedBy: session.user.id,
+        updatedAt: new Date(),
+      });
+
       // 更新报销单状态为处理中
       await db.update(reimbursements)
         .set({
           status: 'processing',
           updatedAt: new Date(),
-          // 存储支付信息到 aiSuggestions 字段（临时方案）
           aiSuggestions: [
             ...(reimbursement.aiSuggestions as any[] || []),
             {
-              type: 'payment_initiated',
-              paymentId: result.transactionId,
+              type: 'fluxa_payout_initiated',
+              payoutId: result.payoutId,
+              approvalUrl: result.approvalUrl,
+              status: result.status,
               initiatedAt: new Date().toISOString(),
               initiatedBy: session.user.id,
+              amountUSDC: amountUSD,
             },
           ],
         })
@@ -102,15 +151,20 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        transactionId: result.transactionId,
+        payoutId: result.payoutId,
         status: result.status,
-        message: '付款已发起，正在通过 FluxPay 处理',
+        statusDescription: FluxaPayoutClient.getStatusDescription(result.status!),
+        approvalUrl: result.approvalUrl,
+        expiresAt: result.expiresAt,
+        amountUSDC: amountUSD,
+        toAddress: walletInfo.walletAddress,
+        message: '打款请求已创建，请点击审批链接在钱包中完成审批',
       });
     } else {
       return NextResponse.json({
         success: false,
         error: result.error,
-        message: result.message || '付款处理失败',
+        message: result.error?.message || '创建打款请求失败',
       }, { status: 400 });
     }
   } catch (error) {
