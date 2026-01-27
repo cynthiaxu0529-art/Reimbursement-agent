@@ -85,14 +85,10 @@ export default function ReimbursementsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 预览附件：PDF在新标签页打开，图片用弹窗预览
+  // 预览附件
   const handlePreviewReceipt = (url: string | null | undefined) => {
     if (!url) return;
-    if (url.match(/\.pdf($|\?)/i) || url.startsWith('data:application/pdf')) {
-      window.open(url, '_blank');
-    } else {
-      setPreviewImage(url);
-    }
+    setPreviewImage(url);
   };
   const [itemActionLoading, setItemActionLoading] = useState<string | null>(null);
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null);
@@ -946,6 +942,10 @@ export default function ReimbursementsPage() {
                 objectFit: 'contain',
                 borderRadius: '8px',
                 boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              }}
+              onError={() => {
+                window.open(previewImage!, '_blank');
+                setPreviewImage(null);
               }}
             />
             <button
