@@ -74,6 +74,18 @@ export default function DisbursementsPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // 处理附件预览：PDF 在新标签页打开，图片在弹窗预览
+  const handlePreviewReceipt = (url: string | null | undefined) => {
+    if (!url) return;
+    const isPdf = url.toLowerCase().includes('.pdf') || url.startsWith('data:application/pdf');
+    if (isPdf) {
+      window.open(url, '_blank');
+    } else {
+      setPreviewImage(url);
+    }
+  };
+
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -646,7 +658,7 @@ export default function DisbursementsPage() {
                             {item.items?.filter(i => i.receiptUrl).map((lineItem, idx) => (
                               <div
                                 key={idx}
-                                onClick={() => setPreviewImage(lineItem.receiptUrl || null)}
+                                onClick={() => handlePreviewReceipt(lineItem.receiptUrl)}
                                 className="flex items-center gap-3 p-3 bg-white border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
                               >
                                 <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden">
@@ -668,7 +680,7 @@ export default function DisbursementsPage() {
                                   className="text-gray-400 hover:text-blue-600"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setPreviewImage(lineItem.receiptUrl || null);
+                                    handlePreviewReceipt(lineItem.receiptUrl);
                                   }}
                                 >
                                   👁

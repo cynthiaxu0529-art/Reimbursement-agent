@@ -235,6 +235,17 @@ export default function ApprovalsPage() {
   const [comment, setComment] = useState('');
   const [processing, setProcessing] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // 处理附件预览：PDF 在新标签页打开，图片在弹窗预览
+  const handlePreviewReceipt = (url: string | null | undefined) => {
+    if (!url) return;
+    const isPdf = url.toLowerCase().includes('.pdf') || url.startsWith('data:application/pdf');
+    if (isPdf) {
+      window.open(url, '_blank');
+    } else {
+      setPreviewImage(url);
+    }
+  };
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [batchProcessing, setBatchProcessing] = useState(false);
@@ -818,7 +829,7 @@ export default function ApprovalsPage() {
                                   <div
                                     key={idx}
                                     className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
-                                    onClick={() => setPreviewImage(lineItem.receiptUrl || null)}
+                                    onClick={() => handlePreviewReceipt(lineItem.receiptUrl)}
                                   >
                                     <div className="w-10 h-10 rounded-lg bg-white border flex items-center justify-center overflow-hidden">
                                       {lineItem.receiptUrl?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
@@ -837,7 +848,7 @@ export default function ApprovalsPage() {
                                       className="p-1.5 text-gray-400 hover:text-blue-600"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        setPreviewImage(lineItem.receiptUrl || null);
+                                        handlePreviewReceipt(lineItem.receiptUrl);
                                       }}
                                     >
                                       👁
