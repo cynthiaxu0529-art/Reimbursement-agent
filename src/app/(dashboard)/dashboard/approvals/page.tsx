@@ -38,6 +38,24 @@ interface RiskAlert {
   percentage?: number;
 }
 
+interface ApprovalChainStep {
+  id: string;
+  stepOrder: number;
+  stepType: string;
+  stepName: string;
+  approverId?: string;
+  approverRole?: string;
+  status: 'pending' | 'approved' | 'rejected' | 'skipped';
+  comment?: string;
+  completedAt?: string;
+  approver?: {
+    id: string;
+    name: string;
+    email: string;
+    avatar?: string;
+  };
+}
+
 interface Reimbursement {
   id: string;
   title: string;
@@ -56,6 +74,8 @@ interface Reimbursement {
     department?: string;
   };
   riskAlerts?: RiskAlert[];
+  approvalChain?: ApprovalChainStep[];
+  canApprove?: boolean;
 }
 
 const categoryLabels: Record<string, { label: string; icon: string }> = {
@@ -215,6 +235,17 @@ export default function ApprovalsPage() {
   const [comment, setComment] = useState('');
   const [processing, setProcessing] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // 处理附件预览：PDF 在新标签页打开，图片在弹窗预览
+  const handlePreviewReceipt = (url: string | null | undefined) => {
+    if (!url) return;
+    const isPdf = url.toLowerCase().includes('.pdf') || url.startsWith('data:application/pdf');
+    if (isPdf) {
+      window.open(url, '_blank');
+    } else {
+      setPreviewImage(url);
+    }
+  };
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [batchProcessing, setBatchProcessing] = useState(false);
@@ -684,6 +715,55 @@ export default function ApprovalsPage() {
                           </div>
                         )}
 
+                        {/* Approval Chain */}
+                        {expandedData.approvalChain && expandedData.approvalChain.length > 0 && (
+                          <div className="mb-5 p-4 bg-blue-50 rounded-xl border border-blue-200">
+                            <h4 className="text-sm font-semibold text-blue-700 mb-3 flex items-center gap-2">
+                              📋 审批流程
+                            </h4>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {expandedData.approvalChain.map((step, idx) => {
+                                const isCurrentStep = step.status === 'pending' &&
+                                  expandedData.approvalChain?.slice(0, idx).every(s => s.status === 'approved' || s.status === 'skipped');
+                                const statusConfig = {
+                                  pending: { bg: 'bg-gray-100', text: 'text-gray-600', icon: '⏳' },
+                                  approved: { bg: 'bg-green-100', text: 'text-green-700', icon: '✅' },
+                                  rejected: { bg: 'bg-red-100', text: 'text-red-700', icon: '❌' },
+                                  skipped: { bg: 'bg-gray-100', text: 'text-gray-400', icon: '⏭️' },
+                                };
+                                const config = statusConfig[step.status] || statusConfig.pending;
+
+                                return (
+                                  <div key={step.id} className="flex items-center gap-2">
+                                    <div className={`px-3 py-2 rounded-lg ${config.bg} ${isCurrentStep ? 'ring-2 ring-blue-500' : ''}`}>
+                                      <div className="flex items-center gap-2">
+                                        <span>{config.icon}</span>
+                                        <div>
+                                          <p className={`text-sm font-medium ${config.text}`}>{step.stepName}</p>
+                                          {step.approver && (
+                                            <p className="text-xs text-gray-500">{step.approver.name}</p>
+                                          )}
+                                          {step.completedAt && (
+                                            <p className="text-xs text-gray-400">
+                                              {new Date(step.completedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {idx < (expandedData.approvalChain?.length || 0) - 1 && (
+                                      <span className="text-gray-300">→</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {expandedData.canApprove && (
+                              <p className="mt-3 text-sm text-blue-600 font-medium">✨ 当前轮到您审批</p>
+                            )}
+                          </div>
+                        )}
+
                         {/* Line Items with Attachments */}
                         <div className="grid grid-cols-[1fr_280px] gap-5">
                           {/* Line Items */}
@@ -749,7 +829,7 @@ export default function ApprovalsPage() {
                                   <div
                                     key={idx}
                                     className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
-                                    onClick={() => setPreviewImage(lineItem.receiptUrl || null)}
+                                    onClick={() => handlePreviewReceipt(lineItem.receiptUrl)}
                                   >
                                     <div className="w-10 h-10 rounded-lg bg-white border flex items-center justify-center overflow-hidden">
                                       {lineItem.receiptUrl?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
@@ -768,7 +848,7 @@ export default function ApprovalsPage() {
                                       className="p-1.5 text-gray-400 hover:text-blue-600"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        setPreviewImage(lineItem.receiptUrl || null);
+                                        handlePreviewReceipt(lineItem.receiptUrl);
                                       }}
                                     >
                                       👁

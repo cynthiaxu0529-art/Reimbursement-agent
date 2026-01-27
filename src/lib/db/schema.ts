@@ -52,6 +52,13 @@ export const complianceStatusEnum = pgEnum('compliance_status', [
   'failed',
 ]);
 
+export const approvalStepStatusEnum = pgEnum('approval_step_status', [
+  'pending',      // 待审批
+  'approved',     // 已通过
+  'rejected',     // 已拒绝
+  'skipped',      // 跳过（如直属上级与部门审批人是同一人）
+]);
+
 // ============================================================================
 // Tables
 // ============================================================================
@@ -72,6 +79,28 @@ export const tenants = pgTable('tenants', {
 });
 
 /**
+ * 部门表
+ * 支持多级部门结构
+ */
+export const departments = pgTable('departments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  name: text('name').notNull(),
+  code: text('code'),                             // 部门编码，如 TECH-001
+  description: text('description'),
+  parentId: uuid('parent_id'),                    // 上级部门，为空表示顶级部门
+  managerId: uuid('manager_id'),                  // 部门负责人
+  approverIds: jsonb('approver_ids').default([]), // 部门审批人列表（UUID数组）
+  level: integer('level').notNull().default(1),   // 部门层级，1为顶级
+  sortOrder: integer('sort_order').notNull().default(0), // 排序顺序
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
  * 用户表 (兼容 NextAuth)
  */
 export const users = pgTable('users', {
@@ -84,7 +113,8 @@ export const users = pgTable('users', {
   image: text('image'), // NextAuth 使用的头像字段
   passwordHash: text('password_hash'), // 密码登录
   role: userRoleEnum('role').notNull().default('employee'),
-  department: text('department'),
+  department: text('department'),                 // 旧字段，保留兼容
+  departmentId: uuid('department_id'),            // 新字段：关联部门表
   managerId: uuid('manager_id'),
   bankAccount: jsonb('bank_account'),
   preferences: jsonb('preferences').default({}),
@@ -287,6 +317,77 @@ export const approvals = pgTable('approvals', {
 });
 
 /**
+ * 审批链表
+ * 记录报销单的多级审批流程
+ */
+export const approvalChain = pgTable('approval_chain', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reimbursementId: uuid('reimbursement_id')
+    .notNull()
+    .references(() => reimbursements.id),
+
+  stepOrder: integer('step_order').notNull(),     // 步骤顺序，从1开始
+  stepType: text('step_type').notNull(),          // 步骤类型: manager, department, finance, amount_threshold
+  stepName: text('step_name').notNull(),          // 步骤名称，如"直属上级审批"
+
+  approverId: uuid('approver_id')                 // 审批人ID
+    .references(() => users.id),
+  approverRole: text('approver_role'),            // 审批人角色
+  departmentId: uuid('department_id'),            // 关联部门（如部门负责人审批）
+
+  status: approvalStepStatusEnum('status').notNull().default('pending'),
+  comment: text('comment'),                       // 审批意见
+
+  amountThreshold: real('amount_threshold'),      // 金额阈值（用于金额触发的审批）
+
+  assignedAt: timestamp('assigned_at').notNull().defaultNow(),
+  completedAt: timestamp('completed_at'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * 审批规则表
+ * 定义不同条件下的审批流程
+ */
+export const approvalRules = pgTable('approval_rules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+
+  name: text('name').notNull(),                   // 规则名称
+  description: text('description'),
+  priority: integer('priority').notNull().default(0), // 优先级，数字越小优先级越高
+
+  // 触发条件
+  conditions: jsonb('conditions').notNull().default({}),
+  // 条件结构示例:
+  // {
+  //   minAmount: 5000,      // 最小金额
+  //   maxAmount: 50000,     // 最大金额
+  //   categories: ['flight', 'hotel'], // 适用类别
+  //   departments: ['uuid1', 'uuid2'], // 适用部门
+  // }
+
+  // 审批链配置
+  approvalSteps: jsonb('approval_steps').notNull().default([]),
+  // 审批步骤结构示例:
+  // [
+  //   { order: 1, type: 'manager', name: '直属上级' },
+  //   { order: 2, type: 'department', name: '部门负责人' },
+  //   { order: 3, type: 'role', role: 'finance', name: '财务审核' },
+  // ]
+
+  isActive: boolean('is_active').notNull().default(true),
+  isDefault: boolean('is_default').notNull().default(false), // 是否为默认规则
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
  * 支付记录表
  */
 export const payments = pgTable('payments', {
@@ -421,15 +522,21 @@ export const skillExecutionLogs = pgTable('skill_execution_logs', {
 
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   users: many(users),
+  departments: many(departments),
   trips: many(trips),
   reimbursements: many(reimbursements),
   policies: many(policies),
+  approvalRules: many(approvalRules),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
   tenant: one(tenants, {
     fields: [users.tenantId],
     references: [tenants.id],
+  }),
+  departmentRef: one(departments, {
+    fields: [users.departmentId],
+    references: [departments.id],
   }),
   manager: one(users, {
     fields: [users.managerId],
@@ -467,6 +574,7 @@ export const reimbursementsRelations = relations(reimbursements, ({ one, many })
   }),
   items: many(reimbursementItems),
   approvals: many(approvals),
+  approvalChain: many(approvalChain),
   payments: many(payments),
 }));
 
@@ -474,5 +582,45 @@ export const reimbursementItemsRelations = relations(reimbursementItems, ({ one 
   reimbursement: one(reimbursements, {
     fields: [reimbursementItems.reimbursementId],
     references: [reimbursements.id],
+  }),
+}));
+
+export const departmentsRelations = relations(departments, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [departments.tenantId],
+    references: [tenants.id],
+  }),
+  parent: one(departments, {
+    fields: [departments.parentId],
+    references: [departments.id],
+    relationName: 'parentChild',
+  }),
+  children: many(departments, { relationName: 'parentChild' }),
+  manager: one(users, {
+    fields: [departments.managerId],
+    references: [users.id],
+  }),
+  members: many(users),
+}));
+
+export const approvalChainRelations = relations(approvalChain, ({ one }) => ({
+  reimbursement: one(reimbursements, {
+    fields: [approvalChain.reimbursementId],
+    references: [reimbursements.id],
+  }),
+  approver: one(users, {
+    fields: [approvalChain.approverId],
+    references: [users.id],
+  }),
+  department: one(departments, {
+    fields: [approvalChain.departmentId],
+    references: [departments.id],
+  }),
+}));
+
+export const approvalRulesRelations = relations(approvalRules, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [approvalRules.tenantId],
+    references: [tenants.id],
   }),
 }));
