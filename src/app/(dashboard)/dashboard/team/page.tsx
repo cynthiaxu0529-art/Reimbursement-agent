@@ -135,6 +135,8 @@ export default function TeamPage() {
     conditions: {
       minAmount: undefined as number | undefined,
       maxAmount: undefined as number | undefined,
+      categories: undefined as string[] | undefined,
+      departments: undefined as string[] | undefined,
     },
     approvalSteps: [
       { order: 1, type: 'manager', name: '直属上级审批' },
@@ -358,7 +360,7 @@ export default function TeamPage() {
           name: '',
           description: '',
           priority: 0,
-          conditions: { minAmount: undefined, maxAmount: undefined },
+          conditions: { minAmount: undefined, maxAmount: undefined, categories: undefined, departments: undefined },
           approvalSteps: [
             { order: 1, type: 'manager', name: '直属上级审批' },
             { order: 2, type: 'department', name: '部门负责人审批' },
@@ -764,7 +766,7 @@ export default function TeamPage() {
                   name: '',
                   description: '',
                   priority: 0,
-                  conditions: { minAmount: undefined, maxAmount: undefined },
+                  conditions: { minAmount: undefined, maxAmount: undefined, categories: undefined, departments: undefined },
                   approvalSteps: [
                     { order: 1, type: 'manager', name: '直属上级审批' },
                     { order: 2, type: 'department', name: '部门负责人审批' },
@@ -863,7 +865,12 @@ export default function TeamPage() {
                             name: rule.name,
                             description: rule.description || '',
                             priority: rule.priority,
-                            conditions: rule.conditions,
+                            conditions: {
+                              minAmount: rule.conditions.minAmount,
+                              maxAmount: rule.conditions.maxAmount,
+                              categories: rule.conditions.categories,
+                              departments: rule.conditions.departments,
+                            },
                             approvalSteps: rule.approvalSteps,
                             isActive: rule.isActive,
                             isDefault: rule.isDefault,

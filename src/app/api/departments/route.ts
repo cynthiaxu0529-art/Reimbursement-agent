@@ -5,8 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { departments, users } from '@/lib/db/schema';
 import { eq, and, isNull, asc } from 'drizzle-orm';
@@ -14,7 +13,7 @@ import { eq, and, isNull, asc } from 'drizzle-orm';
 // 获取部门列表
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
@@ -139,7 +138,7 @@ export async function GET(request: NextRequest) {
 // 创建新部门
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }

@@ -5,8 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { approvalRules, users } from '@/lib/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
@@ -14,7 +13,7 @@ import { eq, and, asc } from 'drizzle-orm';
 // 获取审批规则列表
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
@@ -56,7 +55,7 @@ export async function GET(request: NextRequest) {
 // 创建新审批规则
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
