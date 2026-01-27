@@ -6,6 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
+
+export const dynamic = 'force-dynamic';
 import { db } from '@/lib/db';
 import { approvalRules, users } from '@/lib/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
