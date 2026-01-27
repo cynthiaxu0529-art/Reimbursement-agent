@@ -27,6 +27,7 @@ export async function GET() {
       data: {
         name: user.name,
         email: user.email,
+        role: user.role,
         department: user.department,
         walletAddress: (user.bankAccount as any)?.walletAddress || '',
         phone: (user.bankAccount as any)?.phone || '',

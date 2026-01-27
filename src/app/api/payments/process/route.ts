@@ -22,9 +22,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
 
-    // 权限检查：前端通过 localStorage 角色切换控制 UI 访问，
-    // 后端只验证用户已登录且属于同一租户（与审批 API 保持一致）
-    // 实际打款安全由 Fluxa 钱包审批环节保障
+    // 权限检查：从数据库查询当前用户角色，只有财务/管理员可发起打款
+    const [currentUser] = await db.select({ role: users.role })
+      .from(users)
+      .where(eq(users.id, session.user.id))
+      .limit(1);
+
+    const dbRole = currentUser?.role || '';
+    if (!['finance', 'admin', 'super_admin'].includes(dbRole)) {
+      return NextResponse.json({ error: '没有权限发起付款，需要财务或管理员角色' }, { status: 403 });
+    }
 
     const { reimbursementId } = await request.json();
 
