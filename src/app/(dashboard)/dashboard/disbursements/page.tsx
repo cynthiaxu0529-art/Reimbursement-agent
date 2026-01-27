@@ -75,10 +75,37 @@ export default function DisbursementsPage() {
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 预览附件
+  // 预览附件：将base64 data URL转为Blob URL以提高渲染性能
   const handlePreviewReceipt = (url: string | null | undefined) => {
     if (!url) return;
+    if (url.startsWith('data:')) {
+      try {
+        const parts = url.split(',');
+        const meta = parts[0];
+        const data = parts.slice(1).join(',');
+        const mimeType = meta.split(':')[1].split(';')[0];
+        const byteString = atob(data);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) {
+          ia[i] = byteString.charCodeAt(i);
+        }
+        const blob = new Blob([ab], { type: mimeType });
+        const blobUrl = URL.createObjectURL(blob);
+        setPreviewImage(blobUrl);
+        return;
+      } catch (e) {
+        console.error('Failed to convert data URL:', e);
+      }
+    }
     setPreviewImage(url);
+  };
+
+  const closePreview = () => {
+    if (previewImage && previewImage.startsWith('blob:')) {
+      URL.revokeObjectURL(previewImage);
+    }
+    setPreviewImage(null);
   };
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
@@ -233,6 +260,39 @@ export default function DisbursementsPage() {
     alert(`批量付款完成：${successCount} 笔成功${failCount > 0 ? `，${failCount} 笔失败` : ''}`);
   };
 
+  const processBatchReject = async () => {
+    if (selectedIds.length === 0) return;
+    const reason = prompt(`请输入批量驳回原因（共 ${selectedIds.length} 笔）：`);
+    if (!reason) return;
+
+    setBatchProcessing(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const id of selectedIds) {
+      try {
+        const response = await fetch(`/api/reimbursements/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'rejected', rejectReason: `财务批量驳回: ${reason}` }),
+        });
+        const result = await response.json();
+        if (result.success) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } catch {
+        failCount++;
+      }
+    }
+
+    setReimbursements(prev => prev.filter(r => !selectedIds.includes(r.id)));
+    setSelectedIds([]);
+    setBatchProcessing(false);
+    alert(`批量驳回完成：${successCount} 笔成功${failCount > 0 ? `，${failCount} 笔失败` : ''}`);
+  };
+
   const toggleSelect = (id: string) => {
     setSelectedIds(prev =>
       prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]
@@ -286,18 +346,33 @@ export default function DisbursementsPage() {
             <span className="mr-2">📊</span> 导出报表
           </Button>
           {selectedIds.length > 0 && (
-            <Button
-              onClick={processBatchPayment}
-              disabled={batchProcessing}
-              className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-md"
-            >
-              {batchProcessing ? '处理中...' : (
-                <>
-                  <span className="mr-2">💳</span>
-                  批量付款 ({selectedIds.length})
-                </>
-              )}
-            </Button>
+            <>
+              <Button
+                onClick={processBatchReject}
+                disabled={batchProcessing}
+                variant="outline"
+                className="text-red-600 border-red-200 hover:bg-red-50"
+              >
+                {batchProcessing ? '处理中...' : (
+                  <>
+                    <span className="mr-2">✕</span>
+                    批量驳回 ({selectedIds.length})
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={processBatchPayment}
+                disabled={batchProcessing}
+                className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-md"
+              >
+                {batchProcessing ? '处理中...' : (
+                  <>
+                    <span className="mr-2">💳</span>
+                    批量付款 ({selectedIds.length})
+                  </>
+                )}
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -730,21 +805,18 @@ export default function DisbursementsPage() {
       {/* Image Preview Modal */}
       {previewImage && (
         <div
-          onClick={() => setPreviewImage(null)}
-          className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 cursor-zoom-out"
+          onClick={closePreview}
+          className="fixed inset-0 bg-black/85 flex items-center justify-center cursor-zoom-out"
+          style={{ zIndex: 9999 }}
         >
           <div className="relative max-w-[90vw] max-h-[90vh]">
             <img
               src={previewImage}
               alt="凭证预览"
               className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
-              onError={() => {
-                window.open(previewImage!, '_blank');
-                setPreviewImage(null);
-              }}
             />
             <button
-              onClick={(e) => { e.stopPropagation(); setPreviewImage(null); }}
+              onClick={(e) => { e.stopPropagation(); closePreview(); }}
               className="absolute -top-10 right-0 text-white text-2xl p-2 hover:text-gray-300"
             >
               ×

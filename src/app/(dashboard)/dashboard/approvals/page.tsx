@@ -236,10 +236,37 @@ export default function ApprovalsPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 预览附件
+  // 预览附件：将base64 data URL转为Blob URL以提高渲染性能
   const handlePreviewReceipt = (url: string | null | undefined) => {
     if (!url) return;
+    if (url.startsWith('data:')) {
+      try {
+        const parts = url.split(',');
+        const meta = parts[0];
+        const data = parts.slice(1).join(',');
+        const mimeType = meta.split(':')[1].split(';')[0];
+        const byteString = atob(data);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) {
+          ia[i] = byteString.charCodeAt(i);
+        }
+        const blob = new Blob([ab], { type: mimeType });
+        const blobUrl = URL.createObjectURL(blob);
+        setPreviewImage(blobUrl);
+        return;
+      } catch (e) {
+        console.error('Failed to convert data URL:', e);
+      }
+    }
     setPreviewImage(url);
+  };
+
+  const closePreview = () => {
+    if (previewImage && previewImage.startsWith('blob:')) {
+      URL.revokeObjectURL(previewImage);
+    }
+    setPreviewImage(null);
   };
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -894,21 +921,18 @@ export default function ApprovalsPage() {
       {/* Image Preview Modal */}
       {previewImage && (
         <div
-          onClick={() => setPreviewImage(null)}
-          className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 cursor-zoom-out"
+          onClick={closePreview}
+          className="fixed inset-0 bg-black/85 flex items-center justify-center cursor-zoom-out"
+          style={{ zIndex: 9999 }}
         >
           <div className="relative max-w-[90vw] max-h-[90vh]">
             <img
               src={previewImage}
               alt="凭证预览"
               className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
-              onError={() => {
-                window.open(previewImage!, '_blank');
-                setPreviewImage(null);
-              }}
             />
             <button
-              onClick={(e) => { e.stopPropagation(); setPreviewImage(null); }}
+              onClick={(e) => { e.stopPropagation(); closePreview(); }}
               className="absolute -top-10 right-0 text-white text-2xl p-2 hover:text-gray-300"
             >
               ×
