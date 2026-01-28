@@ -324,64 +324,6 @@ export class FluxPayClient {
     };
   }
 
-  /**
-   * 设置 Webhook 回调
-   */
-  async registerWebhook(url: string, events: string[]): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.baseUrl}/v1/webhooks`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          url,
-          events,
-        }),
-      });
-
-      return response.ok;
-    } catch (error) {
-      console.error('Register webhook error:', error);
-      return false;
-    }
-  }
-
-  /**
-   * 获取钱包余额
-   */
-  async getBalance(): Promise<{ success: boolean; balance?: number; currency?: string; error?: string }> {
-    try {
-      const response = await fetch(`${this.baseUrl}/v1/balance`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-      });
-
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        return {
-          success: false,
-          error: error.message || '获取余额失败',
-        };
-      }
-
-      const data = await response.json();
-      return {
-        success: true,
-        balance: data.available_balance || data.balance || 0,
-        currency: data.currency || 'USD',
-      };
-    } catch (error) {
-      console.error('Get balance error:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : '获取余额失败',
-      };
-    }
-  }
 }
 
 // ============================================================================

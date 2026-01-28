@@ -107,8 +107,6 @@ export default function DisbursementsPage() {
     }
     setPreviewImage(null);
   };
-  const [walletBalance, setWalletBalance] = useState<number | null>(null);
-  const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [roleChecked, setRoleChecked] = useState(false);
 
@@ -121,27 +119,6 @@ export default function DisbursementsPage() {
       setRoleChecked(true);
     }
   }, [router]);
-
-  // 获取 FluxPay 钱包余额
-  useEffect(() => {
-    const fetchBalance = async () => {
-      try {
-        const response = await fetch('/api/payments/balance');
-        const result = await response.json();
-        if (result.success) {
-          setWalletBalance(result.balance);
-          setBalanceWarning(result.warning || null);
-        } else {
-          setWalletBalance(0);
-          setBalanceWarning(result.error || 'FluxPay 连接失败');
-        }
-      } catch (error) {
-        setWalletBalance(0);
-        setBalanceWarning('无法获取余额');
-      }
-    };
-    fetchBalance();
-  }, []);
 
   useEffect(() => {
     fetchReimbursements();
@@ -388,38 +365,7 @@ export default function DisbursementsPage() {
       )}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <Card className={`p-4 border-l-4 ${walletBalance !== null && walletBalance >= totalPayable ? 'border-l-blue-500' : 'border-l-red-500'}`}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500 mb-1">可用余额 (FluxPay)</p>
-              {walletBalance === null ? (
-                <p className="text-2xl font-bold text-gray-400">加载中...</p>
-              ) : (
-                <p className="text-2xl font-bold text-gray-900">
-                  ${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                </p>
-              )}
-              {balanceWarning ? (
-                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                  <span>⚠️</span> {balanceWarning}
-                </p>
-              ) : walletBalance !== null && walletBalance >= totalPayable ? (
-                <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                  <span>✓</span> 余额充足
-                </p>
-              ) : walletBalance !== null ? (
-                <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                  <span>⚠️</span> 余额不足
-                </p>
-              ) : null}
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-xl">
-              🏦
-            </div>
-          </div>
-        </Card>
-
+      <div className="grid grid-cols-3 gap-4 mb-6">
         <Card className="p-4 border-l-4 border-l-amber-500">
           <div className="flex items-center justify-between">
             <div>

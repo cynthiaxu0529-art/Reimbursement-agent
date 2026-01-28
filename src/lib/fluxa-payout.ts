@@ -28,7 +28,6 @@ export interface CreatePayoutRequest {
   amount: string;             // 金额（USDC最小单位，6位小数，如 "1000000" = 1.0 USDC）
   description?: string;       // 描述
   metadata?: Record<string, any>;  // 元数据
-  webhookUrl?: string;        // Webhook回调URL
   ttlSeconds?: number;        // 过期时间 (60-3600秒)
 }
 
@@ -103,7 +102,6 @@ export class FluxaPayoutClient {
   private agentToken: string;
   private walletApiUrl: string;
   private agentIdApiUrl: string;
-  private webhookUrl: string;
   private jwtToken: string | null = null;
   private jwtExpiresAt: number = 0;
 
@@ -112,7 +110,6 @@ export class FluxaPayoutClient {
     this.agentToken = process.env.FLUXA_AGENT_TOKEN || '';
     this.walletApiUrl = (process.env.FLUXA_WALLET_API || 'https://walletapi.fluxapay.xyz').replace(/\/+$/, '');
     this.agentIdApiUrl = (process.env.FLUXA_AGENT_ID_API || 'https://agentid.fluxapay.xyz').replace(/\/+$/, '');
-    this.webhookUrl = process.env.FLUXA_WEBHOOK_URL || '';
   }
 
   /**
@@ -216,7 +213,6 @@ export class FluxaPayoutClient {
           amount: request.amount,
           description: request.description,
           metadata: request.metadata,
-          webhookUrl: request.webhookUrl || this.webhookUrl,
           ttlSeconds: request.ttlSeconds || DEFAULT_TTL_SECONDS,
         }),
       });
