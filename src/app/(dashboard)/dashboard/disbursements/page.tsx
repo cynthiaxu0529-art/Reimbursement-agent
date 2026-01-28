@@ -38,6 +38,7 @@ interface Reimbursement {
   };
   paymentStatus?: 'pending' | 'processing' | 'completed' | 'failed';
   paymentId?: string;
+  aiSuggestions?: any[];
 }
 
 const categoryLabels: Record<string, { label: string; icon: string; color: string }> = {
@@ -155,12 +156,15 @@ export default function DisbursementsPage() {
       const result = await response.json();
 
       if (result.success) {
-        // Update local state
         setReimbursements(prev => prev.filter(r => r.id !== id));
         setSelectedIds(prev => prev.filter(sid => sid !== id));
         setExpandedId(null);
         setErrorMessage(null);
-        alert('付款已发起，正在通过 FluxPay 处理');
+        // 打开 Fluxa 审批链接
+        if (result.approvalUrl) {
+          window.open(result.approvalUrl, '_blank');
+        }
+        alert('付款已提交成功，请在 Fluxa 钱包中完成审批');
       } else {
         // 显示详细的错误信息
         const errorMsg = result.message || result.error || '付款处理失败';
@@ -508,15 +512,17 @@ export default function DisbursementsPage() {
         ) : (
           <div className="overflow-auto h-full">
             {/* Table Header */}
-            <div className="grid grid-cols-[40px_140px_1fr_120px_100px_120px_100px_80px] gap-2 px-4 py-3 bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase sticky top-0">
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={selectedIds.length === reimbursements.length && reimbursements.length > 0}
-                  onChange={toggleSelectAll}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-600"
-                />
-              </div>
+            <div className={`grid ${activeTab === 'ready' ? 'grid-cols-[40px_140px_1fr_120px_100px_120px_100px_80px]' : 'grid-cols-[140px_1fr_120px_100px_120px_100px_80px]'} gap-2 px-4 py-3 bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase sticky top-0`}>
+              {activeTab === 'ready' && (
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.length === reimbursements.length && reimbursements.length > 0}
+                    onChange={toggleSelectAll}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600"
+                  />
+                </div>
+              )}
               <div>表单编号</div>
               <div>员工</div>
               <div>提交日期</div>
@@ -536,18 +542,20 @@ export default function DisbursementsPage() {
               return (
                 <div key={item.id}>
                   {/* Main Row */}
-                  <div className={`grid grid-cols-[40px_140px_1fr_120px_100px_120px_100px_80px] gap-2 px-4 py-3.5 items-center border-b transition-colors ${
+                  <div className={`grid ${activeTab === 'ready' ? 'grid-cols-[40px_140px_1fr_120px_100px_120px_100px_80px]' : 'grid-cols-[140px_1fr_120px_100px_120px_100px_80px]'} gap-2 px-4 py-3.5 items-center border-b transition-colors ${
                     isExpanded ? 'bg-emerald-50' : isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'
                   }`}>
-                    {/* Checkbox */}
-                    <div>
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => toggleSelect(item.id)}
-                        className="w-4 h-4 rounded border-gray-300 text-blue-600"
-                      />
-                    </div>
+                    {/* Checkbox - only on ready tab */}
+                    {activeTab === 'ready' && (
+                      <div>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(item.id)}
+                          className="w-4 h-4 rounded border-gray-300 text-blue-600"
+                        />
+                      </div>
+                    )}
 
                     {/* Form ID */}
                     <button
@@ -588,9 +596,21 @@ export default function DisbursementsPage() {
 
                     {/* Status */}
                     <div className="text-center">
-                      <Badge variant="success" className="bg-green-100 text-green-700">
-                        ● Ready
-                      </Badge>
+                      {activeTab === 'ready' && (
+                        <Badge variant="success" className="bg-green-100 text-green-700">
+                          ● Ready
+                        </Badge>
+                      )}
+                      {activeTab === 'processing' && (
+                        <Badge className="bg-amber-100 text-amber-700">
+                          ● Processing
+                        </Badge>
+                      )}
+                      {activeTab === 'history' && (
+                        <Badge className="bg-blue-100 text-blue-700">
+                          ● Paid
+                        </Badge>
+                      )}
                     </div>
 
                     {/* Expand */}
@@ -715,28 +735,70 @@ export default function DisbursementsPage() {
                             </button>
                           )}
 
-                          {/* Action Buttons */}
-                          <div className="flex gap-2 pt-2 border-t">
-                            <Button
-                              variant="outline"
-                              onClick={() => rejectPayment(item.id)}
-                              disabled={processing === item.id}
-                              className="flex-1 text-red-600 border-red-200 hover:bg-red-50"
-                            >
-                              <span className="mr-1">✕</span> Reject Form
-                            </Button>
-                            <Button
-                              onClick={() => processPayment(item.id)}
-                              disabled={processing === item.id}
-                              className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white"
-                            >
-                              {processing === item.id ? '处理中...' : (
-                                <>
-                                  <span className="mr-1">💳</span> Process Payment
-                                </>
-                              )}
-                            </Button>
-                          </div>
+                          {/* Action Buttons - only on Ready tab */}
+                          {activeTab === 'ready' && (
+                            <div className="flex gap-2 pt-2 border-t">
+                              <Button
+                                variant="outline"
+                                onClick={() => rejectPayment(item.id)}
+                                disabled={processing === item.id}
+                                className="flex-1 text-red-600 border-red-200 hover:bg-red-50"
+                              >
+                                <span className="mr-1">✕</span> Reject Form
+                              </Button>
+                              <Button
+                                onClick={() => processPayment(item.id)}
+                                disabled={processing === item.id}
+                                className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white"
+                              >
+                                {processing === item.id ? '处理中...' : (
+                                  <>
+                                    <span className="mr-1">💳</span> Process Payment
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                          )}
+
+                          {/* Processing tab - show payout status & approval link */}
+                          {activeTab === 'processing' && (() => {
+                            const payoutInfo = item.aiSuggestions?.find(
+                              (s: any) => s.type === 'fluxa_payout_initiated'
+                            );
+                            return (
+                              <div className="pt-2 border-t space-y-2">
+                                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                  <p className="text-sm font-medium text-amber-800 mb-1">
+                                    已提交付款，等待 Fluxa 钱包审批
+                                  </p>
+                                  <p className="text-xs text-amber-600">
+                                    金额: ${(item.totalAmountInBaseCurrency || item.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC
+                                  </p>
+                                </div>
+                                {payoutInfo?.approvalUrl && (
+                                  <a
+                                    href={payoutInfo.approvalUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block w-full text-center py-2 px-4 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                                  >
+                                    前往 Fluxa 钱包审批
+                                  </a>
+                                )}
+                              </div>
+                            );
+                          })()}
+
+                          {/* History tab - show paid info */}
+                          {activeTab === 'history' && (
+                            <div className="pt-2 border-t">
+                              <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                                <p className="text-sm font-medium text-green-800">
+                                  已完成付款
+                                </p>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

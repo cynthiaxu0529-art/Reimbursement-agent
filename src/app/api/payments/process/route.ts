@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { reimbursements, users, payments } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, notInArray } from 'drizzle-orm';
 import {
   createFluxaPayoutService,
   FluxaPayoutClient,
@@ -53,7 +53,41 @@ export async function POST(request: NextRequest) {
     }
 
     if (reimbursement.status !== 'approved') {
-      return NextResponse.json({ error: '只有已批准的报销单可以付款' }, { status: 400 });
+      return NextResponse.json({
+        success: false,
+        error: '该报销单当前状态不允许付款',
+        message: reimbursement.status === 'processing'
+          ? '该报销单已提交付款，正在处理中，请勿重复提交'
+          : reimbursement.status === 'paid'
+            ? '该报销单已完成付款'
+            : '只有已批准的报销单可以付款',
+      }, { status: 400 });
+    }
+
+    // 防重复：检查是否已有未终态的 payment 记录
+    const existingPayments = await db.select({
+      id: payments.id,
+      payoutId: payments.payoutId,
+      status: payments.status,
+      approvalUrl: payments.approvalUrl,
+    })
+      .from(payments)
+      .where(and(
+        eq(payments.reimbursementId, reimbursementId),
+        notInArray(payments.status, ['failed', 'expired', 'cancelled']),
+      ))
+      .limit(1);
+
+    if (existingPayments.length > 0) {
+      const existing = existingPayments[0];
+      return NextResponse.json({
+        success: false,
+        error: '该报销单已提交付款，请勿重复操作',
+        message: '如需重新提交，请等待当前付款过期或失败后再试',
+        existingPayoutId: existing.payoutId,
+        existingStatus: existing.status,
+        approvalUrl: existing.approvalUrl,
+      }, { status: 409 });
     }
 
     // 获取报销人信息
