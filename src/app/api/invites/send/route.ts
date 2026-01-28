@@ -34,18 +34,20 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { email, name, department, roles, companyName } = body;
+    const { email, name, department, departmentId, roles, setAsDeptManager, companyName } = body;
 
     if (!email) {
       return NextResponse.json({ success: false, error: '邮箱地址必填' }, { status: 400 });
     }
 
-    // Generate invite token with tenant ID and roles
+    // Generate invite token with tenant ID, roles, and department info
     const inviteData = {
       email,
       tenantId: inviter.tenantId,
       roles: roles || ['employee'],
       department: department || '',
+      departmentId: departmentId || '',
+      setAsDeptManager: setAsDeptManager || false,
       timestamp: Date.now(),
     };
     const inviteToken = Buffer.from(JSON.stringify(inviteData)).toString('base64');

@@ -199,7 +199,7 @@ export default function TeamPage() {
 
   const fetchDepartments = async () => {
     try {
-      const response = await fetch('/api/departments');
+      const response = await fetch('/api/departments?flat=true');
       const result = await response.json();
       if (result.success && result.data) {
         setDepartments(result.data);
