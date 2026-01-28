@@ -44,10 +44,13 @@ export async function GET(request: NextRequest) {
 
     // 转换角色格式以兼容前端
     const formattedMembers = members.map(member => {
-      // 优先使用 departmentId 查找部门名称，其次使用 department 文本字段
-      let deptName = member.department;
-      if (!deptName && member.departmentId) {
+      // 优先使用 departmentId 查找部门名称（更可靠），其次使用 department 文本字段
+      let deptName: string | null = null;
+      if (member.departmentId) {
         deptName = deptMap.get(member.departmentId) || null;
+      }
+      if (!deptName && member.department) {
+        deptName = member.department;
       }
 
       return {

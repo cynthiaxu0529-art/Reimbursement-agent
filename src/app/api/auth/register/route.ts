@@ -81,10 +81,9 @@ export async function POST(request: NextRequest) {
         // 使用邀请中的角色（取第一个作为主要角色），并映射到数据库角色
         const inviteRole = inviteData.roles?.[0] || 'employee';
         userRole = roleMapping[inviteRole] || 'employee';
-        // 提取部门信息
-        departmentName = inviteData.department || null;
         setAsDeptManager = inviteData.setAsDeptManager || false;
-        // 验证 departmentId 是否存在
+
+        // 验证并设置部门信息 - 必须通过 departmentId 验证才能设置部门
         if (inviteData.departmentId) {
           const dept = await db.query.departments.findFirst({
             where: and(
@@ -95,6 +94,9 @@ export async function POST(request: NextRequest) {
           if (dept) {
             departmentId = dept.id;
             departmentName = dept.name; // 使用数据库中的实际名称
+          } else {
+            // departmentId 无效（部门可能已被删除），不设置部门
+            console.warn(`Invalid departmentId ${inviteData.departmentId} in invite token for ${email}`);
           }
         }
       }
