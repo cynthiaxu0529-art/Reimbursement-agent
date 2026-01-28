@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db';
-import { users, tenants } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { users, tenants, departments } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
 // 解析邀请 token
-function parseInviteToken(token: string): { email: string; tenantId: string; roles: string[]; department: string } | null {
+function parseInviteToken(token: string): { email: string; tenantId: string; roles: string[]; department: string; departmentId?: string; setAsDeptManager?: boolean } | null {
   try {
     const decoded = Buffer.from(token, 'base64').toString('utf-8');
     const data = JSON.parse(decoded);
@@ -52,6 +52,9 @@ export async function POST(request: NextRequest) {
     let tenantId: string | null = null;
     type UserRole = 'employee' | 'manager' | 'finance' | 'admin' | 'super_admin';
     let userRole: UserRole = 'employee';
+    let departmentName: string | null = null;
+    let departmentId: string | null = null;
+    let setAsDeptManager = false;
 
     // 映射邀请角色到数据库角色
     const roleMapping: Record<string, UserRole> = {
@@ -78,6 +81,22 @@ export async function POST(request: NextRequest) {
         // 使用邀请中的角色（取第一个作为主要角色），并映射到数据库角色
         const inviteRole = inviteData.roles?.[0] || 'employee';
         userRole = roleMapping[inviteRole] || 'employee';
+        // 提取部门信息
+        departmentName = inviteData.department || null;
+        setAsDeptManager = inviteData.setAsDeptManager || false;
+        // 验证 departmentId 是否存在
+        if (inviteData.departmentId) {
+          const dept = await db.query.departments.findFirst({
+            where: and(
+              eq(departments.id, inviteData.departmentId),
+              eq(departments.tenantId, inviteData.tenantId)
+            ),
+          });
+          if (dept) {
+            departmentId = dept.id;
+            departmentName = dept.name; // 使用数据库中的实际名称
+          }
+        }
       }
     } else if (companyName) {
       // 创建新公司
@@ -108,12 +127,26 @@ export async function POST(request: NextRequest) {
         passwordHash,
         tenantId,
         role: userRole,
+        department: departmentName,
+        departmentId,
       })
       .returning({
         id: users.id,
         email: users.email,
         name: users.name,
       });
+
+    // 如果需要设为部门负责人，更新部门的 managerId
+    if (setAsDeptManager && departmentId && user.id) {
+      try {
+        await db
+          .update(departments)
+          .set({ managerId: user.id, updatedAt: new Date() })
+          .where(eq(departments.id, departmentId));
+      } catch (e) {
+        console.error('Failed to set department manager:', e);
+      }
+    }
 
     return NextResponse.json({
       success: true,

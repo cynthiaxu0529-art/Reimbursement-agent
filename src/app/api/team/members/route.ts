@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { users } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { users, departments } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,20 +30,37 @@ export async function GET(request: NextRequest) {
         email: true,
         role: true,
         department: true,
+        departmentId: true,
         createdAt: true,
       },
     });
 
+    // 获取所有部门用于名称查找
+    const deptList = await db.query.departments.findMany({
+      where: eq(departments.tenantId, session.user.tenantId),
+      columns: { id: true, name: true },
+    });
+    const deptMap = new Map(deptList.map(d => [d.id, d.name]));
+
     // 转换角色格式以兼容前端
-    const formattedMembers = members.map(member => ({
-      id: member.id,
-      name: member.name,
-      email: member.email,
-      roles: [member.role], // 将单一角色转为数组
-      department: member.department || '未分配',
-      status: 'active' as const,
-      isExample: false,
-    }));
+    const formattedMembers = members.map(member => {
+      // 优先使用 departmentId 查找部门名称，其次使用 department 文本字段
+      let deptName = member.department;
+      if (!deptName && member.departmentId) {
+        deptName = deptMap.get(member.departmentId) || null;
+      }
+
+      return {
+        id: member.id,
+        name: member.name,
+        email: member.email,
+        roles: [member.role], // 将单一角色转为数组
+        department: deptName || '未分配',
+        departmentId: member.departmentId || undefined,
+        status: 'active' as const,
+        isExample: false,
+      };
+    });
 
     return NextResponse.json({
       success: true,
