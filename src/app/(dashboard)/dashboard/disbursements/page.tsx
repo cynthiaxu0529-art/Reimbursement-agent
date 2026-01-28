@@ -110,6 +110,7 @@ export default function DisbursementsPage() {
   };
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [roleChecked, setRoleChecked] = useState(false);
+  const [payoutStatuses, setPayoutStatuses] = useState<Record<string, any>>({});
 
   // 检查用户角色，非财务角色重定向
   useEffect(() => {
@@ -143,6 +144,44 @@ export default function DisbursementsPage() {
       setLoading(false);
     }
   };
+
+  // 处理中 tab: 轮询 Fluxa payout 状态，自动更新 processing→paid / processing→approved
+  const checkPayoutStatuses = async (items: Reimbursement[]) => {
+    let hasStatusChange = false;
+    for (const item of items) {
+      const payoutInfo = item.aiSuggestions?.find(
+        (s: any) => s.type === 'fluxa_payout_initiated'
+      );
+      if (!payoutInfo?.payoutId) continue;
+
+      try {
+        const res = await fetch(`/api/payments/status/${payoutInfo.payoutId}`);
+        const data = await res.json();
+        if (data.success) {
+          setPayoutStatuses(prev => ({ ...prev, [item.id]: data }));
+          if (data.statusChanged) hasStatusChange = true;
+        }
+      } catch {
+        // ignore individual check failures
+      }
+    }
+    // 如果有状态变化（succeeded/failed/expired），刷新列表
+    if (hasStatusChange) {
+      fetchReimbursements();
+    }
+  };
+
+  // 处理中 tab 加载时自动检查状态
+  useEffect(() => {
+    if (activeTab === 'processing' && reimbursements.length > 0 && !loading) {
+      checkPayoutStatuses(reimbursements);
+      // 每 30 秒轮询一次
+      const interval = setInterval(() => {
+        checkPayoutStatuses(reimbursements);
+      }, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab, reimbursements.length, loading]);
 
   const processPayment = async (id: string) => {
     setProcessing(id);
@@ -601,11 +640,22 @@ export default function DisbursementsPage() {
                           ● Ready
                         </Badge>
                       )}
-                      {activeTab === 'processing' && (
-                        <Badge className="bg-amber-100 text-amber-700">
-                          ● Processing
-                        </Badge>
-                      )}
+                      {activeTab === 'processing' && (() => {
+                        const live = payoutStatuses[item.id];
+                        const st = live?.status || 'pending_authorization';
+                        const labels: Record<string, { text: string; cls: string }> = {
+                          pending_authorization: { text: '待审批', cls: 'bg-amber-100 text-amber-700' },
+                          authorized: { text: '已授权', cls: 'bg-blue-100 text-blue-700' },
+                          signed: { text: '已签名', cls: 'bg-blue-100 text-blue-700' },
+                          broadcasting: { text: '广播中', cls: 'bg-purple-100 text-purple-700' },
+                        };
+                        const info = labels[st] || { text: 'Processing', cls: 'bg-amber-100 text-amber-700' };
+                        return (
+                          <Badge className={info.cls}>
+                            ● {info.text}
+                          </Badge>
+                        );
+                      })()}
                       {activeTab === 'history' && (
                         <Badge className="bg-blue-100 text-blue-700">
                           ● Paid
@@ -765,19 +815,27 @@ export default function DisbursementsPage() {
                             const payoutInfo = item.aiSuggestions?.find(
                               (s: any) => s.type === 'fluxa_payout_initiated'
                             );
+                            const liveStatus = payoutStatuses[item.id];
+                            const statusDesc = liveStatus?.statusDescription || '等待 Fluxa 钱包审批';
+                            const approvalUrl = liveStatus?.approvalUrl || payoutInfo?.approvalUrl;
                             return (
                               <div className="pt-2 border-t space-y-2">
                                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                                   <p className="text-sm font-medium text-amber-800 mb-1">
-                                    已提交付款，等待 Fluxa 钱包审批
+                                    {statusDesc}
                                   </p>
                                   <p className="text-xs text-amber-600">
                                     金额: ${(item.totalAmountInBaseCurrency || item.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC
                                   </p>
+                                  {liveStatus?.txHash && (
+                                    <p className="text-xs text-gray-500 mt-1 font-mono">
+                                      TxHash: {liveStatus.txHash.slice(0, 10)}...{liveStatus.txHash.slice(-8)}
+                                    </p>
+                                  )}
                                 </div>
-                                {payoutInfo?.approvalUrl && (
+                                {approvalUrl && (
                                   <a
-                                    href={payoutInfo.approvalUrl}
+                                    href={approvalUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="block w-full text-center py-2 px-4 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
@@ -790,15 +848,26 @@ export default function DisbursementsPage() {
                           })()}
 
                           {/* History tab - show paid info */}
-                          {activeTab === 'history' && (
-                            <div className="pt-2 border-t">
-                              <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                                <p className="text-sm font-medium text-green-800">
-                                  已完成付款
-                                </p>
+                          {activeTab === 'history' && (() => {
+                            const payoutInfo = item.aiSuggestions?.find(
+                              (s: any) => s.type === 'fluxa_payout_initiated'
+                            );
+                            return (
+                              <div className="pt-2 border-t space-y-2">
+                                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                                  <p className="text-sm font-medium text-green-800 mb-1">
+                                    已完成付款
+                                  </p>
+                                  <div className="text-xs text-green-700 space-y-1">
+                                    <p>金额: ${(item.totalAmountInBaseCurrency || item.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</p>
+                                    {payoutInfo?.initiatedAt && (
+                                      <p>发起时间: {formatDate(payoutInfo.initiatedAt)}</p>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                          )}
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
