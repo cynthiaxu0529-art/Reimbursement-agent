@@ -1,0 +1,114 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
+import { db } from '@/lib/db';
+import { users, departments } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
+
+export const dynamic = 'force-dynamic';
+
+interface RouteParams {
+  params: Promise<{ id: string }>;
+}
+
+/**
+ * PATCH /api/team/members/[id] - 更新成员信息（部门、角色等）
+ */
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const session = await auth();
+
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: '未登录' }, { status: 401 });
+    }
+
+    const currentUser = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+    });
+
+    if (!currentUser?.tenantId) {
+      return NextResponse.json({ error: '未找到租户信息' }, { status: 400 });
+    }
+
+    // 只有管理员可以修改成员信息
+    if (!['admin', 'super_admin'].includes(currentUser.role)) {
+      return NextResponse.json({ error: '无权限修改成员信息' }, { status: 403 });
+    }
+
+    // 检查目标用户是否存在且属于同一租户
+    const targetUser = await db.query.users.findFirst({
+      where: and(
+        eq(users.id, id),
+        eq(users.tenantId, currentUser.tenantId)
+      ),
+    });
+
+    if (!targetUser) {
+      return NextResponse.json({ error: '成员不存在' }, { status: 404 });
+    }
+
+    const body = await request.json();
+    const { departmentId, role } = body;
+
+    const updateData: Record<string, unknown> = {};
+
+    // 更新部门
+    if (departmentId !== undefined) {
+      if (departmentId) {
+        // 验证部门存在且属于同一租户
+        const dept = await db.query.departments.findFirst({
+          where: and(
+            eq(departments.id, departmentId),
+            eq(departments.tenantId, currentUser.tenantId)
+          ),
+        });
+        if (!dept) {
+          return NextResponse.json({ error: '部门不存在' }, { status: 400 });
+        }
+        updateData.departmentId = departmentId;
+        updateData.department = dept.name;
+      } else {
+        // 清除部门
+        updateData.departmentId = null;
+        updateData.department = null;
+      }
+    }
+
+    // 更新角色
+    if (role !== undefined) {
+      const validRoles = ['employee', 'manager', 'finance', 'admin', 'super_admin'];
+      if (!validRoles.includes(role)) {
+        return NextResponse.json({ error: '无效的角色' }, { status: 400 });
+      }
+      updateData.role = role;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json({ error: '没有需要更新的字段' }, { status: 400 });
+    }
+
+    const [updated] = await db
+      .update(users)
+      .set(updateData)
+      .where(eq(users.id, id))
+      .returning({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        role: users.role,
+        department: users.department,
+        departmentId: users.departmentId,
+      });
+
+    return NextResponse.json({
+      success: true,
+      data: updated,
+    });
+  } catch (error) {
+    console.error('更新成员信息失败:', error);
+    return NextResponse.json(
+      { error: '更新成员信息失败' },
+      { status: 500 }
+    );
+  }
+}

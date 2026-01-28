@@ -152,6 +152,8 @@ export default function TeamPage() {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
+  const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
+  const [memberFormData, setMemberFormData] = useState({ departmentId: '', role: '' });
 
   // 获取用户角色
   useEffect(() => {
@@ -324,6 +326,35 @@ export default function TeamPage() {
         showMessage(result.error || '删除失败', 'error');
       }
     } catch (error) {
+      showMessage('网络错误', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // 更新成员信息
+  const handleUpdateMember = async () => {
+    if (!editingMember) return;
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/team/members/${editingMember.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          departmentId: memberFormData.departmentId || null,
+          role: memberFormData.role || undefined,
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        showMessage('成员信息更新成功', 'success');
+        setEditingMember(null);
+        fetchMembers();
+      } else {
+        showMessage(result.error || '更新失败', 'error');
+      }
+    } catch (error) {
+      console.error('Update member error:', error);
       showMessage('网络错误', 'error');
     } finally {
       setSaving(false);
@@ -623,7 +654,18 @@ export default function TeamPage() {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem', padding: '1rem 1.25rem' }}>
                       {deptMembers.map(member => (
-                        <div key={member.id} style={{ padding: '1rem', border: '1px solid #e5e7eb', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div
+                          key={member.id}
+                          onClick={() => {
+                            if (!member.isExample) {
+                              setEditingMember(member);
+                              setMemberFormData({ departmentId: member.departmentId || '', role: member.roles[0] || 'employee' });
+                            }
+                          }}
+                          style={{ padding: '1rem', border: '1px solid #e5e7eb', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: member.isExample ? 'default' : 'pointer', transition: 'all 0.15s' }}
+                          onMouseEnter={(e) => { if (!member.isExample) e.currentTarget.style.borderColor = '#93c5fd'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; }}
+                        >
                           <div style={{
                             width: '44px',
                             height: '44px',
@@ -636,7 +678,7 @@ export default function TeamPage() {
                           }}>
                             <span style={{ color: 'white', fontWeight: 600, fontSize: '1rem' }}>{member.name[0]}</span>
                           </div>
-                          <div style={{ minWidth: 0 }}>
+                          <div style={{ minWidth: 0, flex: 1 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                               <p style={{ fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.name}</p>
                               {member.isExample && (
@@ -652,6 +694,7 @@ export default function TeamPage() {
                               ))}
                             </div>
                           </div>
+                          {!member.isExample && <span style={{ color: '#9ca3af', fontSize: '0.75rem' }}>✎</span>}
                         </div>
                       ))}
                     </div>
@@ -667,7 +710,18 @@ export default function TeamPage() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem', padding: '1rem 1.25rem' }}>
                     {filteredMembers.map(member => (
-                      <div key={member.id} style={{ padding: '1rem', border: '1px solid #e5e7eb', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <div
+                        key={member.id}
+                        onClick={() => {
+                          if (!member.isExample) {
+                            setEditingMember(member);
+                            setMemberFormData({ departmentId: member.departmentId || '', role: member.roles[0] || 'employee' });
+                          }
+                        }}
+                        style={{ padding: '1rem', border: '1px solid #e5e7eb', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: member.isExample ? 'default' : 'pointer', transition: 'all 0.15s' }}
+                        onMouseEnter={(e) => { if (!member.isExample) e.currentTarget.style.borderColor = '#93c5fd'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; }}
+                      >
                         <div style={{
                           width: '44px',
                           height: '44px',
@@ -680,7 +734,7 @@ export default function TeamPage() {
                         }}>
                           <span style={{ color: 'white', fontWeight: 600, fontSize: '1rem' }}>{member.name[0]}</span>
                         </div>
-                        <div style={{ minWidth: 0 }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <p style={{ fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.name}</p>
                             {member.isExample && (
@@ -696,6 +750,7 @@ export default function TeamPage() {
                             ))}
                           </div>
                         </div>
+                        {!member.isExample && <span style={{ color: '#9ca3af', fontSize: '0.75rem' }}>✎</span>}
                       </div>
                     ))}
                   </div>
@@ -1100,6 +1155,85 @@ export default function TeamPage() {
                 }}
               >
                 {saving ? '发送中...' : '发送邀请'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Member Edit Modal */}
+      {editingMember && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ backgroundColor: 'white', borderRadius: '0.75rem', padding: '1.5rem', width: '100%', maxWidth: '440px', margin: '1rem' }}>
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '1.25rem' }}>
+              编辑成员
+            </h3>
+
+            {/* Member info */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '0.5rem', marginBottom: '1.25rem' }}>
+              <div style={{
+                width: '44px', height: '44px',
+                backgroundColor: editingMember.roles.includes('admin') ? '#dc2626' : '#2563eb',
+                borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}>
+                <span style={{ color: 'white', fontWeight: 600 }}>{editingMember.name[0]}</span>
+              </div>
+              <div>
+                <p style={{ fontWeight: 500, color: '#111827' }}>{editingMember.name}</p>
+                <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>{editingMember.email}</p>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gap: '1rem' }}>
+              {/* Department */}
+              <div>
+                <label style={labelStyle}>所属部门</label>
+                <select
+                  value={memberFormData.departmentId}
+                  onChange={(e) => setMemberFormData({ ...memberFormData, departmentId: e.target.value })}
+                  style={inputStyle}
+                >
+                  <option value="">未分配</option>
+                  {flatDeptList.map((dept) => (
+                    <option key={dept.id} value={dept.id}>{dept.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Role */}
+              <div>
+                <label style={labelStyle}>角色权限</label>
+                <select
+                  value={memberFormData.role}
+                  onChange={(e) => setMemberFormData({ ...memberFormData, role: e.target.value })}
+                  style={inputStyle}
+                >
+                  <option value="employee">员工 - 提交报销</option>
+                  <option value="manager">经理 - 审批报销</option>
+                  <option value="finance">财务 - 处理打款</option>
+                  <option value="admin">管理员 - 所有权限</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
+              <button
+                onClick={() => setEditingMember(null)}
+                style={{ padding: '0.5rem 1rem', backgroundColor: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: '0.5rem', cursor: 'pointer' }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleUpdateMember}
+                disabled={saving}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: saving ? '#9ca3af' : '#2563eb',
+                  color: 'white', border: 'none', borderRadius: '0.5rem',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {saving ? '保存中...' : '保存'}
               </button>
             </div>
           </div>
