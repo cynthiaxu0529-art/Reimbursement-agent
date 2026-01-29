@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth, hasApproverPermission, hasFinancePermission } from '@/lib/auth';
+import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
 import { eq, desc, and, or } from 'drizzle-orm';
+import { getUserRoles, canApprove, canProcessPayment } from '@/lib/auth/roles';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -33,16 +34,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '用户不存在' }, { status: 404 });
     }
 
-    // 使用单角色（多角色功能需要先运行数据库迁移）
-    const userRole = currentUser.role;
+    // 获取用户的角色数组（支持多角色）
+    const userRoles = getUserRoles(currentUser);
 
     // 构建查询条件
-    let conditions: any[] = [];
+    const conditions: any[] = [];
 
     // 验证角色权限
     if (role === 'approver' && currentUser.tenantId) {
       // 检查用户是否有审批权限
-      if (!hasApproverPermission(userRole)) {
+      if (!canApprove(userRoles)) {
         return NextResponse.json({ error: '无审批权限' }, { status: 403 });
       }
       conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest) {
       }
     } else if (role === 'finance' && currentUser.tenantId) {
       // 检查用户是否有财务权限
-      if (!hasFinancePermission(userRole)) {
+      if (!canProcessPayment(userRoles)) {
         return NextResponse.json({ error: '无财务权限' }, { status: 403 });
       }
       conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
@@ -77,10 +78,8 @@ export async function GET(request: NextRequest) {
     }
 
     // 是否需要加载提交人信息
-    const hasApproverRole = hasApproverPermission(userRole);
-    const hasFinanceRole = hasFinancePermission(userRole);
-    const isApproverOrFinance = (role === 'approver' && hasApproverRole) ||
-                                 (role === 'finance' && hasFinanceRole);
+    const isApproverOrFinance = (role === 'approver' && canApprove(userRoles)) ||
+                                 (role === 'finance' && canProcessPayment(userRoles));
 
     // 查询报销列表
     const list = await db.query.reimbursements.findMany({
