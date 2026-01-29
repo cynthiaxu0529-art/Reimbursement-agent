@@ -707,3 +707,63 @@ export const invitationsRelations = relations(invitations, ({ one }) => ({
     relationName: 'revokedInvitations',
   }),
 }));
+
+// ============================================================================
+// 汇率相关表
+// ============================================================================
+
+/**
+ * 月初固定汇率表
+ * 每月月初记录一次汇率，用于当月所有报销的汇率计算
+ * 避免汇率波动导致的计算差异
+ */
+export const monthlyExchangeRates = pgTable('monthly_exchange_rates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // 年月标识（格式：2024-01）
+  yearMonth: text('year_month').notNull(),
+
+  // 货币对
+  fromCurrency: text('from_currency').notNull(),
+  toCurrency: text('to_currency').notNull(),
+
+  // 汇率
+  rate: real('rate').notNull(),
+
+  // 数据来源
+  source: text('source').notNull().default('api'), // 'api' | 'manual' | 'central_bank'
+
+  // 记录时间（月初第一天的汇率）
+  rateDate: timestamp('rate_date').notNull(),
+
+  // 审计字段
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedBy: uuid('updated_by'),
+});
+
+/**
+ * 汇率缓存表
+ * 用于持久化汇率缓存，避免服务重启后丢失
+ */
+export const exchangeRateCache = pgTable('exchange_rate_cache', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // 缓存键（格式：USD_CNY）
+  cacheKey: text('cache_key').notNull().unique(),
+
+  // 货币对
+  fromCurrency: text('from_currency').notNull(),
+  toCurrency: text('to_currency').notNull(),
+
+  // 汇率
+  rate: real('rate').notNull(),
+
+  // 数据来源
+  source: text('source').notNull(),
+
+  // 过期时间
+  expiresAt: timestamp('expires_at').notNull(),
+
+  // 创建时间
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
