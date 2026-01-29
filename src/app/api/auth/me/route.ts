@@ -28,18 +28,18 @@ export async function GET() {
       return NextResponse.json({ error: '用户不存在' }, { status: 404 });
     }
 
-    // 获取用户的所有角色（支持新的 roles 字段，兼容旧的 role 字段）
-    const userRoles: string[] = (user as any).roles || [user.role];
+    // 使用单角色（多角色功能需要先运行数据库迁移）
+    const userRole = user.role;
 
     // 计算用户可以使用的前端角色
     const availableRoles = ['employee']; // 所有人都可以是员工
-    if (userRoles.some(r => APPROVER_ROLES.includes(r))) {
+    if (APPROVER_ROLES.includes(userRole)) {
       availableRoles.push('approver');
     }
-    if (userRoles.some(r => FINANCE_ROLES.includes(r))) {
+    if (FINANCE_ROLES.includes(userRole)) {
       availableRoles.push('finance');
     }
-    if (userRoles.includes('admin') || userRoles.includes('super_admin')) {
+    if (userRole === 'admin' || userRole === 'super_admin') {
       availableRoles.push('admin');
     }
 
@@ -50,7 +50,6 @@ export async function GET() {
         name: user.name,
         email: user.email,
         role: user.role,
-        roles: userRoles,
         department: user.department,
         departmentId: user.departmentId,
         tenantId: user.tenantId,
