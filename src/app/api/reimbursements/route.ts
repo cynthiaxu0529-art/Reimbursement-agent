@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems } from '@/lib/db/schema';
-import { eq, desc, and } from 'drizzle-orm';
+import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
+import { eq, desc, and, or } from 'drizzle-orm';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
+
+// 定义哪些数据库角色可以使用哪些查询角色
+const APPROVER_ROLES = ['manager', 'admin', 'super_admin'];
+const FINANCE_ROLES = ['finance', 'admin', 'super_admin'];
 
 /**
  * GET /api/reimbursements - 获取报销列表
@@ -20,15 +24,45 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
     const role = searchParams.get('role'); // 'approver' 查看待审批的
+    const myApprovals = searchParams.get('myApprovals') === 'true'; // 只看自己批准的
     const page = parseInt(searchParams.get('page') || '1');
     const pageSize = parseInt(searchParams.get('pageSize') || '50');
+
+    // 获取用户实际的数据库角色
+    const currentUser = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+      columns: { role: true, tenantId: true },
+    });
+
+    if (!currentUser) {
+      return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+    }
+
+    const dbRole = currentUser.role;
 
     // 构建查询条件
     let conditions: any[] = [];
 
-    if ((role === 'approver' || role === 'finance') && session.user.tenantId) {
-      // 审批人/财务模式：查看同租户的报销
-      conditions.push(eq(reimbursements.tenantId, session.user.tenantId));
+    // 验证角色权限
+    if (role === 'approver' && currentUser.tenantId) {
+      // 检查用户是否有审批权限
+      if (!APPROVER_ROLES.includes(dbRole)) {
+        return NextResponse.json({ error: '无审批权限' }, { status: 403 });
+      }
+      conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
+      // 如果只看自己处理的（批准或驳回）
+      if (myApprovals) {
+        conditions.push(or(
+          eq(reimbursements.approvedBy, session.user.id),
+          eq(reimbursements.rejectedBy, session.user.id)
+        ));
+      }
+    } else if (role === 'finance' && currentUser.tenantId) {
+      // 检查用户是否有财务权限
+      if (!FINANCE_ROLES.includes(dbRole)) {
+        return NextResponse.json({ error: '无财务权限' }, { status: 403 });
+      }
+      conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
     } else {
       // 员工模式：只看自己的
       conditions.push(eq(reimbursements.userId, session.user.id));
@@ -46,6 +80,10 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // 是否需要加载提交人信息
+    const isApproverOrFinance = (role === 'approver' && APPROVER_ROLES.includes(dbRole)) ||
+                                 (role === 'finance' && FINANCE_ROLES.includes(dbRole));
+
     // 查询报销列表
     const list = await db.query.reimbursements.findMany({
       where: and(...conditions),
@@ -54,7 +92,7 @@ export async function GET(request: NextRequest) {
       offset: (page - 1) * pageSize,
       with: {
         items: true,
-        user: (role === 'approver' || role === 'finance') ? {
+        user: isApproverOrFinance ? {
           columns: {
             id: true,
             name: true,
