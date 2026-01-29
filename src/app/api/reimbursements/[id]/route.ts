@@ -81,6 +81,27 @@ export async function GET(
       // 忽略错误
     }
 
+    // 获取驳回人信息（如果有）
+    let rejector = null;
+    if (reimbursement.rejectedBy) {
+      const rejectorUser = await db.query.users.findFirst({
+        where: eq(users.id, reimbursement.rejectedBy),
+        columns: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+        },
+      });
+      if (rejectorUser) {
+        rejector = {
+          name: rejectorUser.name,
+          email: rejectorUser.email,
+          role: rejectorUser.role,
+        };
+      }
+    }
+
     // Transform data to include submitter info
     const transformedData = {
       ...reimbursement,
@@ -93,6 +114,7 @@ export async function GET(
       user: undefined, // Remove the raw user object
       approvalChain: approvalChainData,
       canApprove,
+      rejector,
     };
 
     return NextResponse.json({
@@ -141,6 +163,7 @@ export async function PUT(
     const allowedTransitions: Record<string, string[]> = {
       draft: ['pending'],      // 草稿可以提交
       pending: ['draft'],      // 待审批可以撤回
+      rejected: ['draft', 'pending'],  // 被驳回可以撤回为草稿或直接重新提交
     };
 
     // 如果有状态变更请求
@@ -151,10 +174,10 @@ export async function PUT(
           { status: 400 }
         );
       }
-    } else if (existing.status !== 'draft') {
-      // 如果不是状态变更，只有草稿可以编辑内容
+    } else if (existing.status !== 'draft' && existing.status !== 'rejected') {
+      // 如果不是状态变更，只有草稿或被驳回状态可以编辑内容
       return NextResponse.json(
-        { error: '只有草稿状态的报销单可以编辑' },
+        { error: '只有草稿或已驳回状态的报销单可以编辑' },
         { status: 400 }
       );
     }
@@ -174,29 +197,47 @@ export async function PUT(
     // 确定新状态
     let finalStatus = existing.status;
     let submittedAt: Date | null = existing.submittedAt;
+    let clearRejection = false;
 
     if (newStatus === 'pending') {
       finalStatus = 'pending';
       submittedAt = new Date();
+      // 如果从 rejected 重新提交，清除拒绝信息
+      if (existing.status === 'rejected') {
+        clearRejection = true;
+      }
     } else if (newStatus === 'draft') {
       finalStatus = 'draft';
       // 撤回时清除提交时间
       submittedAt = null;
+      // 如果从 rejected 改为 draft，也清除拒绝信息
+      if (existing.status === 'rejected') {
+        clearRejection = true;
+      }
     }
 
     // 更新报销单
+    const updateData: Record<string, unknown> = {
+      title: title || existing.title,
+      description: description ?? existing.description,
+      totalAmount,
+      totalAmountInBaseCurrency: usdTotal,
+      baseCurrency: 'USD',
+      status: finalStatus,
+      submittedAt: submittedAt,
+      updatedAt: new Date(),
+    };
+
+    // 如果是从 rejected 重新提交，清除拒绝信息
+    if (clearRejection) {
+      updateData.rejectedAt = null;
+      updateData.rejectedBy = null;
+      updateData.rejectReason = null;
+    }
+
     const [updated] = await db
       .update(reimbursements)
-      .set({
-        title: title || existing.title,
-        description: description ?? existing.description,
-        totalAmount,
-        totalAmountInBaseCurrency: usdTotal,
-        baseCurrency: 'USD',
-        status: finalStatus,
-        submittedAt: submittedAt,
-        updatedAt: new Date(),
-      })
+      .set(updateData)
       .where(eq(reimbursements.id, id))
       .returning();
 
