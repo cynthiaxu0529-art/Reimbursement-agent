@@ -4,6 +4,9 @@ import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
+// 标记为动态路由，避免构建时静态渲染错误
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/settings/profile - 获取用户资料
  */
