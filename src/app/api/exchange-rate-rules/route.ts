@@ -7,7 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { exchangeRateRules } from '@/lib/db/schema';
+import { exchangeRateRules, users } from '@/lib/db/schema';
 import { eq, desc, and, or, isNull } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 
@@ -70,8 +70,23 @@ export async function POST(request: Request) {
   try {
     const session = await auth();
 
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: '未登录' }, { status: 401 });
+    }
+
+    // 获取用户信息，检查角色权限
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+    }
+
+    // 只有 admin、super_admin、finance 角色可以管理汇率规则
+    const allowedRoles = ['admin', 'super_admin', 'finance'];
+    if (!allowedRoles.includes(user.role)) {
+      return NextResponse.json({ error: '无权限管理汇率规则' }, { status: 403 });
     }
 
     const body = await request.json();
@@ -87,7 +102,7 @@ export async function POST(request: Request) {
     const newRule = await db
       .insert(exchangeRateRules)
       .values({
-        tenantId: body.tenantId || null,
+        tenantId: user.tenantId || null,
         description: body.description,
         source: body.source,
         currencies: body.currencies || [],
@@ -97,7 +112,7 @@ export async function POST(request: Request) {
         fallbackRule: body.fallbackRule || null,
         status: body.status || 'draft',
         priority: body.priority || 0,
-        createdBy: (session.user as { id?: string }).id || null,
+        createdBy: user.id,
       })
       .returning();
 

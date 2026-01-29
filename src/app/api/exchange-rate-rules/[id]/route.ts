@@ -8,9 +8,33 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { exchangeRateRules } from '@/lib/db/schema';
+import { exchangeRateRules, users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
+
+// 允许管理汇率规则的角色
+const ALLOWED_ROLES = ['admin', 'super_admin', 'finance'];
+
+// 检查用户是否有权限管理汇率规则
+async function checkPermission(session: { user?: { id?: string } } | null) {
+  if (!session?.user?.id) {
+    return { error: '未登录', status: 401 };
+  }
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, session.user.id),
+  });
+
+  if (!user) {
+    return { error: '用户不存在', status: 404 };
+  }
+
+  if (!ALLOWED_ROLES.includes(user.role)) {
+    return { error: '无权限管理汇率规则', status: 403 };
+  }
+
+  return { user };
+}
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -46,9 +70,13 @@ export async function GET(request: Request, { params }: RouteParams) {
 export async function PUT(request: Request, { params }: RouteParams) {
   try {
     const session = await auth();
+    const permissionResult = await checkPermission(session);
 
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if ('error' in permissionResult) {
+      return NextResponse.json(
+        { error: permissionResult.error },
+        { status: permissionResult.status }
+      );
     }
 
     const { id } = await params;
@@ -103,9 +131,13 @@ export async function PUT(request: Request, { params }: RouteParams) {
 export async function DELETE(request: Request, { params }: RouteParams) {
   try {
     const session = await auth();
+    const permissionResult = await checkPermission(session);
 
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if ('error' in permissionResult) {
+      return NextResponse.json(
+        { error: permissionResult.error },
+        { status: permissionResult.status }
+      );
     }
 
     const { id } = await params;
