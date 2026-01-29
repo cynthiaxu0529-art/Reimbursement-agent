@@ -342,6 +342,16 @@ export async function DELETE(
       .delete(reimbursementItems)
       .where(eq(reimbursementItems.reimbursementId, id));
 
+    // 删除审批链记录
+    await db
+      .delete(approvalChain)
+      .where(eq(approvalChain.reimbursementId, id));
+
+    // 删除支付记录（如果有）
+    await db
+      .delete(payments)
+      .where(eq(payments.reimbursementId, id));
+
     // 删除报销单
     await db
       .delete(reimbursements)
