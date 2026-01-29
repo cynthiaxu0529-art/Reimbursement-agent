@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 
-type UserRole = 'employee' | 'approver' | 'admin';
 type TabType = 'members' | 'departments' | 'approval-rules';
 
 interface TeamMember {
@@ -92,8 +91,18 @@ const stepTypeLabels: Record<string, string> = {
   specific_user: '指定审批人',
 };
 
+// 数据库角色到前端角色的映射
+const DB_TO_FRONTEND_ROLE: Record<string, string> = {
+  employee: 'employee',
+  manager: 'approver',
+  finance: 'finance',
+  admin: 'admin',
+  super_admin: 'admin',
+};
+
 export default function TeamPage() {
-  const [userRole, setUserRole] = useState<UserRole>('employee');
+  const [userRoles, setUserRoles] = useState<string[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('members');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showDeptModal, setShowDeptModal] = useState(false);
@@ -155,24 +164,42 @@ export default function TeamPage() {
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
   const [memberFormData, setMemberFormData] = useState({ departmentId: '', role: '' });
 
-  // 获取用户角色
+  // 从 API 获取用户角色
   useEffect(() => {
-    const savedRole = localStorage.getItem('userRole') as UserRole;
-    if (savedRole && (savedRole === 'employee' || savedRole === 'approver' || savedRole === 'admin')) {
-      setUserRole(savedRole);
-    }
+    const fetchRoles = async () => {
+      try {
+        const response = await fetch('/api/settings/role');
+        const result = await response.json();
+        if (result.success && result.roles) {
+          // 转换数据库角色到前端角色
+          const frontendRoles = result.roles.map((r: string) => DB_TO_FRONTEND_ROLE[r] || r);
+          const uniqueRoles = [...new Set(frontendRoles)] as string[];
+          setUserRoles(uniqueRoles);
+        }
+      } catch (error) {
+        console.error('Failed to fetch roles:', error);
+        setUserRoles(['employee']);
+      } finally {
+        setRolesLoading(false);
+      }
+    };
+    fetchRoles();
   }, []);
+
+  // 检查是否有管理员权限
+  const isAdmin = userRoles.includes('admin');
 
   // 加载数据
   useEffect(() => {
-    if (userRole === 'admin') {
+    if (rolesLoading) return; // 等待角色加载完成
+    if (isAdmin) {
       fetchMembers();
       fetchDepartments();
       fetchApprovalRules();
     } else {
       setLoading(false);
     }
-  }, [userRole]);
+  }, [isAdmin, rolesLoading]);
 
   const fetchMembers = async () => {
     try {
@@ -491,7 +518,18 @@ export default function TeamPage() {
     fontSize: '0.875rem',
   });
 
-  if (userRole !== 'admin') {
+  // 等待角色加载
+  if (rolesLoading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px', color: '#6b7280' }}>
+        <div style={{ width: '40px', height: '40px', borderRadius: '50%', border: '3px solid #e5e7eb', borderTopColor: '#2563eb', animation: 'spin 1s linear infinite', marginBottom: '1rem' }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <p>加载中...</p>
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px', color: '#6b7280' }}>
         <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🔒</div>
