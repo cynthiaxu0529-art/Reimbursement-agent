@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
     let tenantId: string | null = null;
     type UserRole = 'employee' | 'manager' | 'finance' | 'admin' | 'super_admin';
     let userRole: UserRole = 'employee';
+    let userRoles: UserRole[] = ['employee']; // 多角色数组
     let departmentName: string | null = null;
     let departmentId: string | null = null;
     let setAsDeptManager = false;
@@ -66,6 +67,15 @@ export async function POST(request: NextRequest) {
       super_admin: 'super_admin',
     };
 
+    // 角色优先级（数字越大权限越高）
+    const rolePriority: Record<UserRole, number> = {
+      employee: 1,
+      manager: 2,
+      finance: 3,
+      admin: 4,
+      super_admin: 5,
+    };
+
     if (inviteToken) {
       // 通过邀请链接注册
       const inviteData = parseInviteToken(inviteToken);
@@ -78,13 +88,20 @@ export async function POST(request: NextRequest) {
           );
         }
         tenantId = inviteData.tenantId;
-        // 使用邀请中的角色（取第一个作为主要角色），并映射到数据库角色
-        const inviteRole = inviteData.roles?.[0] || 'employee';
-        userRole = roleMapping[inviteRole] || 'employee';
-        // 提取部门信息
-        departmentName = inviteData.department || null;
+
+        // 映射所有邀请角色到数据库角色，并去重
+        const inviteRoles = inviteData.roles || ['employee'];
+        const mappedRoles = [...new Set(inviteRoles.map(r => roleMapping[r] || 'employee'))] as UserRole[];
+        userRoles = mappedRoles.length > 0 ? mappedRoles : ['employee'];
+
+        // 选择最高权限的角色作为主要角色（向后兼容）
+        userRole = userRoles.reduce((highest, current) => {
+          return (rolePriority[current] || 0) > (rolePriority[highest] || 0) ? current : highest;
+        }, 'employee' as UserRole);
+
         setAsDeptManager = inviteData.setAsDeptManager || false;
-        // 验证 departmentId 是否存在
+
+        // 验证并设置部门信息 - 必须通过 departmentId 验证才能设置部门
         if (inviteData.departmentId) {
           const dept = await db.query.departments.findFirst({
             where: and(
@@ -95,6 +112,9 @@ export async function POST(request: NextRequest) {
           if (dept) {
             departmentId = dept.id;
             departmentName = dept.name; // 使用数据库中的实际名称
+          } else {
+            // departmentId 无效（部门可能已被删除），不设置部门
+            console.warn(`Invalid departmentId ${inviteData.departmentId} in invite token for ${email}`);
           }
         }
       }
@@ -116,6 +136,7 @@ export async function POST(request: NextRequest) {
 
       tenantId = tenant.id;
       userRole = 'admin' as UserRole; // 创建公司的用户默认为管理员
+      userRoles = ['admin']; // 多角色也是管理员
     }
 
     // 创建用户
@@ -127,6 +148,7 @@ export async function POST(request: NextRequest) {
         passwordHash,
         tenantId,
         role: userRole,
+        roles: userRoles, // 存储多角色
         department: departmentName,
         departmentId,
       })

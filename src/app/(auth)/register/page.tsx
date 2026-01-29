@@ -51,6 +51,13 @@ function RegisterForm() {
       return;
     }
 
+    // 非邀请用户必须填写公司名称
+    if (!isInvited && !formData.companyName.trim()) {
+      setError('请填写公司名称，或使用邀请链接加入已有公司');
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch('/api/auth/register', {
         method: 'POST',
@@ -227,17 +234,18 @@ function RegisterForm() {
           {!isInvited && (
             <div style={{ marginBottom: '1.5rem' }}>
               <label style={labelStyle}>
-                公司名称 <span style={{ color: '#9ca3af' }}>(可选)</span>
+                公司名称 *
               </label>
               <input
                 name="companyName"
                 value={formData.companyName}
                 onChange={handleChange}
-                placeholder="创建新公司"
+                required
+                placeholder="输入公司名称"
                 style={inputStyle}
               />
               <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                填写后将创建新公司，您将成为管理员
+                创建新公司后，您将成为管理员，可邀请其他成员加入
               </p>
             </div>
           )}

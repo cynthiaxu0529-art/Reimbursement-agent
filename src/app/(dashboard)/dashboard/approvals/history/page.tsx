@@ -130,14 +130,18 @@ export default function ApprovalHistoryPage() {
     }
   }, [router]);
 
-  // 获取审批历史数据
+  // 获取审批历史数据 - 只显示当前用户批准的记录
   useEffect(() => {
     const fetchHistory = async () => {
       try {
-        const response = await fetch('/api/reimbursements?status=approved,rejected,paid,processing&role=approver');
+        // 添加 myApprovals=true 只获取自己批准的记录
+        const response = await fetch('/api/reimbursements?status=approved,rejected,paid,processing&role=approver&myApprovals=true');
         const result = await response.json();
         if (result.success) {
           setHistoryList(result.data || []);
+        } else if (result.error === '无审批权限') {
+          // 用户没有审批权限，跳转回首页
+          router.push('/dashboard');
         }
       } catch (error) {
         console.error('Failed to fetch history:', error);
@@ -148,7 +152,7 @@ export default function ApprovalHistoryPage() {
     if (roleChecked) {
       fetchHistory();
     }
-  }, [roleChecked]);
+  }, [roleChecked, router]);
 
   // 获取选中项的详情
   useEffect(() => {
