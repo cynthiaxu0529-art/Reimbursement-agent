@@ -41,6 +41,14 @@ const financeNavigation = [
 
 type UserRole = 'employee' | 'approver' | 'admin' | 'finance';
 
+// 角色显示信息
+const ROLE_INFO: Record<UserRole, { label: string; description: string; color: string }> = {
+  employee: { label: '员工', description: '提交和管理报销', color: '#2563eb' },
+  approver: { label: '审批人', description: '审批下属报销', color: '#7c3aed' },
+  admin: { label: '管理员', description: '管理公司设置和团队', color: '#dc2626' },
+  finance: { label: '财务', description: '处理付款和打款', color: '#059669' },
+};
+
 export default function DashboardLayout({
   children,
 }: {
@@ -49,26 +57,25 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const router = useRouter();
   const [role, setRole] = useState<UserRole>('employee');
+  const [availableRoles, setAvailableRoles] = useState<UserRole[]>(['employee']);
   const [showRoleMenu, setShowRoleMenu] = useState(false);
 
-  // 初始化：从数据库获取角色，同步到 localStorage
+  // 初始化：从数据库获取角色和可用角色列表
   useEffect(() => {
     const initRole = async () => {
       try {
         const response = await fetch('/api/settings/role');
         const result = await response.json();
-        if (result.success && result.role) {
-          // 数据库角色到前端角色的映射
-          const dbToFrontend: Record<string, UserRole> = {
-            employee: 'employee',
-            manager: 'approver',
-            finance: 'finance',
-            admin: 'admin',
-            super_admin: 'admin',
-          };
-          const frontendRole = dbToFrontend[result.role] || 'employee';
-          setRole(frontendRole);
-          localStorage.setItem('userRole', frontendRole);
+        if (result.success) {
+          // 使用activeRole作为当前角色
+          const activeRole = result.activeRole as UserRole || 'employee';
+          setRole(activeRole);
+          localStorage.setItem('userRole', activeRole);
+
+          // 设置可用角色列表
+          if (result.availableRoles && Array.isArray(result.availableRoles)) {
+            setAvailableRoles(result.availableRoles as UserRole[]);
+          }
         }
       } catch {
         // 降级：从 localStorage 读取
@@ -137,8 +144,17 @@ export default function DashboardLayout({
   };
 
   const navigation = role === 'employee' ? employeeNavigation : role === 'approver' ? approverNavigation : role === 'finance' ? financeNavigation : adminNavigation;
-  const roleLabel = role === 'employee' ? '员工' : role === 'approver' ? '审批人' : role === 'finance' ? '财务' : '管理员';
-  const roleColor = role === 'employee' ? '#2563eb' : role === 'approver' ? '#7c3aed' : role === 'finance' ? '#059669' : '#dc2626';
+  const currentRoleInfo = ROLE_INFO[role];
+  const roleLabel = currentRoleInfo.label;
+  const roleColor = currentRoleInfo.color;
+
+  // 角色高亮背景色
+  const roleHighlightBg: Record<UserRole, string> = {
+    employee: '#eff6ff',
+    approver: '#f3e8ff',
+    admin: '#fef2f2',
+    finance: '#ecfdf5',
+  };
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
@@ -223,117 +239,54 @@ export default function DashboardLayout({
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <button
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('employee'); }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.625rem 0.875rem',
-                    backgroundColor: role === 'employee' ? '#eff6ff' : 'white',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    textAlign: 'left'
-                  }}
-                >
-                  <span style={{
-                    width: '8px',
-                    height: '8px',
-                    backgroundColor: '#2563eb',
-                    borderRadius: '50%'
-                  }} />
-                  <div>
-                    <div style={{ fontWeight: 500, color: '#374151' }}>员工</div>
-                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>提交和管理报销</div>
-                  </div>
-                  {role === 'employee' && <span style={{ marginLeft: 'auto', color: '#2563eb' }}>✓</span>}
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('approver'); }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.625rem 0.875rem',
-                    backgroundColor: role === 'approver' ? '#f3e8ff' : 'white',
-                    border: 'none',
+                {/* 只显示用户可用的角色 */}
+                {availableRoles.map((availableRole, index) => {
+                  const info = ROLE_INFO[availableRole];
+                  const isActive = role === availableRole;
+                  return (
+                    <button
+                      key={availableRole}
+                      onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole(availableRole); }}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.625rem 0.875rem',
+                        backgroundColor: isActive ? roleHighlightBg[availableRole] : 'white',
+                        border: 'none',
+                        borderTop: index > 0 ? '1px solid #e5e7eb' : 'none',
+                        cursor: 'pointer',
+                        fontSize: '0.875rem',
+                        textAlign: 'left'
+                      }}
+                    >
+                      <span style={{
+                        width: '8px',
+                        height: '8px',
+                        backgroundColor: info.color,
+                        borderRadius: '50%'
+                      }} />
+                      <div>
+                        <div style={{ fontWeight: 500, color: '#374151' }}>{info.label}</div>
+                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{info.description}</div>
+                      </div>
+                      {isActive && <span style={{ marginLeft: 'auto', color: info.color }}>✓</span>}
+                    </button>
+                  );
+                })}
+                {/* 如果只有一个角色可用，显示提示 */}
+                {availableRoles.length === 1 && (
+                  <div style={{
+                    padding: '0.5rem 0.875rem',
                     borderTop: '1px solid #e5e7eb',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    textAlign: 'left'
-                  }}
-                >
-                  <span style={{
-                    width: '8px',
-                    height: '8px',
-                    backgroundColor: '#7c3aed',
-                    borderRadius: '50%'
-                  }} />
-                  <div>
-                    <div style={{ fontWeight: 500, color: '#374151' }}>审批人</div>
-                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>审批下属报销</div>
+                    fontSize: '0.75rem',
+                    color: '#9ca3af',
+                    textAlign: 'center'
+                  }}>
+                    当前账户仅有员工权限
                   </div>
-                  {role === 'approver' && <span style={{ marginLeft: 'auto', color: '#7c3aed' }}>✓</span>}
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('admin'); }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.625rem 0.875rem',
-                    backgroundColor: role === 'admin' ? '#fef2f2' : 'white',
-                    border: 'none',
-                    borderTop: '1px solid #e5e7eb',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    textAlign: 'left'
-                  }}
-                >
-                  <span style={{
-                    width: '8px',
-                    height: '8px',
-                    backgroundColor: '#dc2626',
-                    borderRadius: '50%'
-                  }} />
-                  <div>
-                    <div style={{ fontWeight: 500, color: '#374151' }}>管理员</div>
-                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>管理公司设置和团队</div>
-                  </div>
-                  {role === 'admin' && <span style={{ marginLeft: 'auto', color: '#dc2626' }}>✓</span>}
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('finance'); }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.625rem 0.875rem',
-                    backgroundColor: role === 'finance' ? '#ecfdf5' : 'white',
-                    border: 'none',
-                    borderTop: '1px solid #e5e7eb',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    textAlign: 'left'
-                  }}
-                >
-                  <span style={{
-                    width: '8px',
-                    height: '8px',
-                    backgroundColor: '#059669',
-                    borderRadius: '50%'
-                  }} />
-                  <div>
-                    <div style={{ fontWeight: 500, color: '#374151' }}>财务</div>
-                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>处理付款和打款</div>
-                  </div>
-                  {role === 'finance' && <span style={{ marginLeft: 'auto', color: '#059669' }}>✓</span>}
-                </button>
+                )}
               </div>
             )}
           </div>

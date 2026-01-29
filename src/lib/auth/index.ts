@@ -132,3 +132,42 @@ declare module 'next-auth' {
     };
   }
 }
+
+// ============ 角色和权限模块导出 ============
+
+// 角色定义
+export {
+  ROLES,
+  FRONTEND_ROLES,
+  ROLE_PRIORITY,
+  APPROVER_ROLES,
+  FINANCE_ROLES,
+  ADMIN_ROLES,
+  DB_TO_FRONTEND_ROLE,
+  FRONTEND_TO_DB_ROLE,
+  INVITE_ROLE_MAPPING,
+  INVITE_PERMISSIONS,
+  ROLE_DISPLAY_NAMES,
+  getAvailableFrontendRoles,
+  canInviteRoles,
+  getHighestRole,
+  type Role,
+  type FrontendRole,
+} from './roles';
+
+// 权限检查
+export {
+  hasApproverPermission,
+  hasFinancePermission,
+  hasAdminPermission,
+  isSuperAdmin,
+  canSwitchToRole,
+  hasPermission,
+  getRolePermissions,
+  checkApproverPermission,
+  checkFinancePermission,
+  checkAdminPermission,
+  checkPermission,
+  type Permission,
+  type PermissionCheckResult,
+} from './permissions';
