@@ -719,7 +719,7 @@ export default function ReimbursementsPage() {
                     {item.status === 'rejected' && (
                       <>
                         <Link
-                          href="/dashboard/reimbursements/new"
+                          href={`/dashboard/reimbursements/${item.id}/edit`}
                           style={{
                             padding: '4px 8px',
                             fontSize: '11px',
@@ -730,7 +730,7 @@ export default function ReimbursementsPage() {
                             textDecoration: 'none',
                           }}
                         >
-                          重新提交
+                          修改
                         </Link>
                         <button
                           onClick={() => handleDelete(item.id)}
@@ -748,6 +748,9 @@ export default function ReimbursementsPage() {
                           删除
                         </button>
                       </>
+                    )}
+                    {item.status === 'processing' && (
+                      <span style={{ fontSize: '11px', color: '#6b7280' }}>-</span>
                     )}
                   </div>
                 </div>
