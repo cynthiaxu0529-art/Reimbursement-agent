@@ -9,8 +9,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { exchangeRateRules } from '@/lib/db/schema';
 import { eq, desc, and, or, isNull } from 'drizzle-orm';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth/auth-options';
+import { auth } from '@/lib/auth';
 
 export async function GET(request: Request) {
   try {
@@ -69,7 +68,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
 
     if (!session?.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
