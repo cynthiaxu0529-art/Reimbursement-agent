@@ -52,7 +52,6 @@ export async function POST(request: NextRequest) {
     let tenantId: string | null = null;
     type UserRole = 'employee' | 'manager' | 'finance' | 'admin' | 'super_admin';
     let userRole: UserRole = 'employee';
-    let userRoles: UserRole[] = ['employee']; // 多角色数组
     let departmentName: string | null = null;
     let departmentId: string | null = null;
     let setAsDeptManager = false;
@@ -89,13 +88,12 @@ export async function POST(request: NextRequest) {
         }
         tenantId = inviteData.tenantId;
 
-        // 映射所有邀请角色到数据库角色，并去重
+        // 映射邀请角色到数据库角色，选择权限最高的
         const inviteRoles = inviteData.roles || ['employee'];
         const mappedRoles = [...new Set(inviteRoles.map(r => roleMapping[r] || 'employee'))] as UserRole[];
-        userRoles = mappedRoles.length > 0 ? mappedRoles : ['employee'];
 
-        // 选择最高权限的角色作为主要角色（向后兼容）
-        userRole = userRoles.reduce((highest, current) => {
+        // 选择最高权限的角色
+        userRole = mappedRoles.reduce((highest, current) => {
           return (rolePriority[current] || 0) > (rolePriority[highest] || 0) ? current : highest;
         }, 'employee' as UserRole);
 
@@ -136,7 +134,6 @@ export async function POST(request: NextRequest) {
 
       tenantId = tenant.id;
       userRole = 'admin' as UserRole; // 创建公司的用户默认为管理员
-      userRoles = ['admin']; // 多角色也是管理员
     }
 
     // 创建用户
@@ -148,7 +145,6 @@ export async function POST(request: NextRequest) {
         passwordHash,
         tenantId,
         role: userRole,
-        roles: userRoles, // 存储多角色
         department: departmentName,
         departmentId,
       })

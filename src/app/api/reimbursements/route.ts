@@ -37,16 +37,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '用户不存在' }, { status: 404 });
     }
 
-    // 支持多角色 - 获取用户所有角色
-    const userRoles: string[] = (currentUser as any).roles || [currentUser.role];
+    // 使用单角色（多角色功能需要先运行数据库迁移）
+    const userRole = currentUser.role;
 
     // 构建查询条件
     let conditions: any[] = [];
 
-    // 验证角色权限（基于用户所有角色）
+    // 验证角色权限
     if (role === 'approver' && currentUser.tenantId) {
-      // 检查用户是否有审批权限（任一角色符合即可）
-      const hasApproverRole = userRoles.some(r => APPROVER_ROLES.includes(r));
+      // 检查用户是否有审批权限
+      const hasApproverRole = APPROVER_ROLES.includes(userRole);
       if (!hasApproverRole) {
         return NextResponse.json({ error: '无审批权限' }, { status: 403 });
       }
@@ -59,8 +59,8 @@ export async function GET(request: NextRequest) {
         ));
       }
     } else if (role === 'finance' && currentUser.tenantId) {
-      // 检查用户是否有财务权限（任一角色符合即可）
-      const hasFinanceRole = userRoles.some(r => FINANCE_ROLES.includes(r));
+      // 检查用户是否有财务权限
+      const hasFinanceRole = FINANCE_ROLES.includes(userRole);
       if (!hasFinanceRole) {
         return NextResponse.json({ error: '无财务权限' }, { status: 403 });
       }
@@ -83,8 +83,8 @@ export async function GET(request: NextRequest) {
     }
 
     // 是否需要加载提交人信息
-    const hasApproverRole = userRoles.some(r => APPROVER_ROLES.includes(r));
-    const hasFinanceRole = userRoles.some(r => FINANCE_ROLES.includes(r));
+    const hasApproverRole = APPROVER_ROLES.includes(userRole);
+    const hasFinanceRole = FINANCE_ROLES.includes(userRole);
     const isApproverOrFinance = (role === 'approver' && hasApproverRole) ||
                                  (role === 'finance' && hasFinanceRole);
 

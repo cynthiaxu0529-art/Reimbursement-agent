@@ -44,14 +44,12 @@ export async function GET(request: NextRequest) {
         deptName = member.department;
       }
 
-      // 使用 roles 数组（支持多角色），如果不存在则降级为单角色数组
-      const memberRoles: string[] = (member as any).roles || [member.role];
-
       return {
         id: member.id,
         name: member.name,
         email: member.email,
-        roles: memberRoles,
+        role: member.role,
+        roles: [member.role], // 兼容前端多角色显示
         department: deptName || '未分配',
         departmentId: member.departmentId || undefined,
         status: 'active' as const,
