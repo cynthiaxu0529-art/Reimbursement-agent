@@ -119,13 +119,29 @@ export const INVITE_ROLE_MAPPING: Record<string, Role> = {
 /**
  * 从用户对象获取 roles 数组
  * 兼容旧的 role 单字段和新的 roles 数组
+ *
+ * 核心逻辑：合并 roles 数组和 role 字段，确保不丢失任何权限
+ * 这可以防止数据库迁移遗漏导致的权限丢失问题
  */
 export function getUserRoles(user: { role?: string; roles?: string[] | unknown }): string[] {
+  const roles: string[] = [];
+
+  // 1. 从 roles 字段获取
   if (user.roles && Array.isArray(user.roles) && user.roles.length > 0) {
-    return user.roles as string[];
+    roles.push(...(user.roles as string[]));
   }
-  // 降级到单个 role
-  return user.role ? [user.role] : ['employee'];
+
+  // 2. 确保 role 字段的值也在 roles 数组中（防止迁移遗漏）
+  if (user.role && !roles.includes(user.role)) {
+    roles.push(user.role);
+  }
+
+  // 3. 如果都没有，默认为 employee
+  if (roles.length === 0) {
+    return ['employee'];
+  }
+
+  return roles;
 }
 
 /**

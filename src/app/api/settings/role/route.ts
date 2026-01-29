@@ -33,19 +33,26 @@ export async function GET() {
     });
 
     // 获取 roles 数组
-    // 优先使用 roles 字段，如果为空/null 则从 role 字段生成
+    // 核心逻辑：合并 roles 数组和 role 字段，确保不丢失任何权限
     let roles: string[] = [];
 
+    // 1. 从 roles 字段获取
     if (user?.roles && Array.isArray(user.roles) && user.roles.length > 0) {
-      roles = user.roles as string[];
-    } else if (user?.role) {
-      // 从单个 role 字段生成 roles 数组
-      roles = [user.role];
-    } else {
+      roles = [...(user.roles as string[])];
+    }
+
+    // 2. 确保 role 字段的值也在 roles 数组中（防止迁移遗漏）
+    // 这是关键修复：即使 roles 数组存在，也要检查 role 字段
+    if (user?.role && !roles.includes(user.role)) {
+      roles.push(user.role);
+    }
+
+    // 3. 如果都没有，默认为 employee
+    if (roles.length === 0) {
       roles = ['employee'];
     }
 
-    // 确保 roles 数组至少包含 employee（所有人都应该能提交报销）
+    // 4. 确保 roles 数组至少包含 employee（所有人都应该能提交报销）
     if (!roles.includes('employee')) {
       roles.unshift('employee');
     }
