@@ -49,9 +49,8 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const router = useRouter();
   const [role, setRole] = useState<UserRole>('employee');
-  const [showRoleMenu, setShowRoleMenu] = useState(false);
 
-  // 初始化：从数据库获取角色，同步到 localStorage
+  // 初始化：从数据库获取角色（只读，不允许切换）
   useEffect(() => {
     const initRole = async () => {
       try {
@@ -68,14 +67,10 @@ export default function DashboardLayout({
           };
           const frontendRole = dbToFrontend[result.role] || 'employee';
           setRole(frontendRole);
-          localStorage.setItem('userRole', frontendRole);
         }
       } catch {
-        // 降级：从 localStorage 读取
-        const savedRole = localStorage.getItem('userRole') as UserRole;
-        if (savedRole && ['employee', 'approver', 'admin', 'finance'].includes(savedRole)) {
-          setRole(savedRole);
-        }
+        // 出错时默认为员工角色
+        setRole('employee');
       }
     };
     initRole();
@@ -108,33 +103,6 @@ export default function DashboardLayout({
       }
     }
   }, [role, pathname, router]);
-
-  // 切换角色：同步到数据库 + localStorage，然后跳转
-  const switchRole = async (newRole: UserRole) => {
-    setRole(newRole);
-    localStorage.setItem('userRole', newRole);
-    setShowRoleMenu(false);
-
-    // 同步到数据库
-    try {
-      await fetch('/api/settings/role', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: newRole }),
-      });
-    } catch (error) {
-      console.error('Failed to sync role:', error);
-    }
-
-    // 跳转到对应角色的默认页面
-    if (newRole === 'employee') {
-      router.push('/dashboard/reimbursements');
-    } else if (newRole === 'approver' || newRole === 'admin') {
-      router.push('/dashboard/approvals');
-    } else if (newRole === 'finance') {
-      router.push('/dashboard/disbursements');
-    }
-  };
 
   const navigation = role === 'employee' ? employeeNavigation : role === 'approver' ? approverNavigation : role === 'finance' ? financeNavigation : adminNavigation;
   const roleLabel = role === 'employee' ? '员工' : role === 'approver' ? '审批人' : role === 'finance' ? '财务' : '管理员';
@@ -176,166 +144,26 @@ export default function DashboardLayout({
           <span style={{ fontWeight: 600, fontSize: '1rem', color: '#111827' }}>报销助手</span>
         </div>
 
-        {/* Role Switcher */}
-        <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e5e7eb', position: 'relative', zIndex: 50 }}>
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={() => setShowRoleMenu(!showRoleMenu)}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '0.625rem 0.875rem',
-                backgroundColor: '#f3f4f6',
-                border: 'none',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-                fontSize: '0.875rem'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{
-                  width: '8px',
-                  height: '8px',
-                  backgroundColor: roleColor,
-                  borderRadius: '50%'
-                }} />
-                <span style={{ fontWeight: 500, color: '#374151' }}>当前角色: {roleLabel}</span>
-              </div>
-              <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>▼</span>
-            </button>
-
-            {showRoleMenu && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  marginTop: '0.25rem',
-                  backgroundColor: 'white',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '0.5rem',
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                  zIndex: 100,
-                  overflow: 'hidden'
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <button
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('employee'); }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.625rem 0.875rem',
-                    backgroundColor: role === 'employee' ? '#eff6ff' : 'white',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    textAlign: 'left'
-                  }}
-                >
-                  <span style={{
-                    width: '8px',
-                    height: '8px',
-                    backgroundColor: '#2563eb',
-                    borderRadius: '50%'
-                  }} />
-                  <div>
-                    <div style={{ fontWeight: 500, color: '#374151' }}>员工</div>
-                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>提交和管理报销</div>
-                  </div>
-                  {role === 'employee' && <span style={{ marginLeft: 'auto', color: '#2563eb' }}>✓</span>}
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('approver'); }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.625rem 0.875rem',
-                    backgroundColor: role === 'approver' ? '#f3e8ff' : 'white',
-                    border: 'none',
-                    borderTop: '1px solid #e5e7eb',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    textAlign: 'left'
-                  }}
-                >
-                  <span style={{
-                    width: '8px',
-                    height: '8px',
-                    backgroundColor: '#7c3aed',
-                    borderRadius: '50%'
-                  }} />
-                  <div>
-                    <div style={{ fontWeight: 500, color: '#374151' }}>审批人</div>
-                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>审批下属报销</div>
-                  </div>
-                  {role === 'approver' && <span style={{ marginLeft: 'auto', color: '#7c3aed' }}>✓</span>}
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('admin'); }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.625rem 0.875rem',
-                    backgroundColor: role === 'admin' ? '#fef2f2' : 'white',
-                    border: 'none',
-                    borderTop: '1px solid #e5e7eb',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    textAlign: 'left'
-                  }}
-                >
-                  <span style={{
-                    width: '8px',
-                    height: '8px',
-                    backgroundColor: '#dc2626',
-                    borderRadius: '50%'
-                  }} />
-                  <div>
-                    <div style={{ fontWeight: 500, color: '#374151' }}>管理员</div>
-                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>管理公司设置和团队</div>
-                  </div>
-                  {role === 'admin' && <span style={{ marginLeft: 'auto', color: '#dc2626' }}>✓</span>}
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); switchRole('finance'); }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.625rem 0.875rem',
-                    backgroundColor: role === 'finance' ? '#ecfdf5' : 'white',
-                    border: 'none',
-                    borderTop: '1px solid #e5e7eb',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    textAlign: 'left'
-                  }}
-                >
-                  <span style={{
-                    width: '8px',
-                    height: '8px',
-                    backgroundColor: '#059669',
-                    borderRadius: '50%'
-                  }} />
-                  <div>
-                    <div style={{ fontWeight: 500, color: '#374151' }}>财务</div>
-                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>处理付款和打款</div>
-                  </div>
-                  {role === 'finance' && <span style={{ marginLeft: 'auto', color: '#059669' }}>✓</span>}
-                </button>
-              </div>
-            )}
+        {/* Role Display (只读，不可切换) */}
+        <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.625rem 0.875rem',
+              backgroundColor: '#f3f4f6',
+              borderRadius: '0.5rem',
+              fontSize: '0.875rem'
+            }}
+          >
+            <span style={{
+              width: '8px',
+              height: '8px',
+              backgroundColor: roleColor,
+              borderRadius: '50%'
+            }} />
+            <span style={{ fontWeight: 500, color: '#374151' }}>当前角色: {roleLabel}</span>
           </div>
         </div>
 
@@ -440,21 +268,6 @@ export default function DashboardLayout({
           {children}
         </main>
       </div>
-
-      {/* Click outside to close role menu */}
-      {showRoleMenu && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            right: 0,
-            bottom: 0,
-            left: '240px',
-            zIndex: 40
-          }}
-          onClick={() => setShowRoleMenu(false)}
-        />
-      )}
     </div>
   );
 }
