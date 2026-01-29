@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,7 +9,7 @@ interface ExchangeRateRule {
   id: string;
   description: string;
   source: string;
-  sourceIcon: string;
+  sourceIcon?: string;
   effectiveFrom: string;
   effectiveTo: string;
   status: 'active' | 'draft' | 'archived';
@@ -26,12 +26,20 @@ interface ChatMessage {
   draftRule?: Partial<ExchangeRateRule>;
 }
 
-const sourceIcons: Record<string, { icon: string; color: string }> = {
-  'Central Bank': { icon: '🏛️', color: '#2563eb' },
-  'OANDA': { icon: '📊', color: '#f59e0b' },
-  'Reuters': { icon: '📰', color: '#ef4444' },
-  'Open Exchange': { icon: '🌐', color: '#10b981' },
-  'Manual': { icon: '✏️', color: '#6b7280' },
+// 数据来源映射
+const sourceIcons: Record<string, { icon: string; color: string; label: string }> = {
+  central_bank: { icon: '🏛️', color: '#2563eb', label: 'Central Bank' },
+  oanda: { icon: '📊', color: '#f59e0b', label: 'OANDA' },
+  reuters: { icon: '📰', color: '#ef4444', label: 'Reuters' },
+  open_exchange: { icon: '🌐', color: '#10b981', label: 'Open Exchange' },
+  manual: { icon: '✏️', color: '#6b7280', label: 'Manual' },
+  api: { icon: '🔗', color: '#8b5cf6', label: 'API' },
+  // 兼容旧格式
+  'Central Bank': { icon: '🏛️', color: '#2563eb', label: 'Central Bank' },
+  'OANDA': { icon: '📊', color: '#f59e0b', label: 'OANDA' },
+  'Reuters': { icon: '📰', color: '#ef4444', label: 'Reuters' },
+  'Open Exchange': { icon: '🌐', color: '#10b981', label: 'Open Exchange' },
+  'Manual': { icon: '✏️', color: '#6b7280', label: 'Manual' },
 };
 
 const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
@@ -40,45 +48,9 @@ const statusConfig: Record<string, { label: string; color: string; bg: string }>
   archived: { label: 'Archived', color: '#9ca3af', bg: '#f3f4f6' },
 };
 
-// 默认汇率规则
-const defaultRules: ExchangeRateRule[] = [
-  {
-    id: 'R-2024-001',
-    description: 'CNY/USD 标准汇率',
-    source: 'Central Bank',
-    sourceIcon: '🏛️',
-    effectiveFrom: '2024-01-01',
-    effectiveTo: '2024-12-31',
-    status: 'active',
-    currencies: ['CNY', 'USD'],
-    createdAt: '2024-01-01',
-  },
-  {
-    id: 'R-2024-002',
-    description: 'APAC 地区汇率',
-    source: 'OANDA',
-    sourceIcon: '📊',
-    effectiveFrom: '2024-01-01',
-    effectiveTo: '2024-03-31',
-    status: 'active',
-    currencies: ['JPY', 'KRW', 'SGD', 'HKD'],
-    createdAt: '2024-01-01',
-  },
-  {
-    id: 'R-2024-003',
-    description: '欧元区汇率',
-    source: 'Reuters',
-    sourceIcon: '📰',
-    effectiveFrom: '2024-01-01',
-    effectiveTo: '2024-12-31',
-    status: 'active',
-    currencies: ['EUR', 'GBP', 'CHF'],
-    createdAt: '2024-01-01',
-  },
-];
-
 export default function ExchangeRatesPage() {
-  const [rules, setRules] = useState<ExchangeRateRule[]>(defaultRules);
+  const [rules, setRules] = useState<ExchangeRateRule[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -93,6 +65,56 @@ export default function ExchangeRatesPage() {
   ]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
+  // 从 API 获取汇率规则
+  const fetchRules = useCallback(async () => {
+    try {
+      setLoading(true);
+      const params = new URLSearchParams();
+      if (statusFilter !== 'all') {
+        params.set('status', statusFilter);
+      }
+
+      const response = await fetch(`/api/exchange-rate-rules?${params}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.rules) {
+          setRules(
+            data.rules.map((rule: ExchangeRateRule) => ({
+              ...rule,
+              effectiveFrom: rule.effectiveFrom
+                ? new Date(rule.effectiveFrom).toISOString().split('T')[0]
+                : '',
+              effectiveTo: rule.effectiveTo
+                ? new Date(rule.effectiveTo).toISOString().split('T')[0]
+                : '',
+              createdAt: rule.createdAt
+                ? new Date(rule.createdAt).toISOString().split('T')[0]
+                : '',
+            }))
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch exchange rate rules:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    fetchRules();
+  }, [fetchRules]);
+
+  // 点击外部关闭下拉菜单
+  useEffect(() => {
+    const handleClickOutside = () => setOpenDropdown(null);
+    if (openDropdown) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [openDropdown]);
 
   // Stats
   const stats = {
@@ -147,28 +169,90 @@ export default function ExchangeRatesPage() {
     }, 1500);
   };
 
-  const addDraftRule = (draftRule: Partial<ExchangeRateRule>) => {
-    const newRule: ExchangeRateRule = {
-      id: draftRule.id || `R-${Date.now()}`,
-      description: draftRule.description || '新汇率规则',
-      source: draftRule.source || 'Manual',
-      sourceIcon: sourceIcons[draftRule.source || 'Manual']?.icon || '✏️',
-      effectiveFrom: draftRule.effectiveFrom || new Date().toISOString().split('T')[0],
-      effectiveTo: draftRule.effectiveTo || '',
-      status: 'draft',
-      currencies: draftRule.currencies || [],
-      fallbackRule: draftRule.fallbackRule,
-      createdAt: new Date().toISOString(),
-    };
-    setRules(prev => [...prev, newRule]);
+  // 通过 API 创建新规则
+  const addDraftRule = async (draftRule: Partial<ExchangeRateRule>) => {
+    try {
+      const response = await fetch('/api/exchange-rate-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: draftRule.description || '新汇率规则',
+          source: draftRule.source?.toLowerCase().replace(' ', '_') || 'manual',
+          currencies: draftRule.currencies || [],
+          effectiveFrom: draftRule.effectiveFrom || new Date().toISOString(),
+          effectiveTo: draftRule.effectiveTo || null,
+          fallbackRule: draftRule.fallbackRule || null,
+          status: 'draft',
+        }),
+      });
 
-    const confirmMessage: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'assistant',
-      content: `已添加规则 "${newRule.description}" 到列表中。规则状态为草稿，你可以在表格中编辑并激活它。`,
-      timestamp: new Date().toISOString(),
-    };
-    setChatMessages(prev => [...prev, confirmMessage]);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          // 刷新规则列表
+          await fetchRules();
+
+          const confirmMessage: ChatMessage = {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: `已添加规则 "${draftRule.description}" 到列表中。规则状态为草稿，你可以在表格中编辑并激活它。`,
+            timestamp: new Date().toISOString(),
+          };
+          setChatMessages((prev) => [...prev, confirmMessage]);
+        }
+      } else {
+        const errorMessage: ChatMessage = {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: '抱歉，添加规则失败。请稍后重试。',
+          timestamp: new Date().toISOString(),
+        };
+        setChatMessages((prev) => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      console.error('Failed to add rule:', error);
+      const errorMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: '抱歉，添加规则时发生错误。请检查网络连接后重试。',
+        timestamp: new Date().toISOString(),
+      };
+      setChatMessages((prev) => [...prev, errorMessage]);
+    }
+  };
+
+  // 更新规则状态
+  const updateRuleStatus = async (ruleId: string, newStatus: 'active' | 'draft' | 'archived') => {
+    try {
+      const response = await fetch(`/api/exchange-rate-rules/${ruleId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      if (response.ok) {
+        await fetchRules();
+      }
+    } catch (error) {
+      console.error('Failed to update rule status:', error);
+    }
+  };
+
+  // 删除规则
+  const deleteRule = async (ruleId: string) => {
+    if (!confirm('确定要删除这条规则吗？')) return;
+
+    try {
+      const response = await fetch(`/api/exchange-rate-rules/${ruleId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        await fetchRules();
+      }
+    } catch (error) {
+      console.error('Failed to delete rule:', error);
+    }
   };
 
   const formatDate = (dateStr: string) => {
@@ -344,10 +428,65 @@ export default function ExchangeRatesPage() {
                           {statusInfo.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-center">
-                        <button className="text-gray-400 hover:text-gray-600 p-1">
+                      <td className="px-4 py-3 text-center relative">
+                        <button
+                          className="text-gray-400 hover:text-gray-600 p-1"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenDropdown(openDropdown === rule.id ? null : rule.id);
+                          }}
+                        >
                           ⋮
                         </button>
+                        {openDropdown === rule.id && (
+                          <div
+                            className="absolute right-4 top-8 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 min-w-[120px]"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {rule.status !== 'active' && (
+                              <button
+                                className="w-full px-4 py-2 text-left text-sm text-green-600 hover:bg-gray-50 flex items-center gap-2"
+                                onClick={() => {
+                                  updateRuleStatus(rule.id, 'active');
+                                  setOpenDropdown(null);
+                                }}
+                              >
+                                <span>✓</span> 激活
+                              </button>
+                            )}
+                            {rule.status === 'active' && (
+                              <button
+                                className="w-full px-4 py-2 text-left text-sm text-gray-600 hover:bg-gray-50 flex items-center gap-2"
+                                onClick={() => {
+                                  updateRuleStatus(rule.id, 'archived');
+                                  setOpenDropdown(null);
+                                }}
+                              >
+                                <span>📁</span> 归档
+                              </button>
+                            )}
+                            {rule.status === 'archived' && (
+                              <button
+                                className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
+                                onClick={() => {
+                                  updateRuleStatus(rule.id, 'draft');
+                                  setOpenDropdown(null);
+                                }}
+                              >
+                                <span>✏️</span> 转为草稿
+                              </button>
+                            )}
+                            <button
+                              className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-gray-50 flex items-center gap-2"
+                              onClick={() => {
+                                deleteRule(rule.id);
+                                setOpenDropdown(null);
+                              }}
+                            >
+                              <span>🗑️</span> 删除
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );

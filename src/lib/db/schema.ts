@@ -707,3 +707,104 @@ export const invitationsRelations = relations(invitations, ({ one }) => ({
     relationName: 'revokedInvitations',
   }),
 }));
+
+// ============================================================================
+// 汇率相关表
+// ============================================================================
+
+/**
+ * 月初固定汇率表
+ * 每月月初记录一次汇率，用于当月所有报销的汇率计算
+ * 避免汇率波动导致的计算差异
+ */
+export const monthlyExchangeRates = pgTable('monthly_exchange_rates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // 年月标识（格式：2024-01）
+  yearMonth: text('year_month').notNull(),
+
+  // 货币对
+  fromCurrency: text('from_currency').notNull(),
+  toCurrency: text('to_currency').notNull(),
+
+  // 汇率
+  rate: real('rate').notNull(),
+
+  // 数据来源
+  source: text('source').notNull().default('api'), // 'api' | 'manual' | 'central_bank'
+
+  // 记录时间（月初第一天的汇率）
+  rateDate: timestamp('rate_date').notNull(),
+
+  // 审计字段
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedBy: uuid('updated_by'),
+});
+
+/**
+ * 汇率缓存表
+ * 用于持久化汇率缓存，避免服务重启后丢失
+ */
+export const exchangeRateCache = pgTable('exchange_rate_cache', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // 缓存键（格式：USD_CNY）
+  cacheKey: text('cache_key').notNull().unique(),
+
+  // 货币对
+  fromCurrency: text('from_currency').notNull(),
+  toCurrency: text('to_currency').notNull(),
+
+  // 汇率
+  rate: real('rate').notNull(),
+
+  // 数据来源
+  source: text('source').notNull(),
+
+  // 过期时间
+  expiresAt: timestamp('expires_at').notNull(),
+
+  // 创建时间
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+/**
+ * 汇率规则配置表
+ * 用于配置汇率获取策略、数据来源和回退规则
+ */
+export const exchangeRateRules = pgTable('exchange_rate_rules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // 租户（可选，为空表示全局规则）
+  tenantId: uuid('tenant_id').references(() => tenants.id),
+
+  // 规则描述
+  description: text('description').notNull(),
+
+  // 数据来源: 'central_bank' | 'oanda' | 'reuters' | 'open_exchange' | 'manual' | 'api'
+  source: text('source').notNull().default('api'),
+
+  // 覆盖的货币列表（JSON 数组）
+  currencies: jsonb('currencies').notNull().default([]),
+
+  // 固定汇率（当 source = 'manual' 时使用）
+  fixedRates: jsonb('fixed_rates'),
+
+  // 生效日期
+  effectiveFrom: timestamp('effective_from').notNull(),
+  effectiveTo: timestamp('effective_to'),
+
+  // 回退规则描述
+  fallbackRule: text('fallback_rule'),
+
+  // 状态: 'active' | 'draft' | 'archived'
+  status: text('status').notNull().default('draft'),
+
+  // 优先级（数字越小优先级越高）
+  priority: integer('priority').notNull().default(0),
+
+  // 审计字段
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});

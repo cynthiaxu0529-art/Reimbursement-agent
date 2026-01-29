@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useExchangeRate } from '@/hooks/useExchangeRate';
+import { CurrencyType, Currency } from '@/types';
 
 const expenseCategories = [
   { value: 'flight', label: '机票', icon: '✈️' },
@@ -58,14 +60,18 @@ interface LineItem {
   receiptFileName?: string;
 }
 
-// 支持的币种
+// 支持的币种（完整列表）
 const currencies = [
   { code: 'CNY', symbol: '¥', name: '人民币' },
   { code: 'USD', symbol: '$', name: '美元' },
   { code: 'EUR', symbol: '€', name: '欧元' },
   { code: 'GBP', symbol: '£', name: '英镑' },
-  { code: 'JPY', symbol: '¥', name: '日元' },
+  { code: 'JPY', symbol: 'JP¥', name: '日元' },
   { code: 'HKD', symbol: 'HK$', name: '港币' },
+  { code: 'SGD', symbol: 'S$', name: '新加坡元' },
+  { code: 'AUD', symbol: 'A$', name: '澳元' },
+  { code: 'CAD', symbol: 'C$', name: '加元' },
+  { code: 'KRW', symbol: '₩', name: '韩元' },
 ];
 
 export default function NewReimbursementPage() {
@@ -96,64 +102,43 @@ export default function NewReimbursementPage() {
   ]);
   const [itemsAutoFilled, setItemsAutoFilled] = useState(false);
 
-  // 汇率缓存
-  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({
-    USD: 1,
-    CNY: 0.14,  // 默认汇率，会被实时更新
-    EUR: 1.08,
-    GBP: 1.27,
-    JPY: 0.0067,
-    HKD: 0.13,
-  });
+  // 使用统一汇率 Hook（数据来源与后端一致）
+  const {
+    rates: exchangeRates,
+    loading: ratesLoading,
+    getRate,
+    convert,
+    formatAmount,
+  } = useExchangeRate(Currency.CNY);
 
-  // 获取实时汇率
-  const fetchExchangeRate = async (fromCurrency: string): Promise<number> => {
-    if (fromCurrency === 'USD') return 1;
+  // 更新费用明细并计算汇率（使用统一 Hook）
+  const updateLineItemWithExchange = useCallback(
+    (id: string, field: keyof LineItem, value: string) => {
+      const item = lineItems.find((i) => i.id === id);
+      if (!item) return;
 
-    // 如果缓存中有，直接返回
-    if (exchangeRates[fromCurrency]) {
-      return exchangeRates[fromCurrency];
-    }
+      const updatedItem = { ...item, [field]: value };
 
-    try {
-      // 使用免费汇率 API
-      const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${fromCurrency}`);
-      if (response.ok) {
-        const data = await response.json();
-        const rate = data.rates?.USD || exchangeRates[fromCurrency] || 1;
-        setExchangeRates(prev => ({ ...prev, [fromCurrency]: rate }));
-        return rate;
+      // 如果金额或币种变化，重新计算本位币金额
+      if (field === 'amount' || field === 'currency') {
+        const amount = parseFloat(field === 'amount' ? value : item.amount) || 0;
+        const currency = (field === 'currency' ? value : item.currency) as CurrencyType;
+
+        if (amount > 0 && currency) {
+          // 使用统一 Hook 获取汇率（到 CNY 的汇率）
+          const rate = exchangeRates[currency]?.rate || 1;
+          updatedItem.exchangeRate = rate;
+          // amountInBaseCurrency: 转换到本位币 CNY
+          updatedItem.amountInUSD = convert(amount, currency, Currency.CNY);
+        }
       }
-    } catch (error) {
-      console.error('Failed to fetch exchange rate:', error);
-    }
 
-    return exchangeRates[fromCurrency] || 1;
-  };
-
-  // 更新费用明细并计算汇率
-  const updateLineItemWithExchange = async (id: string, field: keyof LineItem, value: string) => {
-    const item = lineItems.find(i => i.id === id);
-    if (!item) return;
-
-    const updatedItem = { ...item, [field]: value };
-
-    // 如果金额或币种变化，重新计算美元金额
-    if (field === 'amount' || field === 'currency') {
-      const amount = parseFloat(field === 'amount' ? value : item.amount) || 0;
-      const currency = field === 'currency' ? value : item.currency;
-
-      if (amount > 0 && currency) {
-        const rate = await fetchExchangeRate(currency);
-        updatedItem.exchangeRate = rate;
-        updatedItem.amountInUSD = parseFloat((amount * rate).toFixed(2));
-      }
-    }
-
-    setLineItems(prevItems =>
-      prevItems.map(i => i.id === id ? updatedItem : i)
-    );
-  };
+      setLineItems((prevItems) =>
+        prevItems.map((i) => (i.id === id ? updatedItem : i))
+      );
+    },
+    [lineItems, exchangeRates, convert]
+  );
 
   // 从 sessionStorage 读取 OCR 数据并预填表单
   useEffect(() => {
@@ -288,7 +273,7 @@ export default function NewReimbursementPage() {
 
       const currency = ocrData.currency || 'CNY';
       const amount = ocrData.amount ? parseFloat(ocrData.amount) : 0;
-      const rate = await fetchExchangeRate(currency);
+      const rate = getRate(currency as CurrencyType, Currency.CNY);
 
       newItems.push({
         id: Date.now().toString() + index + Math.random().toString(36).substr(2, 9),
