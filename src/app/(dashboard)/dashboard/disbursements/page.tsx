@@ -818,30 +818,77 @@ export default function DisbursementsPage() {
                             const liveStatus = payoutStatuses[item.id];
                             const statusDesc = liveStatus?.statusDescription || '等待 Fluxa 钱包审批';
                             const approvalUrl = liveStatus?.approvalUrl || payoutInfo?.approvalUrl;
+                            const isFailed = liveStatus?.status === 'failed' || liveStatus?.status === 'expired';
+                            const usdAmt = item.totalAmountInBaseCurrency || item.totalAmount * 0.14;
+
                             return (
                               <div className="pt-2 border-t space-y-2">
-                                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                                  <p className="text-sm font-medium text-amber-800 mb-1">
-                                    {statusDesc}
-                                  </p>
-                                  <p className="text-xs text-amber-600">
-                                    金额: ${(item.totalAmountInBaseCurrency || item.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC
-                                  </p>
-                                  {liveStatus?.txHash && (
-                                    <p className="text-xs text-gray-500 mt-1 font-mono">
-                                      TxHash: {liveStatus.txHash.slice(0, 10)}...{liveStatus.txHash.slice(-8)}
+                                {isFailed ? (
+                                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                                    <p className="text-sm font-medium text-red-800 mb-1">
+                                      打款失败
                                     </p>
+                                    <p className="text-xs text-red-600">
+                                      金额: ${usdAmt.toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC
+                                    </p>
+                                    {liveStatus?.errorMessage && (
+                                      <p className="text-xs text-red-600 mt-1">
+                                        原因: {liveStatus.errorMessage}
+                                      </p>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                    <p className="text-sm font-medium text-amber-800 mb-1">
+                                      {statusDesc}
+                                    </p>
+                                    <p className="text-xs text-amber-600">
+                                      金额: ${usdAmt.toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC
+                                    </p>
+                                    {liveStatus?.txHash && (
+                                      <p className="text-xs text-gray-500 mt-1 font-mono">
+                                        TxHash: {liveStatus.txHash.slice(0, 10)}...{liveStatus.txHash.slice(-8)}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* 操作按钮 */}
+                                <div className="flex gap-2">
+                                  {approvalUrl && !isFailed && (
+                                    <a
+                                      href={approvalUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex-1 text-center py-2 px-4 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                                    >
+                                      前往 Fluxa 钱包审批
+                                    </a>
                                   )}
-                                </div>
-                                {approvalUrl && (
-                                  <a
-                                    href={approvalUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="block w-full text-center py-2 px-4 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+
+                                  {/* 退回按钮 - 打款失败或等待审批时都可以退回 */}
+                                  <Button
+                                    variant="outline"
+                                    onClick={() => rejectPayment(item.id)}
+                                    disabled={processing === item.id}
+                                    className={`${isFailed ? 'flex-1' : ''} text-red-600 border-red-200 hover:bg-red-50`}
                                   >
-                                    前往 Fluxa 钱包审批
-                                  </a>
+                                    <span className="mr-1">↩</span> 退回给员工
+                                  </Button>
+                                </div>
+
+                                {isFailed && (
+                                  <Button
+                                    onClick={() => processPayment(item.id)}
+                                    disabled={processing === item.id}
+                                    className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white"
+                                  >
+                                    {processing === item.id ? '处理中...' : (
+                                      <>
+                                        <span className="mr-1">🔄</span> 重新发起打款
+                                      </>
+                                    )}
+                                  </Button>
                                 )}
                               </div>
                             );
