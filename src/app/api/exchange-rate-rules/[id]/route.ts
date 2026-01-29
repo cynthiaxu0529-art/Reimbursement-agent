@@ -13,7 +13,8 @@ import { eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 
 // 允许管理汇率规则的角色
-const ALLOWED_ROLES = ['admin', 'super_admin', 'finance'];
+// 注意：admin 不包含财务权限，只有 finance 和 super_admin 可以管理汇率
+const ALLOWED_ROLES = ['super_admin', 'finance'];
 
 // 检查用户是否有权限管理汇率规则
 async function checkPermission(session: { user?: { id?: string } } | null) {

@@ -5,7 +5,14 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
-type UserRole = 'employee' | 'approver' | 'admin';
+// 数据库角色到前端角色的映射
+const DB_TO_FRONTEND_ROLE: Record<string, string> = {
+  employee: 'employee',
+  manager: 'approver',
+  finance: 'finance',
+  admin: 'admin',
+  super_admin: 'super_admin',
+};
 
 interface PolicyRule {
   id: string;
@@ -70,7 +77,8 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [userRole, setUserRole] = useState<UserRole>('employee');
+  const [userRoles, setUserRoles] = useState<string[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(true);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isEditingCompany, setIsEditingCompany] = useState(false);
 
@@ -96,16 +104,33 @@ export default function SettingsPage() {
   const [policiesLoading, setPoliciesLoading] = useState(false);
   const [expandedPolicyId, setExpandedPolicyId] = useState<string | null>(null);
 
-  // 从 localStorage 读取角色
+  // 从 API 获取用户角色
   useEffect(() => {
-    const savedRole = localStorage.getItem('userRole') as UserRole;
-    if (savedRole && (savedRole === 'employee' || savedRole === 'approver' || savedRole === 'admin')) {
-      setUserRole(savedRole);
-    }
+    const fetchRoles = async () => {
+      try {
+        const response = await fetch('/api/settings/role');
+        const result = await response.json();
+        if (result.success && result.roles) {
+          // 转换数据库角色到前端角色
+          const frontendRoles = result.roles.map((r: string) => DB_TO_FRONTEND_ROLE[r] || r);
+          const uniqueRoles = [...new Set(frontendRoles)] as string[];
+          setUserRoles(uniqueRoles);
+        }
+      } catch (error) {
+        console.error('Failed to fetch roles:', error);
+        setUserRoles(['employee']);
+      } finally {
+        setRolesLoading(false);
+      }
+    };
+    fetchRoles();
   }, []);
 
+  // 检查是否有管理员权限（admin 或 super_admin 都可以管理公司设置）
+  const isAdmin = userRoles.includes('admin') || userRoles.includes('super_admin');
+
   // 根据角色过滤可见的 tabs
-  const tabs = allTabs.filter(tab => !tab.adminOnly || userRole === 'admin');
+  const tabs = allTabs.filter(tab => !tab.adminOnly || isAdmin);
 
   // 获取用户资料和公司设置
   useEffect(() => {
@@ -151,10 +176,10 @@ export default function SettingsPage() {
 
   // 获取政策列表
   useEffect(() => {
-    if (activeTab === 'policies' && userRole === 'admin') {
+    if (activeTab === 'policies' && isAdmin) {
       fetchPolicies();
     }
-  }, [activeTab, userRole]);
+  }, [activeTab, isAdmin]);
 
   const fetchPolicies = async () => {
     setPoliciesLoading(true);
@@ -256,7 +281,7 @@ export default function SettingsPage() {
     }
   };
 
-  if (loading) {
+  if (loading || rolesLoading) {
     return (
       <div className="p-8 text-center text-gray-500">加载中...</div>
     );

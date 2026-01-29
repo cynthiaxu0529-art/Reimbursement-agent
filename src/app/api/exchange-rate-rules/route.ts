@@ -83,10 +83,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '用户不存在' }, { status: 404 });
     }
 
-    // 只有 admin、super_admin、finance 角色可以管理汇率规则
-    const allowedRoles = ['admin', 'super_admin', 'finance'];
+    // 只有 super_admin 和 finance 角色可以管理汇率规则
+    // 注意：admin 不包含财务权限
+    const allowedRoles = ['super_admin', 'finance'];
     if (!allowedRoles.includes(user.role)) {
-      return NextResponse.json({ error: '无权限管理汇率规则' }, { status: 403 });
+      return NextResponse.json({ error: '无权限管理汇率规则，需要财务或超级管理员角色' }, { status: 403 });
     }
 
     const body = await request.json();
