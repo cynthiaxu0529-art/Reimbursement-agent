@@ -18,8 +18,8 @@ export const ROLES = {
   EMPLOYEE: 'employee',      // 普通员工 - 提交报销
   MANAGER: 'manager',        // 经理/审批人 - 审批权限
   FINANCE: 'finance',        // 财务 - 支付处理权限
-  ADMIN: 'admin',            // 管理员 - 完整权限
-  SUPER_ADMIN: 'super_admin', // 超级管理员 - 最高权限
+  ADMIN: 'admin',            // 管理员 - 团队管理、公司设置（不含审批和付款）
+  SUPER_ADMIN: 'super_admin', // 超级管理员 - 所有权限
 } as const;
 
 export type Role = typeof ROLES[keyof typeof ROLES];
@@ -55,19 +55,19 @@ export const ROLE_PRIORITY: Record<Role, number> = {
 
 /**
  * 具有审批权限的角色
+ * 注意：admin 不包含审批权限，只有 manager 和 super_admin 可以审批
  */
 export const APPROVER_ROLES: Role[] = [
   ROLES.MANAGER,
-  ROLES.ADMIN,
   ROLES.SUPER_ADMIN,
 ];
 
 /**
  * 具有财务权限的角色
+ * 注意：admin 不包含财务权限，只有 finance 和 super_admin 可以处理付款
  */
 export const FINANCE_ROLES: Role[] = [
   ROLES.FINANCE,
-  ROLES.ADMIN,
   ROLES.SUPER_ADMIN,
 ];
 

@@ -25,12 +25,13 @@ const navItems = {
 };
 
 // 数据库角色到前端角色的映射
+// 注意：super_admin 需要保持独立，因为它有所有权限
 const DB_TO_FRONTEND_ROLE: Record<string, string> = {
   employee: 'employee',
   manager: 'approver',
   finance: 'finance',
   admin: 'admin',
-  super_admin: 'admin',
+  super_admin: 'super_admin',  // 保持独立，不映射到 admin
 };
 
 // 角色显示信息
@@ -39,6 +40,7 @@ const ROLE_INFO: Record<string, { label: string; color: string }> = {
   approver: { label: '审批人', color: '#7c3aed' },
   finance: { label: '财务', color: '#059669' },
   admin: { label: '管理员', color: '#dc2626' },
+  super_admin: { label: '超级管理员', color: '#7c2d12' },
 };
 
 // 根据角色数组构建导航菜单
@@ -63,21 +65,21 @@ function buildNavigation(roles: string[]) {
     addItem(navItems.chat);
   }
 
-  // 审批人功能
-  if (roles.includes('approver') || roles.includes('admin')) {
+  // 审批人功能（approver 或 super_admin，admin 不包含审批权限）
+  if (roles.includes('approver') || roles.includes('super_admin')) {
     addItem(navItems.approvals);
     addItem(navItems.approvalHistory);
   }
 
-  // 财务功能
-  if (roles.includes('finance') || roles.includes('admin')) {
+  // 财务功能（finance 或 super_admin，admin 不包含财务权限）
+  if (roles.includes('finance') || roles.includes('super_admin')) {
     addItem(navItems.disbursements);
     addItem(navItems.disbursementHistory);
     addItem(navItems.exchangeRates);
   }
 
-  // 管理员功能
-  if (roles.includes('admin')) {
+  // 管理员功能（admin 或 super_admin 都可以管理团队）
+  if (roles.includes('admin') || roles.includes('super_admin')) {
     addItem(navItems.team);
   }
 
@@ -121,8 +123,9 @@ export default function DashboardLayout({
   // 根据角色构建导航
   const navigation = buildNavigation(roles);
 
-  // 获取主要角色（用于显示颜色）
-  const primaryRole = roles.includes('admin') ? 'admin'
+  // 获取主要角色（用于显示颜色，按权限优先级排序）
+  const primaryRole = roles.includes('super_admin') ? 'super_admin'
+    : roles.includes('admin') ? 'admin'
     : roles.includes('finance') ? 'finance'
     : roles.includes('approver') ? 'approver'
     : 'employee';
