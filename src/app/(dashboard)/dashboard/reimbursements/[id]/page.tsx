@@ -13,6 +13,7 @@ interface ReimbursementItem {
   date: string;
   location?: string;
   vendor?: string;
+  receiptUrl?: string;
 }
 
 interface PayoutInfo {
@@ -113,6 +114,7 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
   const [payoutInfo, setPayoutInfo] = useState<PayoutInfo | null>(null);
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [userRole, setUserRole] = useState<string>('');
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // 从 API 获取报销详情
   useEffect(() => {
@@ -610,10 +612,46 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
                         </p>
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <p style={{ fontWeight: 600, color: '#111827' }}>
-                        ¥{Number(item.amount).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                      </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      {/* Receipt 缩略图 */}
+                      {item.receiptUrl && (
+                        <button
+                          onClick={() => setPreviewImage(item.receiptUrl || null)}
+                          style={{
+                            width: '48px',
+                            height: '48px',
+                            borderRadius: '0.5rem',
+                            border: '1px solid #e5e7eb',
+                            overflow: 'hidden',
+                            cursor: 'pointer',
+                            padding: 0,
+                            background: '#f9fafb',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                          title="点击查看大图"
+                        >
+                          <img
+                            src={item.receiptUrl}
+                            alt="票据"
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                            }}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                              (e.target as HTMLImageElement).parentElement!.innerHTML = '<span style="font-size: 1.25rem;">📄</span>';
+                            }}
+                          />
+                        </button>
+                      )}
+                      <div style={{ textAlign: 'right' }}>
+                        <p style={{ fontWeight: 600, color: '#111827' }}>
+                          ¥{Number(item.amount).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 ))
@@ -922,6 +960,69 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
                 {payoutLoading ? '处理中...' : '确认发起打款'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Preview Modal */}
+      {previewImage && (
+        <div
+          onClick={() => setPreviewImage(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.8)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+            cursor: 'pointer',
+            padding: '2rem'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'relative',
+              maxWidth: '90vw',
+              maxHeight: '90vh',
+              backgroundColor: 'white',
+              borderRadius: '0.75rem',
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+            }}
+          >
+            <button
+              onClick={() => setPreviewImage(null)}
+              style={{
+                position: 'absolute',
+                top: '0.75rem',
+                right: '0.75rem',
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                border: 'none',
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                color: 'white',
+                fontSize: '1.25rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 10
+              }}
+            >
+              x
+            </button>
+            <img
+              src={previewImage}
+              alt="票据大图"
+              style={{
+                maxWidth: '90vw',
+                maxHeight: '90vh',
+                objectFit: 'contain'
+              }}
+            />
           </div>
         </div>
       )}
