@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { auth, canInviteRoles, INVITE_ROLE_MAPPING, type Role } from '@/lib/auth';
 import { sendEmail, checkEmailConfig } from '@/lib/email';
 import { db } from '@/lib/db';
-import { users } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { users, invitations, tenants } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
+import {
+  generateInviteToken,
+  hashToken,
+  calculateExpiryDate,
+  type InvitationData,
+} from '@/lib/invite';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +30,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: '您还未加入公司，无法邀请成员' }, { status: 400 });
     }
 
+    // 获取公司名称
+    const tenant = await db.query.tenants.findFirst({
+      where: eq(tenants.id, inviter.tenantId),
+    });
+    const tenantName = tenant?.name || '公司';
+
     // Check email configuration
     const emailConfig = checkEmailConfig();
     if (!emailConfig.configured) {
@@ -34,23 +46,86 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { email, name, department, departmentId, roles, setAsDeptManager, companyName } = body;
+    const { email, name, department, departmentId, roles, setAsDeptManager } = body;
+    // 使用数据库中的公司名称
+    const companyName = tenantName;
 
     if (!email) {
       return NextResponse.json({ success: false, error: '邮箱地址必填' }, { status: 400 });
     }
 
-    // Generate invite token with tenant ID, roles, and department info
-    const inviteData = {
+    // 检查用户是否已存在
+    const existingUser = await db.query.users.findFirst({
+      where: eq(users.email, email),
+    });
+    if (existingUser) {
+      return NextResponse.json({ success: false, error: '该邮箱已注册' }, { status: 400 });
+    }
+
+    // 映射角色名称到数据库角色
+    const requestedRoles = (roles || ['employee']).map((r: string) => {
+      return INVITE_ROLE_MAPPING[r] || 'employee';
+    }) as Role[];
+
+    // 验证邀请权限：只能邀请同级或更低级别的角色
+    const inviterRole = inviter.role as Role;
+    if (!canInviteRoles(inviterRole, requestedRoles)) {
+      return NextResponse.json({
+        success: false,
+        error: '您没有权限邀请该角色级别的用户'
+      }, { status: 403 });
+    }
+
+    // 检查是否有未过期的待处理邀请
+    const existingInvitation = await db.query.invitations.findFirst({
+      where: and(
+        eq(invitations.email, email),
+        eq(invitations.tenantId, inviter.tenantId),
+        eq(invitations.status, 'pending')
+      ),
+    });
+
+    if (existingInvitation) {
+      // 检查是否过期
+      if (new Date() < existingInvitation.expiresAt) {
+        return NextResponse.json({
+          success: false,
+          error: '该邮箱已有待处理的邀请，请等待对方接受或邀请过期后重试'
+        }, { status: 400 });
+      }
+      // 如果已过期，更新状态
+      await db.update(invitations)
+        .set({ status: 'expired', updatedAt: new Date() })
+        .where(eq(invitations.id, existingInvitation.id));
+    }
+
+    // 创建邀请记录
+    const expiresAt = calculateExpiryDate(7); // 7天有效期
+    const [invitation] = await db.insert(invitations).values({
+      tenantId: inviter.tenantId,
+      email,
+      name: name || null,
+      roles: requestedRoles,
+      departmentId: departmentId || null,
+      setAsDeptManager: setAsDeptManager || false,
+      tokenHash: '', // 临时占位，稍后更新
+      expiresAt,
+      createdBy: session.user.id,
+    }).returning();
+
+    // 生成安全的邀请Token
+    const tokenData: InvitationData = {
+      invitationId: invitation.id,
       email,
       tenantId: inviter.tenantId,
-      roles: roles || ['employee'],
-      department: department || '',
-      departmentId: departmentId || '',
-      setAsDeptManager: setAsDeptManager || false,
       timestamp: Date.now(),
     };
-    const inviteToken = Buffer.from(JSON.stringify(inviteData)).toString('base64');
+    const inviteToken = generateInviteToken(tokenData);
+
+    // 更新token哈希
+    await db.update(invitations)
+      .set({ tokenHash: hashToken(inviteToken) })
+      .where(eq(invitations.id, invitation.id));
 
     // Build invite URL
     const baseUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
@@ -180,9 +255,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: {
+        invitationId: invitation.id,
         messageId: result.messageId,
         email,
-        inviteToken,
+        expiresAt: expiresAt.toISOString(),
         provider: emailConfig.provider,
       },
     });

@@ -1,24 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db';
-import { users, tenants, departments } from '@/lib/db/schema';
+import { users, tenants, departments, invitations } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import {
+  verifyInviteToken,
+  hashToken,
+  isInvitationExpired,
+  parseLegacyToken,
+  detectTokenVersion,
+} from '@/lib/invite';
+import { getHighestRole, INVITE_ROLE_MAPPING, type Role } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
-
-// 解析邀请 token
-function parseInviteToken(token: string): { email: string; tenantId: string; roles: string[]; department: string; departmentId?: string; setAsDeptManager?: boolean } | null {
-  try {
-    const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    const data = JSON.parse(decoded);
-    if (data.tenantId && data.email) {
-      return data;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -50,71 +44,143 @@ export async function POST(request: NextRequest) {
 
     // 处理邀请 token
     let tenantId: string | null = null;
-    type UserRole = 'employee' | 'manager' | 'finance' | 'admin' | 'super_admin';
-    let userRole: UserRole = 'employee';
+    let userRole: Role = 'employee';
     let departmentName: string | null = null;
     let departmentId: string | null = null;
     let setAsDeptManager = false;
-
-    // 映射邀请角色到数据库角色
-    const roleMapping: Record<string, UserRole> = {
-      employee: 'employee',
-      approver: 'manager',  // 审批人 -> manager
-      manager: 'manager',
-      finance: 'finance',
-      admin: 'admin',
-      super_admin: 'super_admin',
-    };
-
-    // 角色优先级（数字越大权限越高）
-    const rolePriority: Record<UserRole, number> = {
-      employee: 1,
-      manager: 2,
-      finance: 3,
-      admin: 4,
-      super_admin: 5,
-    };
+    let invitationRecord: typeof invitations.$inferSelect | null = null;
 
     if (inviteToken) {
-      // 通过邀请链接注册
-      const inviteData = parseInviteToken(inviteToken);
-      if (inviteData) {
+      // 检测token版本
+      const tokenVersion = detectTokenVersion(inviteToken);
+
+      if (tokenVersion === 'new') {
+        // ===== 新版安全Token处理 =====
+        const tokenData = verifyInviteToken(inviteToken);
+        if (!tokenData) {
+          return NextResponse.json(
+            { error: '邀请链接无效或已被篡改' },
+            { status: 400 }
+          );
+        }
+
         // 验证邮箱匹配
-        if (inviteData.email.toLowerCase() !== email.toLowerCase()) {
+        if (tokenData.email.toLowerCase() !== email.toLowerCase()) {
           return NextResponse.json(
             { error: '邮箱与邀请不匹配' },
             { status: 400 }
           );
         }
-        tenantId = inviteData.tenantId;
 
-        // 映射邀请角色到数据库角色，选择权限最高的
-        const inviteRoles = inviteData.roles || ['employee'];
-        const mappedRoles = [...new Set(inviteRoles.map(r => roleMapping[r] || 'employee'))] as UserRole[];
+        // 通过token哈希查找邀请记录
+        const tokenHashValue = hashToken(inviteToken);
+        const foundInvitation = await db.query.invitations.findFirst({
+          where: and(
+            eq(invitations.id, tokenData.invitationId),
+            eq(invitations.tokenHash, tokenHashValue)
+          ),
+        });
+        invitationRecord = foundInvitation || null;
 
-        // 选择最高权限的角色
-        userRole = mappedRoles.reduce((highest, current) => {
-          return (rolePriority[current] || 0) > (rolePriority[highest] || 0) ? current : highest;
-        }, 'employee' as UserRole);
+        if (!invitationRecord) {
+          return NextResponse.json(
+            { error: '邀请记录不存在' },
+            { status: 400 }
+          );
+        }
 
-        setAsDeptManager = inviteData.setAsDeptManager || false;
+        // 验证邀请状态
+        if (invitationRecord.status !== 'pending') {
+          const statusMessages: Record<string, string> = {
+            accepted: '该邀请已被使用',
+            expired: '该邀请已过期',
+            revoked: '该邀请已被撤销',
+          };
+          return NextResponse.json(
+            { error: statusMessages[invitationRecord.status] || '邀请无效' },
+            { status: 400 }
+          );
+        }
 
-        // 验证并设置部门信息 - 必须通过 departmentId 验证才能设置部门
-        if (inviteData.departmentId) {
+        // 验证过期时间
+        if (isInvitationExpired(invitationRecord.expiresAt)) {
+          // 更新状态为过期
+          await db.update(invitations)
+            .set({ status: 'expired', updatedAt: new Date() })
+            .where(eq(invitations.id, invitationRecord.id));
+
+          return NextResponse.json(
+            { error: '邀请已过期，请联系管理员重新发送' },
+            { status: 400 }
+          );
+        }
+
+        // 从数据库记录获取邀请信息（而非token，更安全）
+        tenantId = invitationRecord.tenantId;
+        const inviteRoles = (invitationRecord.roles as string[]) || ['employee'];
+        const mappedRoles = inviteRoles.map(r => INVITE_ROLE_MAPPING[r] || 'employee') as Role[];
+        userRole = getHighestRole(mappedRoles);
+        setAsDeptManager = invitationRecord.setAsDeptManager || false;
+
+        // 验证并设置部门信息
+        if (invitationRecord.departmentId) {
           const dept = await db.query.departments.findFirst({
             where: and(
-              eq(departments.id, inviteData.departmentId),
-              eq(departments.tenantId, inviteData.tenantId)
+              eq(departments.id, invitationRecord.departmentId),
+              eq(departments.tenantId, invitationRecord.tenantId)
             ),
           });
           if (dept) {
             departmentId = dept.id;
-            departmentName = dept.name; // 使用数据库中的实际名称
-          } else {
-            // departmentId 无效（部门可能已被删除），不设置部门
-            console.warn(`Invalid departmentId ${inviteData.departmentId} in invite token for ${email}`);
+            departmentName = dept.name;
           }
         }
+
+      } else if (tokenVersion === 'legacy') {
+        // ===== 旧版Token兼容处理（过渡期） =====
+        console.warn(`Legacy invite token used for ${email}, consider migrating to new token format`);
+
+        const legacyData = parseLegacyToken(inviteToken);
+        if (!legacyData) {
+          return NextResponse.json(
+            { error: '邀请链接无效' },
+            { status: 400 }
+          );
+        }
+
+        // 验证邮箱匹配
+        if (legacyData.email.toLowerCase() !== email.toLowerCase()) {
+          return NextResponse.json(
+            { error: '邮箱与邀请不匹配' },
+            { status: 400 }
+          );
+        }
+
+        tenantId = legacyData.tenantId;
+        const inviteRoles = legacyData.roles || ['employee'];
+        const mappedRoles = inviteRoles.map(r => INVITE_ROLE_MAPPING[r] || 'employee') as Role[];
+        userRole = getHighestRole(mappedRoles);
+        setAsDeptManager = legacyData.setAsDeptManager || false;
+
+        // 验证并设置部门信息
+        if (legacyData.departmentId) {
+          const dept = await db.query.departments.findFirst({
+            where: and(
+              eq(departments.id, legacyData.departmentId),
+              eq(departments.tenantId, legacyData.tenantId)
+            ),
+          });
+          if (dept) {
+            departmentId = dept.id;
+            departmentName = dept.name;
+          }
+        }
+
+      } else {
+        return NextResponse.json(
+          { error: '邀请链接无效' },
+          { status: 400 }
+        );
       }
     } else if (companyName) {
       // 创建新公司
@@ -133,7 +199,7 @@ export async function POST(request: NextRequest) {
         .returning();
 
       tenantId = tenant.id;
-      userRole = 'admin' as UserRole; // 创建公司的用户默认为管理员
+      userRole = 'admin' as Role; // 创建公司的用户默认为管理员
     }
 
     // 创建用户
@@ -163,6 +229,22 @@ export async function POST(request: NextRequest) {
           .where(eq(departments.id, departmentId));
       } catch (e) {
         console.error('Failed to set department manager:', e);
+      }
+    }
+
+    // 标记邀请为已接受（仅新版token）
+    if (invitationRecord) {
+      try {
+        await db.update(invitations)
+          .set({
+            status: 'accepted',
+            acceptedAt: new Date(),
+            acceptedByUserId: user.id,
+            updatedAt: new Date(),
+          })
+          .where(eq(invitations.id, invitationRecord.id));
+      } catch (e) {
+        console.error('Failed to mark invitation as accepted:', e);
       }
     }
 

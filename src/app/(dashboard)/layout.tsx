@@ -167,7 +167,7 @@ export default function DashboardLayout({
           <span style={{ fontWeight: 600, fontSize: '1rem', color: '#111827' }}>报销助手</span>
         </div>
 
-        {/* Role Display (多角色显示) */}
+        {/* Role Display (多角色显示，不可切换) */}
         <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
           <div
             style={{
