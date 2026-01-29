@@ -440,6 +440,7 @@ export async function PATCH(
       pending: ['approved', 'rejected', 'under_review'],
       under_review: ['approved', 'rejected'],
       approved: ['rejected', 'processing'],  // 财务可以拒绝已批准的报销单
+      processing: ['rejected', 'approved'],  // 打款失败后可以退回或重试（恢复为 approved）
       draft: ['pending'],
     };
 
