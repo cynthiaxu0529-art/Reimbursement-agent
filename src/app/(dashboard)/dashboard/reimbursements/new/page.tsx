@@ -273,7 +273,7 @@ export default function NewReimbursementPage() {
 
       const currency = ocrData.currency || 'CNY';
       const amount = ocrData.amount ? parseFloat(ocrData.amount) : 0;
-      const rate = await fetchExchangeRate(currency);
+      const rate = getRate(currency as CurrencyType, Currency.CNY);
 
       newItems.push({
         id: Date.now().toString() + index + Math.random().toString(36).substr(2, 9),
