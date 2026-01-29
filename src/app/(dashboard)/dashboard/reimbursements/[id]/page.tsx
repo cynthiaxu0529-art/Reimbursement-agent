@@ -46,6 +46,14 @@ interface Reimbursement {
     name: string;
     email: string;
   };
+  rejectedAt?: string;
+  rejectedBy?: string;
+  rejectReason?: string;
+  rejector?: {
+    name: string;
+    email: string;
+    role?: string;
+  };
   timeline?: Array<{
     action: string;
     user: string;
@@ -115,6 +123,9 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [userRole, setUserRole] = useState<string>('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string>('');
 
   // 从 API 获取报销详情
   useEffect(() => {
@@ -146,21 +157,77 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
       }
     };
 
-    const fetchUserRole = async () => {
+    const fetchUserProfile = async () => {
       try {
         const response = await fetch('/api/settings/profile');
         const result = await response.json();
         if (result.success && result.data) {
           setUserRole(result.data.role || 'employee');
+          setCurrentUserId(result.data.id || '');
         }
       } catch (error) {
-        console.error('Failed to fetch user role:', error);
+        console.error('Failed to fetch user profile:', error);
       }
     };
 
     fetchReimbursement();
-    fetchUserRole();
+    fetchUserProfile();
   }, [id]);
+
+  // 判断是否是报销单所有者
+  useEffect(() => {
+    if (reimbursement && currentUserId) {
+      // 检查报销单的 userId 是否与当前用户 ID 匹配
+      const reimbursementUserId = (reimbursement as any).userId;
+      setIsOwner(reimbursementUserId === currentUserId);
+    }
+  }, [reimbursement, currentUserId]);
+
+  // 重新编辑（将状态改为草稿）
+  const handleReEdit = async () => {
+    setProcessing(true);
+    try {
+      const response = await fetch(`/api/reimbursements/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'draft' }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        // 跳转到编辑页面
+        router.push(`/dashboard/reimbursements/${id}/edit`);
+      } else {
+        alert(result.error || '操作失败');
+      }
+    } catch (error) {
+      console.error('Re-edit error:', error);
+      alert('操作失败');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // 删除报销单
+  const handleDelete = async () => {
+    setProcessing(true);
+    try {
+      const response = await fetch(`/api/reimbursements/${id}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      if (result.success) {
+        router.push('/dashboard/reimbursements');
+      } else {
+        alert(result.error || '删除失败');
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      alert('删除失败');
+    } finally {
+      setProcessing(false);
+      setShowDeleteModal(false);
+    }
+  };
 
   const handleApprove = async () => {
     setProcessing(true);
@@ -304,8 +371,12 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
   const status = statusColors[reimbursement.status] || statusColors.draft;
   const isPending = reimbursement.status === 'pending' || reimbursement.status === 'under_review';
   const isApproved = reimbursement.status === 'approved';
+  const isRejected = reimbursement.status === 'rejected';
+  const isDraft = reimbursement.status === 'draft';
   const isProcessing = reimbursement.status === 'processing';
   const canInitiatePayout = isApproved && ['finance', 'admin', 'super_admin'].includes(userRole);
+  const canEdit = isOwner && (isRejected || isDraft);
+  const canDelete = isOwner && (isRejected || isDraft);
 
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto' }}>
@@ -351,6 +422,46 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
         </div>
 
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {/* 被驳回或草稿状态：显示编辑和删除按钮 */}
+          {canEdit && (
+            <button
+              onClick={handleReEdit}
+              disabled={processing}
+              style={{
+                padding: '0.5rem 1rem',
+                background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '0.5rem',
+                fontSize: '0.875rem',
+                fontWeight: 500,
+                cursor: processing ? 'not-allowed' : 'pointer',
+                opacity: processing ? 0.7 : 1
+              }}
+            >
+              {isRejected ? '修改并重新提交' : '编辑'}
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={() => setShowDeleteModal(true)}
+              disabled={processing}
+              style={{
+                padding: '0.5rem 1rem',
+                backgroundColor: 'white',
+                color: '#dc2626',
+                border: '1px solid #dc2626',
+                borderRadius: '0.5rem',
+                fontSize: '0.875rem',
+                fontWeight: 500,
+                cursor: processing ? 'not-allowed' : 'pointer',
+                opacity: processing ? 0.7 : 1
+              }}
+            >
+              删除
+            </button>
+          )}
+          {/* 待审批状态：显示审批按钮 */}
           {isPending && (
             <>
               <button
@@ -442,6 +553,57 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
               </div>
             </div>
           </div>
+
+          {/* Rejection Info Card - 只在被驳回状态显示 */}
+          {isRejected && (
+            <div style={{
+              backgroundColor: '#fef2f2',
+              borderRadius: '0.75rem',
+              border: '1px solid #fecaca',
+              padding: '1.25rem',
+              marginBottom: '1.5rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  backgroundColor: '#fee2e2',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '1.25rem',
+                  flexShrink: 0
+                }}>
+                  ❌
+                </div>
+                <div style={{ flex: 1 }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#dc2626', marginBottom: '0.5rem' }}>
+                    报销申请被驳回
+                  </h3>
+                  {reimbursement.rejectReason && (
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <p style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>驳回原因：</p>
+                      <p style={{ fontSize: '0.875rem', color: '#111827', backgroundColor: 'white', padding: '0.75rem', borderRadius: '0.5rem' }}>
+                        {reimbursement.rejectReason}
+                      </p>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', fontSize: '0.75rem', color: '#6b7280' }}>
+                    {reimbursement.rejectedAt && (
+                      <span>驳回时间：{new Date(reimbursement.rejectedAt).toLocaleString('zh-CN')}</span>
+                    )}
+                    {reimbursement.rejector?.name && (
+                      <span>驳回人：{reimbursement.rejector.name}</span>
+                    )}
+                  </div>
+                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.75rem' }}>
+                    您可以修改后重新提交，或者删除此报销申请。
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Payout Status Card - 只在处理中或有 payout 信息时显示 */}
           {(isProcessing || payoutInfo) && (
@@ -877,6 +1039,64 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
                 }}
               >
                 {processing ? '处理中...' : '确认拒绝'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 50
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '0.75rem',
+            padding: '1.5rem',
+            width: '100%',
+            maxWidth: '400px'
+          }}>
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.5rem', color: '#dc2626' }}>
+              确认删除
+            </h3>
+            <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>
+              确定要删除这笔报销申请吗？此操作无法撤销。
+            </p>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                disabled={processing}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: 'white',
+                  color: '#6b7280',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '0.5rem',
+                  cursor: processing ? 'not-allowed' : 'pointer'
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={processing}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: processing ? '#9ca3af' : '#dc2626',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '0.5rem',
+                  cursor: processing ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {processing ? '删除中...' : '确认删除'}
               </button>
             </div>
           </div>
