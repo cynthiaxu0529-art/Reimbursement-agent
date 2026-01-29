@@ -59,6 +59,13 @@ export const approvalStepStatusEnum = pgEnum('approval_step_status', [
   'skipped',      // 跳过（如直属上级与部门审批人是同一人）
 ]);
 
+export const invitationStatusEnum = pgEnum('invitation_status', [
+  'pending',      // 待接受
+  'accepted',     // 已接受
+  'expired',      // 已过期
+  'revoked',      // 已撤销
+]);
+
 // ============================================================================
 // Tables
 // ============================================================================
@@ -162,6 +169,45 @@ export const verificationTokens = pgTable('verification_tokens', {
   identifier: text('identifier').notNull(),
   token: text('token').notNull().unique(),
   expires: timestamp('expires', { mode: 'date' }).notNull(),
+});
+
+/**
+ * 邀请表
+ * 用于安全的邀请注册流程
+ */
+export const invitations = pgTable('invitations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  name: text('name'),                               // 被邀请人姓名（可选）
+  roles: jsonb('roles').notNull().default(['employee']), // 邀请角色数组
+  departmentId: uuid('department_id')
+    .references(() => departments.id, { onDelete: 'set null' }),
+  setAsDeptManager: boolean('set_as_dept_manager').notNull().default(false),
+
+  // Token安全
+  tokenHash: text('token_hash').notNull().unique(), // 存储token的SHA-256哈希值
+  expiresAt: timestamp('expires_at').notNull(),     // 过期时间
+
+  // 状态跟踪
+  status: invitationStatusEnum('status').notNull().default('pending'),
+  acceptedAt: timestamp('accepted_at'),             // 接受时间
+  acceptedByUserId: uuid('accepted_by_user_id')
+    .references(() => users.id, { onDelete: 'set null' }),
+
+  // 审计字段
+  createdBy: uuid('created_by')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  revokedBy: uuid('revoked_by')
+    .references(() => users.id, { onDelete: 'set null' }),
+  revokedAt: timestamp('revoked_at'),
+  revokeReason: text('revoke_reason'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
 /**
@@ -633,5 +679,31 @@ export const approvalRulesRelations = relations(approvalRules, ({ one }) => ({
   tenant: one(tenants, {
     fields: [approvalRules.tenantId],
     references: [tenants.id],
+  }),
+}));
+
+export const invitationsRelations = relations(invitations, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [invitations.tenantId],
+    references: [tenants.id],
+  }),
+  department: one(departments, {
+    fields: [invitations.departmentId],
+    references: [departments.id],
+  }),
+  createdByUser: one(users, {
+    fields: [invitations.createdBy],
+    references: [users.id],
+    relationName: 'createdInvitations',
+  }),
+  acceptedByUser: one(users, {
+    fields: [invitations.acceptedByUserId],
+    references: [users.id],
+    relationName: 'acceptedInvitation',
+  }),
+  revokedByUser: one(users, {
+    fields: [invitations.revokedBy],
+    references: [users.id],
+    relationName: 'revokedInvitations',
   }),
 }));

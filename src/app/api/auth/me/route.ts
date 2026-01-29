@@ -1,14 +1,10 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
+import { auth, getAvailableFrontendRoles, type Role } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
-
-// 定义哪些数据库角色可以使用哪些前端角色
-const APPROVER_ROLES = ['manager', 'admin', 'super_admin'];
-const FINANCE_ROLES = ['finance', 'admin', 'super_admin'];
 
 /**
  * GET /api/auth/me - 获取当前用户信息及可用角色
@@ -28,20 +24,10 @@ export async function GET() {
       return NextResponse.json({ error: '用户不存在' }, { status: 404 });
     }
 
-    // 使用单角色（多角色功能需要先运行数据库迁移）
-    const userRole = user.role;
+    const userRole = user.role as Role;
 
-    // 计算用户可以使用的前端角色
-    const availableRoles = ['employee']; // 所有人都可以是员工
-    if (APPROVER_ROLES.includes(userRole)) {
-      availableRoles.push('approver');
-    }
-    if (FINANCE_ROLES.includes(userRole)) {
-      availableRoles.push('finance');
-    }
-    if (userRole === 'admin' || userRole === 'super_admin') {
-      availableRoles.push('admin');
-    }
+    // 使用统一的权限函数计算可用角色
+    const availableRoles = getAvailableFrontendRoles(userRole);
 
     return NextResponse.json({
       success: true,
