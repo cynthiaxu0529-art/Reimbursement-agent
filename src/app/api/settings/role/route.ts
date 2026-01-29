@@ -18,7 +18,7 @@ export async function POST() {
 
 /**
  * GET /api/settings/role
- * 获取当前数据库角色
+ * 获取当前用户的角色信息（支持多角色）
  */
 export async function GET() {
   try {
@@ -29,12 +29,21 @@ export async function GET() {
 
     const user = await db.query.users.findFirst({
       where: eq(users.id, session.user.id),
-      columns: { role: true },
+      columns: { role: true, roles: true },
     });
+
+    // 获取 roles 数组，如果不存在则从 role 字段生成
+    const roles: string[] = (user?.roles as string[]) || [user?.role || 'employee'];
+
+    // 确保 roles 数组至少包含 employee
+    if (!roles.includes('employee')) {
+      roles.unshift('employee');
+    }
 
     return NextResponse.json({
       success: true,
-      role: user?.role || 'employee',
+      role: user?.role || 'employee',  // 保留兼容
+      roles: roles,                     // 多角色数组
     });
   } catch (error) {
     console.error('Get role error:', error);

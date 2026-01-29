@@ -7,6 +7,7 @@ import {
   createFluxaPayoutService,
   FluxaPayoutClient,
 } from '@/lib/fluxa-payout';
+import { getUserRoles, canProcessPayment } from '@/lib/auth/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,13 +24,13 @@ export async function POST(request: NextRequest) {
     }
 
     // 权限检查：从数据库查询当前用户角色，只有财务/管理员可发起打款
-    const [currentUser] = await db.select({ role: users.role })
+    const [currentUser] = await db.select({ role: users.role, roles: users.roles })
       .from(users)
       .where(eq(users.id, session.user.id))
       .limit(1);
 
-    const dbRole = currentUser?.role || '';
-    if (!['finance', 'admin', 'super_admin'].includes(dbRole)) {
+    const userRoles = getUserRoles(currentUser || {});
+    if (!canProcessPayment(userRoles)) {
       return NextResponse.json({ error: '没有权限发起付款，需要财务或管理员角色' }, { status: 403 });
     }
 

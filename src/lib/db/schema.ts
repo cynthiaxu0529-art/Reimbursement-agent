@@ -112,8 +112,8 @@ export const users = pgTable('users', {
   avatar: text('avatar'),
   image: text('image'), // NextAuth 使用的头像字段
   passwordHash: text('password_hash'), // 密码登录
-  role: userRoleEnum('role').notNull().default('employee'), // 用户角色
-  // roles: jsonb('roles').default(['employee']),           // 多角色数组 - 需要先运行数据库迁移
+  role: userRoleEnum('role').notNull().default('employee'), // 主要角色（保留兼容）
+  roles: jsonb('roles').$type<string[]>().default(['employee']), // 多角色数组
   department: text('department'),                 // 旧字段，保留兼容
   departmentId: uuid('department_id'),            // 新字段：关联部门表
   managerId: uuid('manager_id'),
