@@ -767,3 +767,44 @@ export const exchangeRateCache = pgTable('exchange_rate_cache', {
   // 创建时间
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+/**
+ * 汇率规则配置表
+ * 用于配置汇率获取策略、数据来源和回退规则
+ */
+export const exchangeRateRules = pgTable('exchange_rate_rules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // 租户（可选，为空表示全局规则）
+  tenantId: uuid('tenant_id').references(() => tenants.id),
+
+  // 规则描述
+  description: text('description').notNull(),
+
+  // 数据来源: 'central_bank' | 'oanda' | 'reuters' | 'open_exchange' | 'manual' | 'api'
+  source: text('source').notNull().default('api'),
+
+  // 覆盖的货币列表（JSON 数组）
+  currencies: jsonb('currencies').notNull().default([]),
+
+  // 固定汇率（当 source = 'manual' 时使用）
+  fixedRates: jsonb('fixed_rates'),
+
+  // 生效日期
+  effectiveFrom: timestamp('effective_from').notNull(),
+  effectiveTo: timestamp('effective_to'),
+
+  // 回退规则描述
+  fallbackRule: text('fallback_rule'),
+
+  // 状态: 'active' | 'draft' | 'archived'
+  status: text('status').notNull().default('draft'),
+
+  // 优先级（数字越小优先级越高）
+  priority: integer('priority').notNull().default(0),
+
+  // 审计字段
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
