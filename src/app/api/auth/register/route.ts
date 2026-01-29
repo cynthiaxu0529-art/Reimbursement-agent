@@ -66,6 +66,16 @@ export async function POST(request: NextRequest) {
       super_admin: 'super_admin',
     };
 
+    // 角色优先级（数字越大权限越高）
+    const rolePriority: Record<string, number> = {
+      employee: 1,
+      approver: 2,
+      manager: 2,
+      finance: 3,
+      admin: 4,
+      super_admin: 5,
+    };
+
     if (inviteToken) {
       // 通过邀请链接注册
       const inviteData = parseInviteToken(inviteToken);
@@ -78,9 +88,14 @@ export async function POST(request: NextRequest) {
           );
         }
         tenantId = inviteData.tenantId;
-        // 使用邀请中的角色（取第一个作为主要角色），并映射到数据库角色
-        const inviteRole = inviteData.roles?.[0] || 'employee';
-        userRole = roleMapping[inviteRole] || 'employee';
+        // 使用邀请中权限最高的角色
+        const roles = inviteData.roles || ['employee'];
+        const highestRole = roles.reduce((highest, current) => {
+          const currentPriority = rolePriority[current] || 0;
+          const highestPriority = rolePriority[highest] || 0;
+          return currentPriority > highestPriority ? current : highest;
+        }, 'employee');
+        userRole = roleMapping[highestRole] || 'employee';
         setAsDeptManager = inviteData.setAsDeptManager || false;
 
         // 验证并设置部门信息 - 必须通过 departmentId 验证才能设置部门
