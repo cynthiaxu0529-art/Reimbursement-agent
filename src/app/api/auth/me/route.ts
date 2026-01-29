@@ -22,37 +22,38 @@ export async function GET() {
 
     const user = await db.query.users.findFirst({
       where: eq(users.id, session.user.id),
-      columns: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        department: true,
-        departmentId: true,
-        tenantId: true,
-      },
     });
 
     if (!user) {
       return NextResponse.json({ error: '用户不存在' }, { status: 404 });
     }
 
+    // 获取用户的所有角色（支持新的 roles 字段，兼容旧的 role 字段）
+    const userRoles: string[] = (user as any).roles || [user.role];
+
     // 计算用户可以使用的前端角色
     const availableRoles = ['employee']; // 所有人都可以是员工
-    if (APPROVER_ROLES.includes(user.role)) {
+    if (userRoles.some(r => APPROVER_ROLES.includes(r))) {
       availableRoles.push('approver');
     }
-    if (FINANCE_ROLES.includes(user.role)) {
+    if (userRoles.some(r => FINANCE_ROLES.includes(r))) {
       availableRoles.push('finance');
     }
-    if (user.role === 'admin' || user.role === 'super_admin') {
+    if (userRoles.includes('admin') || userRoles.includes('super_admin')) {
       availableRoles.push('admin');
     }
 
     return NextResponse.json({
       success: true,
       data: {
-        ...user,
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        roles: userRoles,
+        department: user.department,
+        departmentId: user.departmentId,
+        tenantId: user.tenantId,
         availableRoles,
       },
     });

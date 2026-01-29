@@ -31,22 +31,23 @@ export async function GET(request: NextRequest) {
     // 获取用户实际的数据库角色
     const currentUser = await db.query.users.findFirst({
       where: eq(users.id, session.user.id),
-      columns: { role: true, tenantId: true },
     });
 
     if (!currentUser) {
       return NextResponse.json({ error: '用户不存在' }, { status: 404 });
     }
 
-    const dbRole = currentUser.role;
+    // 支持多角色 - 获取用户所有角色
+    const userRoles: string[] = (currentUser as any).roles || [currentUser.role];
 
     // 构建查询条件
     let conditions: any[] = [];
 
-    // 验证角色权限
+    // 验证角色权限（基于用户所有角色）
     if (role === 'approver' && currentUser.tenantId) {
-      // 检查用户是否有审批权限
-      if (!APPROVER_ROLES.includes(dbRole)) {
+      // 检查用户是否有审批权限（任一角色符合即可）
+      const hasApproverRole = userRoles.some(r => APPROVER_ROLES.includes(r));
+      if (!hasApproverRole) {
         return NextResponse.json({ error: '无审批权限' }, { status: 403 });
       }
       conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
@@ -58,8 +59,9 @@ export async function GET(request: NextRequest) {
         ));
       }
     } else if (role === 'finance' && currentUser.tenantId) {
-      // 检查用户是否有财务权限
-      if (!FINANCE_ROLES.includes(dbRole)) {
+      // 检查用户是否有财务权限（任一角色符合即可）
+      const hasFinanceRole = userRoles.some(r => FINANCE_ROLES.includes(r));
+      if (!hasFinanceRole) {
         return NextResponse.json({ error: '无财务权限' }, { status: 403 });
       }
       conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
@@ -81,8 +83,10 @@ export async function GET(request: NextRequest) {
     }
 
     // 是否需要加载提交人信息
-    const isApproverOrFinance = (role === 'approver' && APPROVER_ROLES.includes(dbRole)) ||
-                                 (role === 'finance' && FINANCE_ROLES.includes(dbRole));
+    const hasApproverRole = userRoles.some(r => APPROVER_ROLES.includes(r));
+    const hasFinanceRole = userRoles.some(r => FINANCE_ROLES.includes(r));
+    const isApproverOrFinance = (role === 'approver' && hasApproverRole) ||
+                                 (role === 'finance' && hasFinanceRole);
 
     // 查询报销列表
     const list = await db.query.reimbursements.findMany({

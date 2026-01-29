@@ -105,6 +105,8 @@ const authConfig = {
 
           if (dbUser) {
             session.user.role = dbUser.role;
+            // 支持多角色 - 如果数据库有 roles 字段则使用，否则降级为单角色数组
+            session.user.roles = (dbUser as any).roles || [dbUser.role];
             session.user.tenantId = dbUser.tenantId ?? undefined;
           }
         } catch (error) {
@@ -128,6 +130,7 @@ declare module 'next-auth' {
       name: string;
       image?: string;
       role?: string;
+      roles?: string[];  // 多角色数组
       tenantId?: string;
     };
   }
