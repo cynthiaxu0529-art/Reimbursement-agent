@@ -346,6 +346,30 @@ export default function NewReimbursementPage() {
     });
   };
 
+  // 上传文件到 Vercel Blob 获取永久URL
+  const uploadToBlob = async (file: File): Promise<string | null> => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+      if (result.success && result.url) {
+        return result.url;
+      } else {
+        console.error('Upload failed:', result.error);
+        return null;
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      return null;
+    }
+  };
+
   // 记录是否已经有识别过的项目
   const [hasRecognizedItems, setHasRecognizedItems] = useState(false);
 
@@ -373,6 +397,7 @@ export default function NewReimbursementPage() {
   const handleFileSelect = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
+    // 本地预览使用临时URL，仅用于显示
     const newFiles: UploadedFile[] = Array.from(files).map(file => ({
       file,
       preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
@@ -386,15 +411,19 @@ export default function NewReimbursementPage() {
     if (imageFiles.length > 0) {
       setIsRecognizing(true);
 
-      // 收集所有 OCR 结果，包含预览 URL
+      // 收集所有 OCR 结果
       const ocrResults: any[] = [];
 
       for (let i = 0; i < imageFiles.length; i++) {
         const imageFile = imageFiles[i];
-        const previewUrl = URL.createObjectURL(imageFile);
 
         try {
-          const base64 = await fileToBase64(imageFile);
+          // 并行执行：上传到 Blob 存储 + OCR 识别
+          const [blobUrl, base64] = await Promise.all([
+            uploadToBlob(imageFile),
+            fileToBase64(imageFile),
+          ]);
+
           const mimeType = imageFile.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
 
           const response = await fetch('/api/ocr', {
@@ -405,15 +434,15 @@ export default function NewReimbursementPage() {
 
           const result = await response.json();
           if (result.success && result.data) {
-            // 将预览 URL 和文件名附加到 OCR 结果
+            // 使用 Blob 永久 URL（如果上传成功）
             ocrResults.push({
               ...result.data,
-              receiptUrl: previewUrl,
+              receiptUrl: blobUrl || '', // 使用永久URL
               receiptFileName: imageFile.name,
             });
           }
         } catch (error) {
-          console.error('OCR error:', error);
+          console.error('OCR/Upload error:', error);
         }
       }
 
