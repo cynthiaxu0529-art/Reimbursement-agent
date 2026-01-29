@@ -32,13 +32,25 @@ export async function GET() {
       columns: { role: true, roles: true },
     });
 
-    // 获取 roles 数组，如果不存在则从 role 字段生成
-    const roles: string[] = (user?.roles as string[]) || [user?.role || 'employee'];
+    // 获取 roles 数组
+    // 优先使用 roles 字段，如果为空/null 则从 role 字段生成
+    let roles: string[] = [];
 
-    // 确保 roles 数组至少包含 employee
+    if (user?.roles && Array.isArray(user.roles) && user.roles.length > 0) {
+      roles = user.roles as string[];
+    } else if (user?.role) {
+      // 从单个 role 字段生成 roles 数组
+      roles = [user.role];
+    } else {
+      roles = ['employee'];
+    }
+
+    // 确保 roles 数组至少包含 employee（所有人都应该能提交报销）
     if (!roles.includes('employee')) {
       roles.unshift('employee');
     }
+
+    console.log('User roles API response:', { userId: session.user.id, role: user?.role, roles });
 
     return NextResponse.json({
       success: true,
