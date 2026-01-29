@@ -92,12 +92,13 @@ const stepTypeLabels: Record<string, string> = {
 };
 
 // 数据库角色到前端角色的映射
+// 注意：super_admin 需要保持独立，因为它有所有权限
 const DB_TO_FRONTEND_ROLE: Record<string, string> = {
   employee: 'employee',
   manager: 'approver',
   finance: 'finance',
   admin: 'admin',
-  super_admin: 'admin',
+  super_admin: 'super_admin',  // 保持独立
 };
 
 export default function TeamPage() {
@@ -186,8 +187,8 @@ export default function TeamPage() {
     fetchRoles();
   }, []);
 
-  // 检查是否有管理员权限
-  const isAdmin = userRoles.includes('admin');
+  // 检查是否有管理员权限（admin 或 super_admin 都可以管理团队）
+  const isAdmin = userRoles.includes('admin') || userRoles.includes('super_admin');
 
   // 加载数据
   useEffect(() => {
