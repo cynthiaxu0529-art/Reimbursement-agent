@@ -18,7 +18,6 @@ const navItems = {
   approvalHistory: { name: '审批历史', href: '/dashboard/approvals/history', icon: '📋' },
   // 财务专属
   disbursements: { name: '付款处理', href: '/dashboard/disbursements', icon: '💳' },
-  disbursementHistory: { name: '付款历史', href: '/dashboard/disbursements/history', icon: '📋' },
   exchangeRates: { name: '汇率设置', href: '/dashboard/settings/exchange-rates', icon: '💱' },
   // 管理员专属
   team: { name: '团队管理', href: '/dashboard/team', icon: '👥' },
@@ -74,7 +73,6 @@ function buildNavigation(roles: string[]) {
   // 财务功能（finance 或 super_admin，admin 不包含财务权限）
   if (roles.includes('finance') || roles.includes('super_admin')) {
     addItem(navItems.disbursements);
-    addItem(navItems.disbursementHistory);
     addItem(navItems.exchangeRates);
   }
 
