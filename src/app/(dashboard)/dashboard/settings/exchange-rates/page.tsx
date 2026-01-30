@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useTenantConfig } from '@/hooks/useTenantConfig';
+import { SUPPORTED_BASE_CURRENCIES, CURRENCY_SYMBOLS, CURRENCY_NAMES } from '@/lib/currency/base-currency';
+import { CurrencyType } from '@/types';
 
 interface ExchangeRateRule {
   id: string;
@@ -55,6 +58,48 @@ export default function ExchangeRatesPage() {
   const [sourceFilter, setSourceFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
+
+  // 本位币配置
+  const {
+    baseCurrency,
+    loading: configLoading,
+    updateBaseCurrency,
+  } = useTenantConfig();
+  const [selectedBaseCurrency, setSelectedBaseCurrency] = useState<CurrencyType | ''>('');
+  const [baseCurrencyUpdating, setBaseCurrencyUpdating] = useState(false);
+
+  // 同步选中的本位币
+  useEffect(() => {
+    if (baseCurrency && !selectedBaseCurrency) {
+      setSelectedBaseCurrency(baseCurrency);
+    }
+  }, [baseCurrency, selectedBaseCurrency]);
+
+  // 更新本位币
+  const handleBaseCurrencyChange = async (currency: CurrencyType) => {
+    if (currency === baseCurrency) return;
+
+    const confirmed = confirm(
+      `确定要将记账本位币从 ${CURRENCY_NAMES[baseCurrency]?.zh || baseCurrency} 更改为 ${CURRENCY_NAMES[currency]?.zh || currency} 吗？\n\n注意：更改后，所有新的报销单将以新本位币计算折算金额。`
+    );
+
+    if (!confirmed) {
+      setSelectedBaseCurrency(baseCurrency);
+      return;
+    }
+
+    setBaseCurrencyUpdating(true);
+    const success = await updateBaseCurrency(currency);
+    setBaseCurrencyUpdating(false);
+
+    if (success) {
+      setSelectedBaseCurrency(currency);
+      alert('本位币已更新');
+    } else {
+      setSelectedBaseCurrency(baseCurrency);
+      alert('更新失败，请重试');
+    }
+  };
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
       id: '1',
@@ -334,6 +379,43 @@ export default function ExchangeRatesPage() {
             </div>
           </Card>
         </div>
+
+        {/* Base Currency Configuration */}
+        <Card className="p-4 mb-6 border-2 border-blue-100 bg-blue-50/30">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center">
+                <span className="text-2xl">{CURRENCY_SYMBOLS[baseCurrency] || '$'}</span>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">记账本位币</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  所有报销金额将折算为此货币。当前：
+                  <span className="font-medium text-blue-600 ml-1">
+                    {CURRENCY_NAMES[baseCurrency]?.zh || baseCurrency} ({baseCurrency})
+                  </span>
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <select
+                value={selectedBaseCurrency}
+                onChange={(e) => handleBaseCurrencyChange(e.target.value as CurrencyType)}
+                disabled={configLoading || baseCurrencyUpdating}
+                className="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[180px]"
+              >
+                {SUPPORTED_BASE_CURRENCIES.map((currency) => (
+                  <option key={currency} value={currency}>
+                    {CURRENCY_SYMBOLS[currency]} {currency} - {CURRENCY_NAMES[currency]?.zh}
+                  </option>
+                ))}
+              </select>
+              {baseCurrencyUpdating && (
+                <span className="text-xs text-blue-600">保存中...</span>
+              )}
+            </div>
+          </div>
+        </Card>
 
         {/* Search & Filters */}
         <Card className="p-4 mb-4">
