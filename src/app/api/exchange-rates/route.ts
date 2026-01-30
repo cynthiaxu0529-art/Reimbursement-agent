@@ -1,11 +1,15 @@
 /**
  * 汇率 API
  * 统一提供汇率数据，确保前后端数据一致
+ * 支持系统默认货币 + 自定义货币（从数据库读取）
  */
 
 import { NextResponse } from 'next/server';
 import { exchangeRateService, CURRENCY_INFO } from '@/lib/currency/exchange-service';
 import { Currency, CurrencyType } from '@/types';
+import { db } from '@/lib/db';
+import { monthlyExchangeRates } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
 
 /**
  * GET /api/exchange-rates
@@ -52,22 +56,17 @@ export async function GET(request: Request) {
 
     // 批量获取所有货币到目标货币的汇率: /api/exchange-rates?target=CNY
     if (target) {
-      if (!isValidCurrency(target)) {
-        return NextResponse.json(
-          { error: 'Invalid target currency code' },
-          { status: 400 }
-        );
-      }
-
+      // target 可以是系统货币或任意 3 字母代码
       const currencies = Object.values(Currency) as CurrencyType[];
       const rates: Record<string, { rate: number; source: string }> = {};
 
+      // 1. 获取系统默认货币的汇率
       await Promise.all(
         currencies.map(async (currency) => {
           try {
             const rateInfo = await exchangeRateService.getExchangeRate(
               currency,
-              target,
+              target as CurrencyType,
               date
             );
             rates[currency] = {
@@ -83,6 +82,61 @@ export async function GET(request: Request) {
           }
         })
       );
+
+      // 2. 获取数据库中的自定义货币汇率
+      try {
+        const now = new Date();
+        const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+        // 查询所有手动添加的汇率
+        const customRates = await db.query.monthlyExchangeRates.findMany({
+          where: and(
+            eq(monthlyExchangeRates.yearMonth, yearMonth),
+            eq(monthlyExchangeRates.source, 'manual')
+          ),
+        });
+
+        // 处理自定义汇率
+        for (const customRate of customRates) {
+          const fromCurrency = customRate.fromCurrency;
+
+          // 如果是系统已支持的货币，跳过（优先使用 API 汇率）
+          if (currencies.includes(fromCurrency as CurrencyType)) {
+            continue;
+          }
+
+          // 如果目标货币是 CNY 且有直接汇率
+          if (target === 'CNY' && customRate.toCurrency === 'CNY') {
+            rates[fromCurrency] = {
+              rate: customRate.rate,
+              source: 'manual',
+            };
+          }
+          // 如果目标货币是 USD 且有直接汇率
+          else if (target === 'USD' && customRate.toCurrency === 'USD') {
+            rates[fromCurrency] = {
+              rate: customRate.rate,
+              source: 'manual',
+            };
+          }
+          // 如果需要通过 CNY 换算
+          else if (customRate.toCurrency === 'CNY' && target !== 'CNY') {
+            // 获取 CNY 到 target 的汇率
+            const cnyToTarget = rates['CNY']?.rate || 1;
+            // 计算 fromCurrency 到 target 的汇率
+            // fromCurrency -> CNY -> target
+            // 例如: 1 THB = 0.21 CNY, 1 CNY = 0.14 USD
+            // 则 1 THB = 0.21 * 0.14 = 0.0294 USD
+            rates[fromCurrency] = {
+              rate: customRate.rate * cnyToTarget,
+              source: 'manual_calculated',
+            };
+          }
+        }
+      } catch (dbError) {
+        console.error('Failed to fetch custom rates from database:', dbError);
+        // 继续返回系统默认汇率
+      }
 
       return NextResponse.json({
         target,
@@ -107,8 +161,15 @@ export async function GET(request: Request) {
 }
 
 /**
- * 验证货币代码是否有效
+ * 验证货币代码是否有效（系统货币）
  */
 function isValidCurrency(code: string): code is CurrencyType {
   return Object.values(Currency).includes(code as CurrencyType);
+}
+
+/**
+ * 验证货币代码格式是否有效（3位大写字母）
+ */
+function isValidCurrencyCode(code: string): boolean {
+  return /^[A-Z]{3}$/.test(code);
 }

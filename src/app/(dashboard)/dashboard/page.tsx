@@ -1,283 +1,597 @@
+'use client';
+
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { Card } from '@/components/ui/card';
+import { UserRole } from '@/types';
+
+interface UserInfo {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  availableRoles: string[];
+}
+
+interface Reimbursement {
+  id: string;
+  title: string;
+  status: string;
+  totalAmount: number;
+  totalAmountInBaseCurrency?: number;
+  baseCurrency?: string;
+  createdAt: string;
+  submitter?: {
+    name: string;
+    email: string;
+    department?: string;
+  };
+}
+
+interface DashboardStats {
+  // 员工统计
+  myTotal: number;
+  myPending: number;
+  myApproved: number;
+  myPaid: number;
+  myRejected: number;
+  myTotalAmount: number;
+  // 审批人统计
+  pendingApproval: number;
+  // 管理员统计
+  teamMembers: number;
+}
 
 export default function DashboardPage() {
-  // 空数据状态 - 实际数据将从API获取
-  const stats = [
-    { label: '待审批', value: '0', icon: '⏳', bgColor: '#fef3c7', color: '#d97706' },
-    { label: '本月报销', value: '¥0', icon: '💰', bgColor: '#dbeafe', color: '#2563eb' },
-    { label: '已完成', value: '0', icon: '✅', bgColor: '#dcfce7', color: '#16a34a' },
-    { label: '团队成员', value: '1', icon: '👥', bgColor: '#f3e8ff', color: '#9333ea' },
-  ];
+  const [user, setUser] = useState<UserInfo | null>(null);
+  const [stats, setStats] = useState<DashboardStats>({
+    myTotal: 0,
+    myPending: 0,
+    myApproved: 0,
+    myPaid: 0,
+    myRejected: 0,
+    myTotalAmount: 0,
+    pendingApproval: 0,
+    teamMembers: 0,
+  });
+  const [recentReimbursements, setRecentReimbursements] = useState<Reimbursement[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<Reimbursement[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // 1. 获取用户信息
+        const userRes = await fetch('/api/auth/me');
+        let userData: UserInfo | null = null;
+        if (userRes.ok) {
+          const userJson = await userRes.json();
+          userData = userJson.data;
+          setUser(userData);
+        }
+
+        // 2. 获取我的报销列表（员工视角）
+        const myReimbursementsRes = await fetch('/api/reimbursements?pageSize=100');
+        if (myReimbursementsRes.ok) {
+          const myData = await myReimbursementsRes.json();
+          const items: Reimbursement[] = myData.data || [];
+
+          // 最近5笔用于展示
+          setRecentReimbursements(items.slice(0, 5));
+
+          // 计算统计数据
+          const myPending = items.filter((r) =>
+            r.status === 'pending' || r.status === 'submitted'
+          ).length;
+          const myApproved = items.filter((r) => r.status === 'approved').length;
+          const myPaid = items.filter((r) => r.status === 'paid').length;
+          const myRejected = items.filter((r) => r.status === 'rejected').length;
+          const myTotalAmount = items.reduce((sum, r) =>
+            sum + (r.totalAmountInBaseCurrency || r.totalAmount || 0), 0
+          );
+
+          setStats(prev => ({
+            ...prev,
+            myTotal: items.length,
+            myPending,
+            myApproved,
+            myPaid,
+            myRejected,
+            myTotalAmount,
+          }));
+        }
+
+        // 3. 如果是审批人，获取待审批列表
+        const userRole = userData?.role;
+        const canApproveRole = userRole === UserRole.MANAGER ||
+                               userRole === UserRole.FINANCE ||
+                               userRole === UserRole.ADMIN ||
+                               userRole === UserRole.SUPER_ADMIN;
+
+        if (canApproveRole) {
+          try {
+            const approvalRes = await fetch('/api/reimbursements?role=approver&status=pending,submitted');
+            if (approvalRes.ok) {
+              const approvalData = await approvalRes.json();
+              const approvalItems: Reimbursement[] = approvalData.data || [];
+              setPendingApprovals(approvalItems.slice(0, 5));
+              setStats(prev => ({
+                ...prev,
+                pendingApproval: approvalItems.length,
+              }));
+            }
+          } catch (e) {
+            console.error('Failed to fetch pending approvals:', e);
+          }
+        }
+
+        // 4. 如果是管理员，获取团队成员数量
+        const isAdminRole = userRole === UserRole.ADMIN || userRole === UserRole.SUPER_ADMIN;
+        if (isAdminRole) {
+          try {
+            const teamRes = await fetch('/api/team/members');
+            if (teamRes.ok) {
+              const teamData = await teamRes.json();
+              setStats(prev => ({
+                ...prev,
+                teamMembers: teamData.data?.length || 0,
+              }));
+            }
+          } catch (e) {
+            console.error('Failed to fetch team members:', e);
+          }
+        }
+
+      } catch (error) {
+        console.error('Failed to fetch dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  const isEmployee = user?.role === UserRole.EMPLOYEE;
+  const isManager = user?.role === UserRole.MANAGER;
+  const isFinance = user?.role === UserRole.FINANCE;
+  const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.SUPER_ADMIN;
+  const canApprove = isManager || isFinance || isAdmin;
+
+  // 根据角色显示不同的欢迎语
+  const getWelcomeMessage = () => {
+    const name = user?.name || '';
+    if (isAdmin) {
+      return {
+        title: `${name}，欢迎回来`,
+        subtitle: '管理团队成员、设置报销政策，掌控报销全流程',
+      };
+    }
+    if (isFinance) {
+      return {
+        title: `${name}，欢迎回来`,
+        subtitle: '审批报销申请、处理打款，确保资金流转顺畅',
+      };
+    }
+    if (isManager) {
+      return {
+        title: `${name}，欢迎回来`,
+        subtitle: '审批团队报销，同时也可以提交自己的报销',
+      };
+    }
+    return {
+      title: `${name}，欢迎回来`,
+      subtitle: '轻松提交报销，实时追踪进度',
+    };
+  };
+
+  const welcome = getWelcomeMessage();
+
+  const formatAmount = (amount: number, currency?: string) => {
+    return new Intl.NumberFormat('zh-CN', {
+      style: 'currency',
+      currency: currency || 'USD',
+      minimumFractionDigits: 2,
+    }).format(amount);
+  };
+
+  const getStatusLabel = (status: string) => {
+    const labels: Record<string, { text: string; color: string; bg: string }> = {
+      draft: { text: '草稿', color: '#6b7280', bg: '#f3f4f6' },
+      pending: { text: '待审批', color: '#d97706', bg: '#fef3c7' },
+      submitted: { text: '待审批', color: '#d97706', bg: '#fef3c7' },
+      approved: { text: '已批准', color: '#16a34a', bg: '#dcfce7' },
+      rejected: { text: '已拒绝', color: '#dc2626', bg: '#fee2e2' },
+      paid: { text: '已打款', color: '#059669', bg: '#d1fae5' },
+    };
+    return labels[status] || { text: status, color: '#6b7280', bg: '#f3f4f6' };
+  };
+
+  const getRoleBadge = (role: string) => {
+    const badges: Record<string, { text: string; color: string }> = {
+      employee: { text: '员工', color: '#6b7280' },
+      manager: { text: '经理', color: '#2563eb' },
+      finance: { text: '财务', color: '#059669' },
+      admin: { text: '管理员', color: '#7c3aed' },
+      super_admin: { text: '超级管理员', color: '#dc2626' },
+    };
+    return badges[role] || { text: role, color: '#6b7280' };
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+          <p className="text-gray-500">加载中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const roleBadge = getRoleBadge(user?.role || 'employee');
 
   return (
-    <div>
-      {/* Welcome Banner */}
-      <div style={{
-        background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
-        borderRadius: '0.75rem',
-        padding: '1.5rem',
-        color: 'white',
-        marginBottom: '1.5rem'
-      }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.5rem' }}>
-          欢迎使用 Fluxa 报销系统
-        </h1>
-        <p style={{ color: 'rgba(255,255,255,0.9)', marginBottom: '1rem' }}>
-          作为管理员，你可以邀请团队成员、设置报销政策，并审批报销申请
-        </p>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <Link
-            href="/dashboard/settings"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              backgroundColor: 'white',
-              color: '#2563eb',
-              padding: '0.5rem 1rem',
-              borderRadius: '0.5rem',
-              textDecoration: 'none',
-              fontWeight: 500,
-              fontSize: '0.875rem'
-            }}
+    <div className="space-y-6">
+      {/* 欢迎横幅 */}
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-6 text-white">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold mb-1">{welcome.title}</h1>
+            <p className="text-blue-100 text-sm">{welcome.subtitle}</p>
+          </div>
+          <span
+            className="px-3 py-1 rounded-full text-xs font-medium bg-white/20"
           >
-            邀请团队成员 →
-          </Link>
-          <Link
-            href="/dashboard/chat"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              backgroundColor: 'rgba(255,255,255,0.2)',
-              color: 'white',
-              padding: '0.5rem 1rem',
-              borderRadius: '0.5rem',
-              textDecoration: 'none',
-              fontWeight: 500,
-              fontSize: '0.875rem'
-            }}
-          >
-            体验 AI 助手
-          </Link>
+            {roleBadge.text}
+          </span>
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-        gap: '1rem',
-        marginBottom: '1.5rem'
-      }}>
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            style={{
-              backgroundColor: 'white',
-              borderRadius: '0.75rem',
-              padding: '1.25rem',
-              border: '1px solid #e5e7eb'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* 审批人：待审批提醒卡片 */}
+      {canApprove && stats.pendingApproval > 0 && (
+        <Card className="p-4 border-2 border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-amber-500 flex items-center justify-center shadow-lg">
+                <span className="text-2xl">📥</span>
+              </div>
               <div>
-                <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.25rem' }}>{stat.label}</p>
-                <p style={{ fontSize: '1.5rem', fontWeight: 700, color: stat.color }}>{stat.value}</p>
-              </div>
-              <div style={{
-                width: '48px',
-                height: '48px',
-                backgroundColor: stat.bgColor,
-                borderRadius: '0.75rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '1.5rem'
-              }}>
-                {stat.icon}
+                <p className="text-sm font-medium text-amber-800">待审批报销单</p>
+                <p className="text-3xl font-bold text-amber-900">{stats.pendingApproval} <span className="text-base font-normal">笔</span></p>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 320px',
-        gap: '1.5rem'
-      }}>
-        {/* Getting Started */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden'
-        }}>
-          <div style={{
-            padding: '1rem 1.25rem',
-            borderBottom: '1px solid #e5e7eb'
-          }}>
-            <h2 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>开始使用</h2>
-          </div>
-          <div style={{ padding: '1.25rem' }}>
-            <div style={{ marginBottom: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                <div style={{
-                  width: '24px',
-                  height: '24px',
-                  backgroundColor: '#dcfce7',
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.75rem',
-                  color: '#16a34a'
-                }}>
-                  ✓
-                </div>
-                <span style={{ color: '#111827', fontWeight: 500 }}>创建公司账号</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                <div style={{
-                  width: '24px',
-                  height: '24px',
-                  backgroundColor: '#fef3c7',
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.75rem',
-                  color: '#d97706'
-                }}>
-                  2
-                </div>
-                <Link href="/dashboard/settings" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>
-                  邀请团队成员 →
-                </Link>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                <div style={{
-                  width: '24px',
-                  height: '24px',
-                  backgroundColor: '#f3f4f6',
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.75rem',
-                  color: '#6b7280'
-                }}>
-                  3
-                </div>
-                <Link href="/dashboard/settings" style={{ color: '#6b7280', textDecoration: 'none' }}>
-                  设置报销政策
-                </Link>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <div style={{
-                  width: '24px',
-                  height: '24px',
-                  backgroundColor: '#f3f4f6',
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.75rem',
-                  color: '#6b7280'
-                }}>
-                  4
-                </div>
-                <span style={{ color: '#6b7280' }}>提交第一笔报销</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden'
-        }}>
-          <div style={{
-            padding: '1rem 1.25rem',
-            borderBottom: '1px solid #e5e7eb'
-          }}>
-            <h2 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>快速操作</h2>
-          </div>
-          <div style={{ padding: '1rem' }}>
-            <Link
-              href="/dashboard/reimbursements/new"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.875rem 1rem',
-                backgroundColor: '#eff6ff',
-                color: '#2563eb',
-                borderRadius: '0.5rem',
-                textDecoration: 'none',
-                marginBottom: '0.5rem',
-                fontWeight: 500
-              }}
-            >
-              <span>📝</span> 新建报销
-            </Link>
-            <Link
-              href="/dashboard/chat"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.875rem 1rem',
-                backgroundColor: '#f3e8ff',
-                color: '#9333ea',
-                borderRadius: '0.5rem',
-                textDecoration: 'none',
-                marginBottom: '0.5rem',
-                fontWeight: 500
-              }}
-            >
-              <span>🤖</span> AI 助手上传票据
-            </Link>
             <Link
               href="/dashboard/approvals"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.875rem 1rem',
-                backgroundColor: '#fef3c7',
-                color: '#d97706',
-                borderRadius: '0.5rem',
-                textDecoration: 'none',
-                marginBottom: '0.5rem',
-                fontWeight: 500
-              }}
+              className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium transition-colors shadow-md"
             >
-              <span>✅</span> 审批报销
-            </Link>
-            <Link
-              href="/dashboard/settings"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.875rem 1rem',
-                backgroundColor: '#dcfce7',
-                color: '#16a34a',
-                borderRadius: '0.5rem',
-                textDecoration: 'none',
-                fontWeight: 500
-              }}
-            >
-              <span>⚙️</span> 系统设置
+              立即处理 →
             </Link>
           </div>
-        </div>
+        </Card>
+      )}
+
+      {/* 统计卡片 */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="p-4 hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-500">我的报销</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.myTotal}</p>
+              <p className="text-xs text-gray-400 mt-1">累计提交</p>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center">
+              <span className="text-2xl">📋</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-4 hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-500">审批中</p>
+              <p className="text-2xl font-bold text-amber-600 mt-1">{stats.myPending}</p>
+              <p className="text-xs text-gray-400 mt-1">等待处理</p>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center">
+              <span className="text-2xl">⏳</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-4 hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-500">已批准</p>
+              <p className="text-2xl font-bold text-green-600 mt-1">{stats.myApproved}</p>
+              <p className="text-xs text-gray-400 mt-1">
+                {stats.myRejected > 0 ? `已拒绝 ${stats.myRejected}` : '待打款'}
+              </p>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center">
+              <span className="text-2xl">✅</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-4 hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-500">累计金额</p>
+              <p className="text-xl font-bold text-indigo-600 mt-1">
+                {formatAmount(stats.myTotalAmount)}
+              </p>
+              <p className="text-xs text-gray-400 mt-1">已打款 {stats.myPaid} 笔</p>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center">
+              <span className="text-2xl">💰</span>
+            </div>
+          </div>
+        </Card>
       </div>
+
+      {/* 管理员额外统计 */}
+      {isAdmin && (
+        <div className="grid grid-cols-2 gap-4">
+          <Card className="p-4 border-l-4 border-l-purple-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">团队成员</p>
+                <p className="text-2xl font-bold text-purple-600 mt-1">{stats.teamMembers}</p>
+                <p className="text-xs text-gray-400 mt-1">已加入公司</p>
+              </div>
+              <Link
+                href="/dashboard/team"
+                className="px-3 py-1.5 text-sm text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+              >
+                管理 →
+              </Link>
+            </div>
+          </Card>
+          <Card className="p-4 border-l-4 border-l-blue-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">待审批总数</p>
+                <p className="text-2xl font-bold text-blue-600 mt-1">{stats.pendingApproval}</p>
+                <p className="text-xs text-gray-400 mt-1">全公司</p>
+              </div>
+              <Link
+                href="/dashboard/approvals"
+                className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              >
+                查看 →
+              </Link>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* 快捷操作 */}
+        <Card className="lg:col-span-1">
+          <div className="p-4 border-b">
+            <h2 className="font-semibold text-gray-900">快捷操作</h2>
+          </div>
+          <div className="p-4 space-y-2">
+            <Link
+              href="/dashboard/reimbursements/new"
+              className="flex items-center gap-3 p-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 transition-colors"
+            >
+              <span className="text-xl">📝</span>
+              <div>
+                <p className="font-medium">新建报销</p>
+                <p className="text-xs text-blue-500">创建新的报销申请</p>
+              </div>
+            </Link>
+
+            <Link
+              href="/dashboard/chat"
+              className="flex items-center gap-3 p-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 transition-colors"
+            >
+              <span className="text-xl">🤖</span>
+              <div>
+                <p className="font-medium">AI 助手</p>
+                <p className="text-xs text-purple-500">拍照上传票据，自动识别</p>
+              </div>
+            </Link>
+
+            <Link
+              href="/dashboard/reimbursements"
+              className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-700 transition-colors"
+            >
+              <span className="text-xl">📊</span>
+              <div>
+                <p className="font-medium">我的报销</p>
+                <p className="text-xs text-gray-500">查看所有报销记录</p>
+              </div>
+            </Link>
+
+            {canApprove && (
+              <Link
+                href="/dashboard/approvals"
+                className="flex items-center gap-3 p-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors"
+              >
+                <span className="text-xl">✅</span>
+                <div className="flex-1">
+                  <p className="font-medium">审批报销</p>
+                  <p className="text-xs text-amber-500">处理待审批的申请</p>
+                </div>
+                {stats.pendingApproval > 0 && (
+                  <span className="px-2 py-0.5 bg-amber-500 text-white text-xs rounded-full">
+                    {stats.pendingApproval}
+                  </span>
+                )}
+              </Link>
+            )}
+
+            {isAdmin && (
+              <>
+                <Link
+                  href="/dashboard/team"
+                  className="flex items-center gap-3 p-3 rounded-xl bg-green-50 hover:bg-green-100 text-green-700 transition-colors"
+                >
+                  <span className="text-xl">👥</span>
+                  <div>
+                    <p className="font-medium">团队管理</p>
+                    <p className="text-xs text-green-500">邀请成员、管理权限</p>
+                  </div>
+                </Link>
+
+                <Link
+                  href="/dashboard/settings"
+                  className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 transition-colors"
+                >
+                  <span className="text-xl">⚙️</span>
+                  <div>
+                    <p className="font-medium">系统设置</p>
+                    <p className="text-xs text-slate-500">配置报销政策和规则</p>
+                  </div>
+                </Link>
+              </>
+            )}
+          </div>
+        </Card>
+
+        {/* 最近报销 / 待审批列表 */}
+        <Card className="lg:col-span-2">
+          <div className="p-4 border-b flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900">
+              {canApprove && pendingApprovals.length > 0 ? '待审批报销' : '最近报销'}
+            </h2>
+            <Link
+              href={canApprove && pendingApprovals.length > 0 ? "/dashboard/approvals" : "/dashboard/reimbursements"}
+              className="text-sm text-blue-600 hover:text-blue-700"
+            >
+              查看全部 →
+            </Link>
+          </div>
+          <div className="divide-y">
+            {/* 如果是审批人且有待审批，优先显示待审批列表 */}
+            {canApprove && pendingApprovals.length > 0 ? (
+              pendingApprovals.map((item) => {
+                const status = getStatusLabel(item.status);
+                return (
+                  <Link
+                    key={item.id}
+                    href={`/dashboard/reimbursements/${item.id}`}
+                    className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+                        <span className="text-lg">👤</span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">
+                          {item.submitter?.name || '未知'}
+                          <span className="text-gray-400 font-normal ml-2">
+                            {item.submitter?.department || ''}
+                          </span>
+                        </p>
+                        <p className="text-sm text-gray-500">{item.title || '报销单'}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-medium text-gray-900">
+                        {formatAmount(item.totalAmountInBaseCurrency || item.totalAmount || 0, item.baseCurrency)}
+                      </p>
+                      <span
+                        className="inline-block text-xs px-2 py-0.5 rounded-full"
+                        style={{ backgroundColor: status.bg, color: status.color }}
+                      >
+                        {status.text}
+                      </span>
+                    </div>
+                  </Link>
+                );
+              })
+            ) : recentReimbursements.length === 0 ? (
+              <div className="p-8 text-center">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
+                  <span className="text-3xl">📭</span>
+                </div>
+                <p className="text-gray-500 mb-4">还没有报销记录</p>
+                <Link
+                  href="/dashboard/reimbursements/new"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                  <span>📝</span> 创建第一笔报销
+                </Link>
+              </div>
+            ) : (
+              recentReimbursements.map((item) => {
+                const status = getStatusLabel(item.status);
+                return (
+                  <Link
+                    key={item.id}
+                    href={`/dashboard/reimbursements/${item.id}`}
+                    className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                        <span className="text-lg">🧾</span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">{item.title || '报销单'}</p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(item.createdAt).toLocaleDateString('zh-CN', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-medium text-gray-900">
+                        {formatAmount(item.totalAmountInBaseCurrency || item.totalAmount || 0, item.baseCurrency)}
+                      </p>
+                      <span
+                        className="inline-block text-xs px-2 py-0.5 rounded-full"
+                        style={{ backgroundColor: status.bg, color: status.color }}
+                      >
+                        {status.text}
+                      </span>
+                    </div>
+                  </Link>
+                );
+              })
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* 管理员新手引导 */}
+      {isAdmin && stats.teamMembers <= 1 && (
+        <Card className="p-6 bg-gradient-to-r from-slate-50 to-blue-50 border-2 border-blue-100">
+          <h3 className="font-semibold text-gray-900 mb-4">🚀 开始使用</h3>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 text-sm font-medium">
+                ✓
+              </div>
+              <span className="text-sm text-gray-600">创建公司账号</span>
+            </div>
+            <Link href="/dashboard/team" className="flex items-center gap-3 group">
+              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-medium">
+                2
+              </div>
+              <span className="text-sm text-blue-600 group-hover:underline">邀请团队成员 →</span>
+            </Link>
+            <Link href="/dashboard/settings" className="flex items-center gap-3 group">
+              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 text-sm font-medium">
+                3
+              </div>
+              <span className="text-sm text-gray-500 group-hover:text-gray-700">设置报销政策</span>
+            </Link>
+            <Link href="/dashboard/reimbursements/new" className="flex items-center gap-3 group">
+              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 text-sm font-medium">
+                4
+              </div>
+              <span className="text-sm text-gray-500 group-hover:text-gray-700">提交第一笔报销</span>
+            </Link>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
