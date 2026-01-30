@@ -119,17 +119,17 @@ export default function NewReimbursementPage() {
 
       const updatedItem = { ...item, [field]: value };
 
-      // 如果金额或币种变化，重新计算本位币金额
+      // 如果金额或币种变化，重新计算本位币金额（USD）
       if (field === 'amount' || field === 'currency') {
         const amount = parseFloat(field === 'amount' ? value : item.amount) || 0;
         const currency = (field === 'currency' ? value : item.currency) as CurrencyType;
 
         if (amount > 0 && currency) {
-          // 使用统一 Hook 获取汇率（到 CNY 的汇率）
-          const rate = exchangeRates[currency]?.rate || 1;
+          // 获取从原币到 USD 的汇率
+          const rate = getRate(currency, Currency.USD);
           updatedItem.exchangeRate = rate;
-          // amountInBaseCurrency: 转换到本位币 CNY
-          updatedItem.amountInUSD = convert(amount, currency, Currency.CNY);
+          // 转换到本位币 USD
+          updatedItem.amountInUSD = convert(amount, currency, Currency.USD);
         }
       }
 
@@ -273,7 +273,10 @@ export default function NewReimbursementPage() {
 
       const currency = ocrData.currency || 'CNY';
       const amount = ocrData.amount ? parseFloat(ocrData.amount) : 0;
-      const rate = getRate(currency as CurrencyType, Currency.CNY);
+      // 获取从原币到 USD 的汇率
+      const rate = getRate(currency as CurrencyType, Currency.USD);
+      // 使用正确的汇率转换到 USD
+      const amountInUSD = amount > 0 ? convert(amount, currency as CurrencyType, Currency.USD) : undefined;
 
       newItems.push({
         id: Date.now().toString() + index + Math.random().toString(36).substr(2, 9),
@@ -289,7 +292,7 @@ export default function NewReimbursementPage() {
         flightNumber: ocrData.flightNumber || '',
         seatClass: ocrData.seatClass || '',
         exchangeRate: rate,
-        amountInUSD: amount > 0 ? parseFloat((amount * rate).toFixed(2)) : undefined,
+        amountInUSD: amountInUSD,
         receiptUrl: ocrData.receiptUrl || '',
         receiptFileName: ocrData.receiptFileName || '',
       });
