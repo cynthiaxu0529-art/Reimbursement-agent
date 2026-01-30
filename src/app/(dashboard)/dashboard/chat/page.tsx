@@ -1,91 +1,134 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
-  attachments?: {
-    name: string;
-    type: string;
-    url?: string;
-  }[];
+  data?: TechExpenseData | PolicyData | null;
+  dataType?: 'tech_expense' | 'policy' | 'vendor';
   actions?: {
     type: string;
     label: string;
-    href?: string;
-    data?: any;
+    onClick?: () => void;
   }[];
-  ocrResult?: OCRResult;
 }
 
-interface OCRResult {
-  type: string;
-  vendor?: string;
-  amount?: number;
-  currency?: string;
-  date?: string;
-  invoiceNumber?: string;
-  category?: string;
-  confidence: number;
-  rawText?: string;
+interface TechExpenseData {
+  summary: {
+    totalAmount: number;
+    currency: string;
+    categoryCount: number;
+    vendorCount: number;
+  };
+  byCategory: {
+    category: string;
+    label: string;
+    total: number;
+    count: number;
+    percentage: number;
+    topVendors: { name: string; amount: number }[];
+  }[];
+  byVendor: {
+    name: string;
+    categoryLabel: string;
+    totalAmount: number;
+    count: number;
+    userCount: number;
+  }[];
+  aiTokenAnalysis: {
+    total: number;
+    suggestions: string[];
+    topProviders: { name: string; totalAmount: number }[];
+  };
+  saasAnalysis: {
+    total: number;
+    activeSubscriptions: number;
+    topSubscriptions: { name: string; totalAmount: number }[];
+  };
+  userRanking?: {
+    name: string;
+    total: number;
+    topCategory: string | null;
+  }[];
 }
 
-const receiptTypeLabels: Record<string, string> = {
-  'vat_invoice': '增值税普通发票',
-  'vat_special': '增值税专用发票',
-  'flight_itinerary': '机票行程单',
-  'train_ticket': '火车票',
-  'hotel_receipt': '酒店发票',
-  'taxi_receipt': '出租车发票',
-  'ride_hailing': '网约车发票',
-  'restaurant': '餐饮发票',
-  'general_receipt': '通用收据',
-  'unknown': '未知类型',
-};
+interface PolicyData {
+  policies: {
+    id: string;
+    name: string;
+    description: string;
+    isActive: boolean;
+    rules: PolicyRule[];
+  }[];
+}
+
+interface PolicyRule {
+  id: string;
+  name: string;
+  description?: string;
+  categories?: string[];
+  limit?: {
+    type: string;
+    amount: number;
+    currency: string;
+  };
+  requiresReceipt?: boolean;
+  requiresApproval?: boolean;
+  message?: string;
+}
 
 const categoryLabels: Record<string, string> = {
-  'flight': '机票',
-  'train': '火车票',
-  'hotel': '酒店住宿',
-  'meal': '餐饮',
-  'taxi': '交通',
-  'other': '其他',
+  flight: '机票',
+  train: '火车票',
+  hotel: '酒店住宿',
+  meal: '餐饮',
+  taxi: '交通',
+  ai_token: 'AI Token',
+  cloud_resource: '云资源',
+  software: '软件订阅',
+  api_service: 'API 服务',
+  hosting: '托管服务',
+  domain: '域名',
+  other: '其他',
+};
+
+const limitTypeLabels: Record<string, string> = {
+  per_item: '单笔',
+  per_day: '每日',
+  per_month: '每月',
+  per_trip: '每次出差',
+  per_year: '每年',
 };
 
 const samplePrompts = [
-  { text: '帮我创建一笔报销', icon: '📝' },
-  { text: '检查报销材料是否齐全', icon: '✅' },
-  { text: '查看当前预算使用情况', icon: '📊' },
   { text: '报销政策是什么', icon: '📋' },
+  { text: '分析本月技术费用', icon: '📊' },
+  { text: 'AI消耗分析', icon: '🤖' },
+  { text: 'SaaS订阅分析', icon: '☁️' },
 ];
 
 const capabilities = [
-  { icon: '📷', title: '票据识别', desc: '上传发票自动识别信息' },
-  { icon: '📝', title: '快速报销', desc: '对话式创建报销单' },
-  { icon: '✅', title: '合规检查', desc: '检查费用是否符合政策' },
-  { icon: '💰', title: '预算查询', desc: '查看部门预算使用情况' },
+  { icon: '📋', title: '政策查询', desc: '了解公司报销政策' },
+  { icon: '📊', title: '费用分析', desc: '技术费用统计分析' },
+  { icon: '🤖', title: 'AI消耗', desc: 'AI Token使用分析' },
+  { icon: '💡', title: '优化建议', desc: '成本优化建议' },
 ];
 
 export default function ChatPage() {
-  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: '你好！我是 Fluxa 智能报销助手。\n\n我可以帮你：\n• 上传票据并自动识别信息\n• 快速创建报销单\n• 检查费用是否符合公司政策\n• 查询预算使用情况\n\n你可以直接上传发票图片，或告诉我你想做什么。',
+      content: '你好！我是 Fluxa 智能助手。\n\n我可以帮你：\n• 查询公司报销政策\n• 分析技术费用（SaaS、AI Token、云资源）\n• 提供成本优化建议\n\n试试点击下方的快捷按钮，或直接问我问题。',
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [lastOCRResult, setLastOCRResult] = useState<OCRResult | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -95,186 +138,288 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files) {
-      const newFiles = Array.from(files);
-      setUploadedFiles(prev => [...prev, ...newFiles]);
-    }
-  };
-
-  const removeFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  // 将文件转换为 base64
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const result = reader.result as string;
-        // 移除 data:image/xxx;base64, 前缀
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
-
-  // 调用 OCR API
-  const callOCRAPI = async (file: File): Promise<OCRResult> => {
+  // 获取报销政策
+  const fetchPolicies = async (): Promise<PolicyData | null> => {
     try {
-      const base64 = await fileToBase64(file);
-      const mimeType = file.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
-
-      const response = await fetch('/api/ocr', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          imageBase64: base64,
-          mimeType: mimeType,
-        }),
-      });
-
+      const response = await fetch('/api/settings/policies');
       const result = await response.json();
-
       if (result.success && result.data) {
-        return {
-          type: result.data.type || 'unknown',
-          vendor: result.data.vendor,
-          amount: result.data.amount,
-          currency: result.data.currency || 'CNY',
-          date: result.data.date ? new Date(result.data.date).toLocaleDateString('zh-CN') : undefined,
-          invoiceNumber: result.data.invoiceNumber,
-          category: result.data.category,
-          confidence: result.data.confidence || 0,
-          rawText: result.data.rawText,
-        };
-      } else {
-        throw new Error(result.error || 'OCR 识别失败');
+        return { policies: result.data };
       }
+      return null;
     } catch (error) {
-      console.error('OCR error:', error);
-      throw error;
+      console.error('Fetch policies error:', error);
+      return null;
     }
+  };
+
+  // 获取技术费用分析
+  const fetchTechExpenses = async (scope: string = 'company'): Promise<TechExpenseData | null> => {
+    try {
+      const response = await fetch(`/api/analytics/tech-expenses?period=month&scope=${scope}`);
+      const result = await response.json();
+      if (result.success && result.data) {
+        return result.data;
+      }
+      return null;
+    } catch (error) {
+      console.error('Fetch tech expenses error:', error);
+      return null;
+    }
+  };
+
+  // 格式化政策回复
+  const formatPolicyResponse = (policyData: PolicyData): string => {
+    if (!policyData.policies || policyData.policies.length === 0) {
+      return '目前还没有配置报销政策。请联系管理员在「设置」中配置公司报销政策。';
+    }
+
+    let response = '**公司报销政策**\n\n';
+
+    policyData.policies.forEach((policy, index) => {
+      if (!policy.isActive) return;
+
+      response += `**${index + 1}. ${policy.name}**\n`;
+      if (policy.description) {
+        response += `${policy.description}\n`;
+      }
+      response += '\n';
+
+      if (policy.rules && policy.rules.length > 0) {
+        policy.rules.forEach(rule => {
+          const categories = rule.categories?.map(c => categoryLabels[c] || c).join('、') || '所有类别';
+          const limitType = rule.limit?.type ? (limitTypeLabels[rule.limit.type] || rule.limit.type) : '';
+          const limitAmount = rule.limit ? `${rule.limit.currency === 'USD' ? '$' : '¥'}${rule.limit.amount}` : '';
+
+          response += `• **${rule.name}**\n`;
+          response += `  适用：${categories}\n`;
+          if (limitAmount) {
+            response += `  限额：${limitType}${limitAmount}\n`;
+          }
+          if (rule.requiresReceipt) {
+            response += `  需要发票：是\n`;
+          }
+          if (rule.requiresApproval) {
+            response += `  需要审批：是\n`;
+          }
+          response += '\n';
+        });
+      }
+    });
+
+    return response;
+  };
+
+  // 格式化技术费用分析回复
+  const formatTechExpenseResponse = (data: TechExpenseData, type: 'all' | 'ai' | 'saas' = 'all'): string => {
+    let response = '';
+
+    if (type === 'all' || type === 'ai') {
+      response += `**📊 本月技术费用分析**\n\n`;
+      response += `**总计：¥${data.summary.totalAmount.toLocaleString()}**\n`;
+      response += `涉及 ${data.summary.vendorCount} 个供应商，${data.summary.categoryCount} 个类别\n\n`;
+
+      // 按类别统计
+      response += `**按类别分布：**\n`;
+      data.byCategory
+        .filter(c => c.total > 0)
+        .sort((a, b) => b.total - a.total)
+        .forEach(cat => {
+          response += `• ${cat.label}：¥${cat.total.toLocaleString()} (${cat.percentage}%)\n`;
+        });
+      response += '\n';
+    }
+
+    if (type === 'all' || type === 'ai') {
+      // AI Token 分析
+      if (data.aiTokenAnalysis && data.aiTokenAnalysis.total > 0) {
+        response += `**🤖 AI Token 分析**\n`;
+        response += `总消耗：¥${data.aiTokenAnalysis.total.toLocaleString()}\n\n`;
+
+        if (data.aiTokenAnalysis.topProviders && data.aiTokenAnalysis.topProviders.length > 0) {
+          response += `供应商分布：\n`;
+          data.aiTokenAnalysis.topProviders.forEach((p, i) => {
+            const percentage = Math.round((p.totalAmount / data.aiTokenAnalysis.total) * 100);
+            response += `${i + 1}. ${p.name}：¥${p.totalAmount.toLocaleString()} (${percentage}%)\n`;
+          });
+          response += '\n';
+        }
+
+        // 优化建议
+        if (data.aiTokenAnalysis.suggestions && data.aiTokenAnalysis.suggestions.length > 0) {
+          response += `**💡 优化建议：**\n`;
+          data.aiTokenAnalysis.suggestions.forEach(s => {
+            response += `• ${s}\n`;
+          });
+          response += '\n';
+        }
+      }
+    }
+
+    if (type === 'all' || type === 'saas') {
+      // SaaS 订阅分析
+      if (data.saasAnalysis && data.saasAnalysis.total > 0) {
+        response += `**☁️ SaaS 订阅分析**\n`;
+        response += `总费用：¥${data.saasAnalysis.total.toLocaleString()}\n`;
+        response += `活跃订阅：${data.saasAnalysis.activeSubscriptions} 个\n\n`;
+
+        if (data.saasAnalysis.topSubscriptions && data.saasAnalysis.topSubscriptions.length > 0) {
+          response += `Top 订阅：\n`;
+          data.saasAnalysis.topSubscriptions.forEach((s, i) => {
+            response += `${i + 1}. ${s.name}：¥${s.totalAmount.toLocaleString()}\n`;
+          });
+          response += '\n';
+        }
+      }
+    }
+
+    // 用户排行（公司级别）
+    if (data.userRanking && data.userRanking.length > 0) {
+      response += `**👥 技术费用 Top 5 用户**\n`;
+      data.userRanking.slice(0, 5).forEach((u, i) => {
+        response += `${i + 1}. ${u.name}：¥${u.total.toLocaleString()}\n`;
+      });
+    }
+
+    if (!response) {
+      response = '本月暂无技术费用记录。';
+    }
+
+    return response;
   };
 
   const sendMessage = async (text?: string) => {
     const messageText = text || input;
-    if ((!messageText.trim() && uploadedFiles.length === 0) || isLoading) return;
-
-    const attachments = uploadedFiles.map(file => ({
-      name: file.name,
-      type: file.type,
-    }));
+    if (!messageText.trim() || isLoading) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: messageText || (uploadedFiles.length > 0 ? `上传了 ${uploadedFiles.length} 个文件` : ''),
+      content: messageText,
       timestamp: new Date(),
-      attachments: attachments.length > 0 ? attachments : undefined,
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages(prev => [...prev, userMessage]);
     setInput('');
-    const filesToProcess = [...uploadedFiles];
-    setUploadedFiles([]);
     setIsLoading(true);
 
     try {
       let response: Message;
+      const lowerText = messageText.toLowerCase();
 
-      if (filesToProcess.length > 0) {
-        // 处理上传的文件 - 调用真正的 OCR API
-        const file = filesToProcess[0]; // 先处理第一个文件
+      // 政策查询
+      if (lowerText.includes('政策') || lowerText.includes('规定') || lowerText.includes('限额') || lowerText.includes('标准')) {
+        const policyData = await fetchPolicies();
+        response = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: policyData ? formatPolicyResponse(policyData) : '获取政策信息失败，请稍后重试。',
+          timestamp: new Date(),
+          data: policyData,
+          dataType: 'policy',
+        };
+      }
+      // AI 消耗分析
+      else if (lowerText.includes('ai') || lowerText.includes('token') || lowerText.includes('openai') || lowerText.includes('claude')) {
+        const techData = await fetchTechExpenses('company');
+        response = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: techData ? formatTechExpenseResponse(techData, 'ai') : '获取 AI 消耗数据失败，请稍后重试。',
+          timestamp: new Date(),
+          data: techData,
+          dataType: 'tech_expense',
+        };
+      }
+      // SaaS 分析
+      else if (lowerText.includes('saas') || lowerText.includes('订阅') || lowerText.includes('软件')) {
+        const techData = await fetchTechExpenses('company');
+        response = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: techData ? formatTechExpenseResponse(techData, 'saas') : '获取 SaaS 订阅数据失败，请稍后重试。',
+          timestamp: new Date(),
+          data: techData,
+          dataType: 'tech_expense',
+        };
+      }
+      // 技术费用/费用分析
+      else if (lowerText.includes('技术') || lowerText.includes('费用') || lowerText.includes('分析') || lowerText.includes('统计') || lowerText.includes('云') || lowerText.includes('消耗')) {
+        const techData = await fetchTechExpenses('company');
+        response = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: techData ? formatTechExpenseResponse(techData, 'all') : '获取技术费用数据失败，请稍后重试。',
+          timestamp: new Date(),
+          data: techData,
+          dataType: 'tech_expense',
+        };
+      }
+      // 我的费用
+      else if (lowerText.includes('我的') || lowerText.includes('个人')) {
+        const techData = await fetchTechExpenses('personal');
+        let content = techData ? formatTechExpenseResponse(techData, 'all') : '获取个人费用数据失败，请稍后重试。';
+        content = content.replace('本月技术费用分析', '我的本月技术费用');
+        response = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content,
+          timestamp: new Date(),
+          data: techData,
+          dataType: 'tech_expense',
+        };
+      }
+      // 优化建议
+      else if (lowerText.includes('优化') || lowerText.includes('建议') || lowerText.includes('节省') || lowerText.includes('省钱')) {
+        const techData = await fetchTechExpenses('company');
+        let content = '**💡 成本优化建议**\n\n';
 
-        try {
-          const ocrResult = await callOCRAPI(file);
-          setLastOCRResult(ocrResult);
+        if (techData) {
+          // AI 优化建议
+          if (techData.aiTokenAnalysis?.suggestions?.length > 0) {
+            content += '**AI 服务优化：**\n';
+            techData.aiTokenAnalysis.suggestions.forEach(s => {
+              content += `• ${s}\n`;
+            });
+            content += '\n';
+          }
 
-          const typeLabel = receiptTypeLabels[ocrResult.type] || ocrResult.type;
-          const categoryLabel = ocrResult.category ? (categoryLabels[ocrResult.category] || ocrResult.category) : '待分类';
-          const confidencePercent = Math.round(ocrResult.confidence * 100);
+          // SaaS 优化建议
+          if (techData.saasAnalysis?.activeSubscriptions > 5) {
+            content += '**SaaS 订阅优化：**\n';
+            content += `• 当前有 ${techData.saasAnalysis.activeSubscriptions} 个活跃订阅，建议定期审查是否有重复或低使用率的工具\n`;
+            content += '• 考虑将月付订阅转为年付以获得折扣\n\n';
+          }
 
-          response = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: `我已识别到你上传的票据！\n\n**识别结果：**\n\n• **类型**：${typeLabel}\n• **商家**：${ocrResult.vendor || '未识别'}\n• **金额**：${ocrResult.amount ? `¥${ocrResult.amount.toLocaleString()}` : '未识别'}\n• **日期**：${ocrResult.date || '未识别'}\n• **发票号**：${ocrResult.invoiceNumber || '未识别'}\n• **费用类别**：${categoryLabel}\n• **识别置信度**：${confidencePercent}%\n\n确认信息无误后，你可以创建报销单。`,
-            timestamp: new Date(),
-            ocrResult: ocrResult,
-            actions: [
-              { type: 'create_with_data', label: '创建报销单', href: '/dashboard/reimbursements/new', data: ocrResult },
-              { type: 'upload_more', label: '继续上传' },
-              { type: 'cancel', label: '取消' },
-            ],
-          };
-        } catch (error) {
-          response = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: `抱歉，票据识别遇到问题。\n\n**错误信息**：${error instanceof Error ? error.message : '未知错误'}\n\n可能的原因：\n• 图片不够清晰\n• 票据格式不支持\n• 服务暂时不可用\n\n请尝试重新上传更清晰的图片，或手动创建报销单。`,
-            timestamp: new Date(),
-            actions: [
-              { type: 'upload_more', label: '重新上传' },
-              { type: 'manual', label: '手动填写', href: '/dashboard/reimbursements/new' },
-            ],
-          };
+          // 通用建议
+          content += '**通用建议：**\n';
+          content += '• 集中采购：多人使用的工具考虑团队版\n';
+          content += '• 定期审查：每季度审查订阅使用情况\n';
+          content += '• 成本分配：按项目或部门分配费用便于追踪\n';
+        } else {
+          content += '暂无足够数据生成优化建议，请确保有历史报销记录。';
         }
-      } else if (messageText.includes('创建') || messageText.includes('报销')) {
+
         response = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: '好的，我来帮你创建报销单。\n\n你可以：\n1. **上传票据** - 我会自动识别发票信息\n2. **手动填写** - 前往报销表单页面\n\n请选择你想要的方式：',
+          content,
           timestamp: new Date(),
-          actions: [
-            { type: 'upload', label: '上传票据' },
-            { type: 'manual', label: '手动填写', href: '/dashboard/reimbursements/new' },
-          ],
+          data: techData,
+          dataType: 'tech_expense',
         };
-      } else if (messageText.includes('检查') || messageText.includes('齐全')) {
+      }
+      // 默认回复
+      else {
         response = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: '让我检查一下你的报销材料...\n\n**检查结果：**\n\n目前没有待提交的报销草稿。\n\n你可以：\n• 创建新的报销单\n• 上传票据开始报销流程',
-          timestamp: new Date(),
-          actions: [
-            { type: 'create', label: '创建报销单', href: '/dashboard/reimbursements/new' },
-          ],
-        };
-      } else if (messageText.includes('预算') || messageText.includes('花费')) {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: '**Fluxa 本月预算使用情况：**\n\n请联系管理员设置部门预算后，我可以帮你查询详细的预算使用情况。\n\n你也可以在「设置」中配置预算限额。',
-          timestamp: new Date(),
-          actions: [
-            { type: 'settings', label: '前往设置', href: '/dashboard/settings' },
-          ],
-        };
-      } else if (messageText.includes('政策')) {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: '**Fluxa 报销政策：**\n\n请管理员在「设置 → 报销政策」中配置公司的报销政策。\n\n配置后，我可以帮你自动检查费用是否符合政策。',
-          timestamp: new Date(),
-          actions: [
-            { type: 'settings', label: '配置政策', href: '/dashboard/settings' },
-          ],
-        };
-      } else {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: '我理解你的需求。你可以尝试：\n\n• **上传票据** - 点击下方📎按钮上传发票\n• **创建报销** - 说"帮我创建一笔报销"\n• **查看预算** - 说"查看预算使用情况"\n\n有什么我可以帮你的？',
+          content: '我可以帮你：\n\n• **查询政策** - 说"报销政策是什么"\n• **技术费用分析** - 说"分析本月技术费用"\n• **AI消耗分析** - 说"AI消耗分析"\n• **SaaS订阅分析** - 说"SaaS订阅分析"\n• **优化建议** - 说"给我一些优化建议"\n\n请告诉我你想了解什么？',
           timestamp: new Date(),
         };
       }
 
-      setMessages((prev) => [...prev, response]);
+      setMessages(prev => [...prev, response]);
     } finally {
       setIsLoading(false);
     }
@@ -284,19 +429,6 @@ export default function ChatPage() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
-    }
-  };
-
-  const handleActionClick = (action: { type: string; label: string; href?: string; data?: any }) => {
-    if (action.href) {
-      // 如果有 OCR 数据，将其存储到 sessionStorage 供报销页面使用
-      if (action.data || lastOCRResult) {
-        const dataToStore = action.data || lastOCRResult;
-        sessionStorage.setItem('ocrData', JSON.stringify(dataToStore));
-      }
-      router.push(action.href);
-    } else if (action.type === 'upload' || action.type === 'upload_more') {
-      fileInputRef.current?.click();
     }
   };
 
@@ -313,7 +445,7 @@ export default function ChatPage() {
       {/* Header */}
       <div style={{ marginBottom: '1rem' }}>
         <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#111827' }}>AI 助手</h2>
-        <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>智能报销助手，支持票据识别和快速报销</p>
+        <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>政策查询 · 费用分析 · 优化建议</p>
       </div>
 
       {/* Messages Area */}
@@ -358,25 +490,6 @@ export default function ChatPage() {
                 boxShadow: message.role === 'assistant' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
               }}
             >
-              {/* Attachments */}
-              {message.attachments && message.attachments.length > 0 && (
-                <div style={{ marginBottom: '0.5rem' }}>
-                  {message.attachments.map((att, idx) => (
-                    <div key={idx} style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.25rem',
-                      padding: '0.25rem 0.5rem',
-                      backgroundColor: message.role === 'user' ? 'rgba(255,255,255,0.2)' : '#f3f4f6',
-                      borderRadius: '0.25rem',
-                      fontSize: '0.75rem',
-                      marginRight: '0.25rem'
-                    }}>
-                      📎 {att.name}
-                    </div>
-                  ))}
-                </div>
-              )}
               <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{message.content}</div>
               {message.actions && (
                 <div style={{
@@ -390,12 +503,12 @@ export default function ChatPage() {
                   {message.actions.map((action, index) => (
                     <button
                       key={index}
-                      onClick={() => handleActionClick(action)}
+                      onClick={action.onClick}
                       style={{
                         padding: '0.375rem 0.75rem',
-                        backgroundColor: action.type === 'create' || action.type === 'manual' || action.type === 'create_with_data' ? '#2563eb' : '#eff6ff',
-                        color: action.type === 'create' || action.type === 'manual' || action.type === 'create_with_data' ? 'white' : '#2563eb',
-                        border: action.type === 'create' || action.type === 'manual' || action.type === 'create_with_data' ? 'none' : '1px solid #bfdbfe',
+                        backgroundColor: '#eff6ff',
+                        color: '#2563eb',
+                        border: '1px solid #bfdbfe',
                         borderRadius: '0.5rem',
                         fontSize: '0.875rem',
                         cursor: 'pointer',
@@ -451,7 +564,7 @@ export default function ChatPage() {
               gap: '0.5rem'
             }}>
               <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>
-                正在识别票据，请稍候...
+                正在分析数据...
               </span>
             </div>
           </div>
@@ -518,53 +631,6 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Uploaded Files Preview */}
-      {uploadedFiles.length > 0 && (
-        <div style={{
-          marginBottom: '0.5rem',
-          padding: '0.75rem',
-          backgroundColor: '#f9fafb',
-          borderRadius: '0.5rem',
-          border: '1px solid #e5e7eb'
-        }}>
-          <p style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.5rem' }}>
-            待上传文件：
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-            {uploadedFiles.map((file, index) => (
-              <div key={index} style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.375rem 0.75rem',
-                backgroundColor: 'white',
-                border: '1px solid #e5e7eb',
-                borderRadius: '0.375rem',
-                fontSize: '0.875rem'
-              }}>
-                <span>📄</span>
-                <span style={{ maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {file.name}
-                </span>
-                <button
-                  onClick={() => removeFile(index)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#dc2626',
-                    cursor: 'pointer',
-                    padding: '0',
-                    fontSize: '1rem'
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Input Area */}
       <div style={{
         backgroundColor: 'white',
@@ -573,37 +639,10 @@ export default function ChatPage() {
         padding: '0.75rem',
         boxShadow: '0 -4px 6px -1px rgba(0, 0, 0, 0.05)'
       }}>
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileUpload}
-          accept="image/*,.pdf"
-          multiple
-          style={{ display: 'none' }}
-        />
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              padding: '0.5rem',
-              backgroundColor: '#eff6ff',
-              border: '1px solid #bfdbfe',
-              borderRadius: '0.5rem',
-              cursor: 'pointer',
-              color: '#2563eb',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.25rem',
-              fontSize: '0.875rem'
-            }}
-            title="上传票据"
-          >
-            <span style={{ fontSize: '1.25rem' }}>📎</span>
-            <span>上传票据</span>
-          </button>
           <input
             type="text"
-            placeholder="输入你的问题或指令..."
+            placeholder="输入问题，如：报销政策是什么、分析AI消耗..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
@@ -619,17 +658,17 @@ export default function ChatPage() {
           />
           <button
             onClick={() => sendMessage()}
-            disabled={(!input.trim() && uploadedFiles.length === 0) || isLoading}
+            disabled={!input.trim() || isLoading}
             style={{
               padding: '0.625rem 1.25rem',
-              background: (!input.trim() && uploadedFiles.length === 0) || isLoading
+              background: !input.trim() || isLoading
                 ? '#9ca3af'
                 : 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
               color: 'white',
               border: 'none',
               borderRadius: '0.5rem',
               fontWeight: 500,
-              cursor: (!input.trim() && uploadedFiles.length === 0) || isLoading ? 'not-allowed' : 'pointer',
+              cursor: !input.trim() || isLoading ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: '0.375rem'
