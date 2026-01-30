@@ -68,6 +68,12 @@ export default function ExchangeRatesPage() {
   const [selectedBaseCurrency, setSelectedBaseCurrency] = useState<CurrencyType | ''>('');
   const [baseCurrencyUpdating, setBaseCurrencyUpdating] = useState(false);
 
+  // 自定义货币状态
+  const [customCurrencyCode, setCustomCurrencyCode] = useState('');
+  const [customRateToCNY, setCustomRateToCNY] = useState('');
+  const [customCurrencyAdding, setCustomCurrencyAdding] = useState(false);
+  const [customCurrencyError, setCustomCurrencyError] = useState('');
+
   // 同步选中的本位币
   useEffect(() => {
     if (baseCurrency && !selectedBaseCurrency) {
@@ -100,6 +106,52 @@ export default function ExchangeRatesPage() {
       alert('更新失败，请重试');
     }
   };
+
+  // 添加自定义货币汇率
+  const handleAddCustomCurrency = async () => {
+    // 验证输入
+    if (!customCurrencyCode || customCurrencyCode.length !== 3) {
+      setCustomCurrencyError('货币代码必须是3位大写字母');
+      return;
+    }
+
+    const rate = parseFloat(customRateToCNY);
+    if (isNaN(rate) || rate <= 0) {
+      setCustomCurrencyError('汇率必须是大于0的数字');
+      return;
+    }
+
+    setCustomCurrencyAdding(true);
+    setCustomCurrencyError('');
+
+    try {
+      const response = await fetch('/api/exchange-rates/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currency: customCurrencyCode,
+          rateToCNY: rate,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        // 成功后清空输入
+        setCustomCurrencyCode('');
+        setCustomRateToCNY('');
+        alert(`货币 ${customCurrencyCode} 汇率已添加：1 ${customCurrencyCode} = ${rate} CNY`);
+      } else {
+        setCustomCurrencyError(data.error || '添加失败，请重试');
+      }
+    } catch (error) {
+      console.error('添加自定义货币失败:', error);
+      setCustomCurrencyError('网络错误，请重试');
+    } finally {
+      setCustomCurrencyAdding(false);
+    }
+  };
+
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
       id: '1',
@@ -415,6 +467,61 @@ export default function ExchangeRatesPage() {
               )}
             </div>
           </div>
+        </Card>
+
+        {/* Custom Currency Section */}
+        <Card className="p-4 mb-6 border border-amber-200 bg-amber-50/30">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center">
+                <span className="text-lg">➕</span>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">添加自定义货币</h3>
+                <p className="text-xs text-gray-500">
+                  员工报销了系统不支持的货币？在这里手动添加汇率
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-end gap-3">
+            <div className="w-28">
+              <label className="text-xs text-gray-500 mb-1 block">货币代码</label>
+              <input
+                type="text"
+                value={customCurrencyCode}
+                onChange={(e) => setCustomCurrencyCode(e.target.value.toUpperCase().slice(0, 3))}
+                placeholder="如 THB"
+                maxLength={3}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 uppercase"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">1 单位 = ? 人民币 (CNY)</label>
+              <input
+                type="number"
+                value={customRateToCNY}
+                onChange={(e) => setCustomRateToCNY(e.target.value)}
+                placeholder="如 0.21 (1泰铢=0.21元)"
+                step="0.0001"
+                min="0"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            <Button
+              onClick={handleAddCustomCurrency}
+              disabled={!customCurrencyCode || !customRateToCNY || customCurrencyAdding}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-4"
+            >
+              {customCurrencyAdding ? '添加中...' : '添加'}
+            </Button>
+          </div>
+          {customCurrencyError && (
+            <p className="text-xs text-red-500 mt-2">{customCurrencyError}</p>
+          )}
+          <p className="text-xs text-gray-400 mt-3">
+            常见货币：THB (泰铢)、MYR (马来西亚林吉特)、VND (越南盾)、PHP (菲律宾比索)、IDR (印尼盾)
+          </p>
         </Card>
 
         {/* Search & Filters */}
