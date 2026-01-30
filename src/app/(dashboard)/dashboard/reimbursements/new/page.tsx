@@ -3,8 +3,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useExchangeRate } from '@/hooks/useExchangeRate';
-import { CurrencyType, Currency } from '@/types';
+import { useBaseCurrencyConversion } from '@/hooks/useBaseCurrencyConversion';
+import { CurrencyType } from '@/types';
 
 const expenseCategories = [
   { value: 'flight', label: '机票', icon: '✈️' },
@@ -102,16 +102,17 @@ export default function NewReimbursementPage() {
   ]);
   const [itemsAutoFilled, setItemsAutoFilled] = useState(false);
 
-  // 使用统一汇率 Hook（数据来源与后端一致）
+  // 使用本位币转换 Hook（自动处理目标货币，避免方向错误）
   const {
-    rates: exchangeRates,
+    baseCurrency,
+    baseCurrencySymbol,
     loading: ratesLoading,
-    getRate,
-    convert,
-    formatAmount,
-  } = useExchangeRate(Currency.CNY);
+    convertToBase,
+    getRateToBase,
+    formatBaseAmount,
+  } = useBaseCurrencyConversion();
 
-  // 更新费用明细并计算汇率（使用统一 Hook）
+  // 更新费用明细并计算汇率（使用本位币转换 Hook，无需手动指定目标货币）
   const updateLineItemWithExchange = useCallback(
     (id: string, field: keyof LineItem, value: string) => {
       const item = lineItems.find((i) => i.id === id);
@@ -119,17 +120,16 @@ export default function NewReimbursementPage() {
 
       const updatedItem = { ...item, [field]: value };
 
-      // 如果金额或币种变化，重新计算本位币金额（USD）
+      // 如果金额或币种变化，重新计算本位币金额
       if (field === 'amount' || field === 'currency') {
         const amount = parseFloat(field === 'amount' ? value : item.amount) || 0;
         const currency = (field === 'currency' ? value : item.currency) as CurrencyType;
 
         if (amount > 0 && currency) {
-          // 获取从原币到 USD 的汇率
-          const rate = getRate(currency, Currency.USD);
-          updatedItem.exchangeRate = rate;
-          // 转换到本位币 USD
-          updatedItem.amountInUSD = convert(amount, currency, Currency.USD);
+          // 使用封装好的本位币转换，无需手动指定目标货币
+          const conversion = convertToBase(amount, currency);
+          updatedItem.exchangeRate = conversion.rate;
+          updatedItem.amountInUSD = conversion.amount;
         }
       }
 
@@ -137,7 +137,7 @@ export default function NewReimbursementPage() {
         prevItems.map((i) => (i.id === id ? updatedItem : i))
       );
     },
-    [lineItems, exchangeRates, convert]
+    [lineItems, convertToBase]
   );
 
   // 从 sessionStorage 读取 OCR 数据并预填表单
@@ -273,10 +273,8 @@ export default function NewReimbursementPage() {
 
       const currency = ocrData.currency || 'CNY';
       const amount = ocrData.amount ? parseFloat(ocrData.amount) : 0;
-      // 获取从原币到 USD 的汇率
-      const rate = getRate(currency as CurrencyType, Currency.USD);
-      // 使用正确的汇率转换到 USD
-      const amountInUSD = amount > 0 ? convert(amount, currency as CurrencyType, Currency.USD) : undefined;
+      // 使用封装好的本位币转换，无需手动指定目标货币
+      const conversion = amount > 0 ? convertToBase(amount, currency as CurrencyType) : null;
 
       newItems.push({
         id: Date.now().toString() + index + Math.random().toString(36).substr(2, 9),
@@ -291,8 +289,8 @@ export default function NewReimbursementPage() {
         trainNumber: ocrData.trainNumber || '',
         flightNumber: ocrData.flightNumber || '',
         seatClass: ocrData.seatClass || '',
-        exchangeRate: rate,
-        amountInUSD: amountInUSD,
+        exchangeRate: conversion?.rate,
+        amountInUSD: conversion?.amount,
         receiptUrl: ocrData.receiptUrl || '',
         receiptFileName: ocrData.receiptFileName || '',
       });
