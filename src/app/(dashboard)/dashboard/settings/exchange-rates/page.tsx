@@ -52,15 +52,22 @@ export default function ExchangeRatesPage() {
   const fetchRates = useCallback(async () => {
     try {
       setRatesLoading(true);
-      const response = await fetch('/api/exchange-rates');
+      // 获取所有货币对 CNY 的汇率
+      const response = await fetch('/api/exchange-rates?target=CNY');
       if (response.ok) {
         const data = await response.json();
         if (data.rates) {
-          const rateList: ExchangeRate[] = Object.entries(data.rates).map(([currency, rate]) => ({
-            currency,
-            rate: rate as number,
-            source: 'system' as const,
-          }));
+          // API 返回格式: { currency: { rate: number, source: string } }
+          const rateList: ExchangeRate[] = Object.entries(data.rates).map(([currency, rateInfo]) => {
+            const info = rateInfo as { rate: number; source: string };
+            return {
+              currency,
+              rate: info.rate,
+              source: (info.source === 'manual' || info.source === 'manual_calculated') ? 'custom' : 'system',
+            };
+          });
+          // 按货币代码排序
+          rateList.sort((a, b) => a.currency.localeCompare(b.currency));
           setRates(rateList);
         }
       }
@@ -320,7 +327,7 @@ export default function ExchangeRatesPage() {
                 </tr>
               ) : (
                 rates.map((rate) => {
-                  const isCustom = customRates.some(cr => cr.currency === rate.currency);
+                  const isCustom = rate.source === 'custom';
                   const currencyName = CURRENCY_NAMES[rate.currency as CurrencyType];
                   return (
                     <tr key={rate.currency} className="hover:bg-gray-50">
