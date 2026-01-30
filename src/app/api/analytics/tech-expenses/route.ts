@@ -1,0 +1,396 @@
+/**
+ * 技术费用分析 API
+ * 提供 SaaS 订阅、AI Token、云资源等技术费用的聚合分析
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
+import { db } from '@/lib/db';
+import { users, reimbursements, reimbursementItems } from '@/lib/db/schema';
+import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
+
+// 技术费用类别
+const TECH_CATEGORIES = [
+  'ai_token',
+  'cloud_resource',
+  'api_service',
+  'software',
+  'hosting',
+  'domain',
+];
+
+// 类别中文名称
+const CATEGORY_LABELS: Record<string, string> = {
+  ai_token: 'AI Token',
+  cloud_resource: '云资源',
+  api_service: 'API 服务',
+  software: '软件订阅',
+  hosting: '托管服务',
+  domain: '域名',
+};
+
+// 常见供应商识别
+const VENDOR_PATTERNS: Record<string, { name: string; category: string }> = {
+  openai: { name: 'OpenAI', category: 'ai_token' },
+  anthropic: { name: 'Anthropic', category: 'ai_token' },
+  claude: { name: 'Anthropic', category: 'ai_token' },
+  'azure openai': { name: 'Azure OpenAI', category: 'ai_token' },
+  cursor: { name: 'Cursor', category: 'ai_token' },
+  'github copilot': { name: 'GitHub Copilot', category: 'ai_token' },
+  copilot: { name: 'GitHub Copilot', category: 'ai_token' },
+  aws: { name: 'AWS', category: 'cloud_resource' },
+  'amazon web services': { name: 'AWS', category: 'cloud_resource' },
+  gcp: { name: 'Google Cloud', category: 'cloud_resource' },
+  'google cloud': { name: 'Google Cloud', category: 'cloud_resource' },
+  azure: { name: 'Microsoft Azure', category: 'cloud_resource' },
+  阿里云: { name: '阿里云', category: 'cloud_resource' },
+  aliyun: { name: '阿里云', category: 'cloud_resource' },
+  腾讯云: { name: '腾讯云', category: 'cloud_resource' },
+  华为云: { name: '华为云', category: 'cloud_resource' },
+  vercel: { name: 'Vercel', category: 'hosting' },
+  netlify: { name: 'Netlify', category: 'hosting' },
+  cloudflare: { name: 'Cloudflare', category: 'hosting' },
+  notion: { name: 'Notion', category: 'software' },
+  figma: { name: 'Figma', category: 'software' },
+  slack: { name: 'Slack', category: 'software' },
+  zoom: { name: 'Zoom', category: 'software' },
+  lark: { name: '飞书', category: 'software' },
+  飞书: { name: '飞书', category: 'software' },
+  dingtalk: { name: '钉钉', category: 'software' },
+  钉钉: { name: '钉钉', category: 'software' },
+  jira: { name: 'Jira', category: 'software' },
+  confluence: { name: 'Confluence', category: 'software' },
+  atlassian: { name: 'Atlassian', category: 'software' },
+  linear: { name: 'Linear', category: 'software' },
+  stripe: { name: 'Stripe', category: 'api_service' },
+  twilio: { name: 'Twilio', category: 'api_service' },
+  sendgrid: { name: 'SendGrid', category: 'api_service' },
+  godaddy: { name: 'GoDaddy', category: 'domain' },
+  namecheap: { name: 'Namecheap', category: 'domain' },
+  万网: { name: '万网', category: 'domain' },
+  dnspod: { name: 'DNSPod', category: 'domain' },
+};
+
+// 识别供应商
+function identifyVendor(vendorStr: string | null): { name: string; category: string } | null {
+  if (!vendorStr) return null;
+
+  const lowerVendor = vendorStr.toLowerCase();
+  for (const [pattern, info] of Object.entries(VENDOR_PATTERNS)) {
+    if (lowerVendor.includes(pattern)) {
+      return info;
+    }
+  }
+  return null;
+}
+
+interface TechExpenseItem {
+  category: string;
+  amount: number;
+  currency: string;
+  amountInBaseCurrency: number;
+  vendor: string | null;
+  date: Date;
+  userId: string;
+  userName: string | null;
+}
+
+/**
+ * GET /api/analytics/tech-expenses
+ * 获取技术费用分析数据
+ *
+ * Query params:
+ * - period: 时间范围 (month, quarter, year, custom)
+ * - startDate: 自定义开始日期
+ * - endDate: 自定义结束日期
+ * - scope: 范围 (personal, team, company)
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const session = await auth();
+    if (!session?.user) {
+      return NextResponse.json({ error: '未登录' }, { status: 401 });
+    }
+
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+    });
+
+    if (!user?.tenantId) {
+      return NextResponse.json({ error: '未关联公司' }, { status: 404 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const period = searchParams.get('period') || 'month';
+    const scope = searchParams.get('scope') || 'personal';
+
+    // 计算时间范围
+    const now = new Date();
+    let startDate: Date;
+    let endDate: Date = now;
+
+    switch (period) {
+      case 'quarter':
+        startDate = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+        break;
+      case 'year':
+        startDate = new Date(now.getFullYear(), 0, 1);
+        break;
+      case 'custom':
+        startDate = searchParams.get('startDate')
+          ? new Date(searchParams.get('startDate')!)
+          : new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = searchParams.get('endDate')
+          ? new Date(searchParams.get('endDate')!)
+          : now;
+        break;
+      case 'month':
+      default:
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        break;
+    }
+
+    // 构建查询条件
+    const conditions = [
+      eq(reimbursements.tenantId, user.tenantId),
+      gte(reimbursementItems.date, startDate),
+      lte(reimbursementItems.date, endDate),
+      inArray(reimbursementItems.category, TECH_CATEGORIES),
+      // 只统计已批准和已支付的报销单
+      inArray(reimbursements.status, ['approved', 'paid']),
+    ];
+
+    // 根据scope过滤
+    if (scope === 'personal') {
+      conditions.push(eq(reimbursements.userId, session.user.id));
+    }
+    // team和company scope暂时都返回公司级数据（后续可根据部门权限过滤）
+
+    // 查询技术费用明细
+    const techExpenses = await db
+      .select({
+        category: reimbursementItems.category,
+        amount: reimbursementItems.amount,
+        currency: reimbursementItems.currency,
+        amountInBaseCurrency: reimbursementItems.amountInBaseCurrency,
+        vendor: reimbursementItems.vendor,
+        date: reimbursementItems.date,
+        userId: reimbursements.userId,
+      })
+      .from(reimbursementItems)
+      .innerJoin(reimbursements, eq(reimbursementItems.reimbursementId, reimbursements.id))
+      .where(and(...conditions));
+
+    // 获取用户信息用于显示
+    const userIds = [...new Set(techExpenses.map(e => e.userId))];
+    const userMap = new Map<string, string>();
+
+    if (userIds.length > 0) {
+      const usersData = await db.query.users.findMany({
+        where: inArray(users.id, userIds),
+        columns: { id: true, name: true },
+      });
+      usersData.forEach(u => userMap.set(u.id, u.name));
+    }
+
+    // 按类别汇总
+    const byCategory: Record<string, {
+      total: number;
+      count: number;
+      items: { vendor: string; amount: number }[];
+    }> = {};
+
+    TECH_CATEGORIES.forEach(cat => {
+      byCategory[cat] = { total: 0, count: 0, items: [] };
+    });
+
+    // 按供应商汇总
+    const byVendor: Record<string, {
+      name: string;
+      category: string;
+      totalAmount: number;
+      count: number;
+      users: Set<string>;
+    }> = {};
+
+    // 按月份汇总（用于趋势图）
+    const byMonth: Record<string, number> = {};
+
+    // 按用户汇总
+    const byUser: Record<string, { name: string; total: number; categories: Record<string, number> }> = {};
+
+    techExpenses.forEach(expense => {
+      const category = expense.category;
+      const amount = expense.amountInBaseCurrency;
+      const vendorInfo = identifyVendor(expense.vendor);
+      const vendorName = vendorInfo?.name || expense.vendor || '未知供应商';
+      const monthKey = `${expense.date.getFullYear()}-${String(expense.date.getMonth() + 1).padStart(2, '0')}`;
+      const userName = userMap.get(expense.userId) || '未知用户';
+
+      // 按类别汇总
+      if (byCategory[category]) {
+        byCategory[category].total += amount;
+        byCategory[category].count += 1;
+        byCategory[category].items.push({ vendor: vendorName, amount });
+      }
+
+      // 按供应商汇总
+      if (!byVendor[vendorName]) {
+        byVendor[vendorName] = {
+          name: vendorName,
+          category: vendorInfo?.category || category,
+          totalAmount: 0,
+          count: 0,
+          users: new Set(),
+        };
+      }
+      byVendor[vendorName].totalAmount += amount;
+      byVendor[vendorName].count += 1;
+      byVendor[vendorName].users.add(expense.userId);
+
+      // 按月份汇总
+      if (!byMonth[monthKey]) {
+        byMonth[monthKey] = 0;
+      }
+      byMonth[monthKey] += amount;
+
+      // 按用户汇总
+      if (!byUser[expense.userId]) {
+        byUser[expense.userId] = {
+          name: userName,
+          total: 0,
+          categories: {},
+        };
+      }
+      byUser[expense.userId].total += amount;
+      if (!byUser[expense.userId].categories[category]) {
+        byUser[expense.userId].categories[category] = 0;
+      }
+      byUser[expense.userId].categories[category] += amount;
+    });
+
+    // 计算总计和同比
+    const totalAmount = Object.values(byCategory).reduce((sum, cat) => sum + cat.total, 0);
+
+    // 格式化类别数据
+    const categoryData = Object.entries(byCategory).map(([key, value]) => ({
+      category: key,
+      label: CATEGORY_LABELS[key] || key,
+      total: Math.round(value.total * 100) / 100,
+      count: value.count,
+      percentage: totalAmount > 0 ? Math.round((value.total / totalAmount) * 1000) / 10 : 0,
+      topVendors: Object.entries(
+        value.items.reduce((acc, item) => {
+          acc[item.vendor] = (acc[item.vendor] || 0) + item.amount;
+          return acc;
+        }, {} as Record<string, number>)
+      )
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([name, amount]) => ({ name, amount: Math.round(amount * 100) / 100 })),
+    }));
+
+    // 格式化供应商数据
+    const vendorData = Object.values(byVendor)
+      .map(v => ({
+        name: v.name,
+        category: v.category,
+        categoryLabel: CATEGORY_LABELS[v.category] || v.category,
+        totalAmount: Math.round(v.totalAmount * 100) / 100,
+        count: v.count,
+        userCount: v.users.size,
+      }))
+      .sort((a, b) => b.totalAmount - a.totalAmount);
+
+    // 格式化月度趋势数据
+    const monthlyTrend = Object.entries(byMonth)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, amount]) => ({
+        month,
+        amount: Math.round(amount * 100) / 100,
+      }));
+
+    // 格式化用户排行
+    const userRanking = Object.entries(byUser)
+      .map(([userId, data]) => ({
+        userId,
+        name: data.name,
+        total: Math.round(data.total * 100) / 100,
+        topCategory: Object.entries(data.categories)
+          .sort((a, b) => b[1] - a[1])[0]?.[0] || null,
+      }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+
+    // AI Token 特别分析
+    const aiTokenAnalysis = {
+      total: byCategory['ai_token']?.total || 0,
+      topProviders: vendorData
+        .filter(v => v.category === 'ai_token')
+        .slice(0, 5),
+      // 简单的优化建议
+      suggestions: [] as string[],
+    };
+
+    // 生成AI Token优化建议
+    if (aiTokenAnalysis.total > 0) {
+      const openaiUsage = vendorData.find(v => v.name === 'OpenAI');
+      if (openaiUsage && openaiUsage.totalAmount > aiTokenAnalysis.total * 0.5) {
+        aiTokenAnalysis.suggestions.push(
+          `OpenAI 占 AI 费用的 ${Math.round((openaiUsage.totalAmount / aiTokenAnalysis.total) * 100)}%，可考虑在适合的场景使用 Claude 或开源模型降低成本`
+        );
+      }
+
+      if (aiTokenAnalysis.topProviders.length === 1) {
+        aiTokenAnalysis.suggestions.push(
+          '目前只使用单一 AI 供应商，建议评估其他供应商以优化成本和避免供应商锁定'
+        );
+      }
+    }
+
+    // 云资源分析
+    const cloudAnalysis = {
+      total: byCategory['cloud_resource']?.total || 0,
+      topProviders: vendorData
+        .filter(v => v.category === 'cloud_resource')
+        .slice(0, 5),
+    };
+
+    // SaaS 订阅分析
+    const saasAnalysis = {
+      total: byCategory['software']?.total || 0,
+      activeSubscriptions: vendorData.filter(v => v.category === 'software').length,
+      topSubscriptions: vendorData
+        .filter(v => v.category === 'software')
+        .slice(0, 5),
+    };
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        period: {
+          start: startDate.toISOString(),
+          end: endDate.toISOString(),
+          label: period,
+        },
+        scope,
+        summary: {
+          totalAmount: Math.round(totalAmount * 100) / 100,
+          currency: 'CNY',
+          categoryCount: categoryData.filter(c => c.total > 0).length,
+          vendorCount: vendorData.length,
+        },
+        byCategory: categoryData,
+        byVendor: vendorData.slice(0, 20), // 返回前20个供应商
+        monthlyTrend,
+        userRanking: scope !== 'personal' ? userRanking : undefined,
+        aiTokenAnalysis,
+        cloudAnalysis,
+        saasAnalysis,
+      },
+    });
+  } catch (error) {
+    console.error('Tech expenses analysis error:', error);
+    return NextResponse.json({ error: '获取技术费用分析失败' }, { status: 500 });
+  }
+}
