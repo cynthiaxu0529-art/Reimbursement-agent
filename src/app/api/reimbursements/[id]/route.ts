@@ -10,6 +10,8 @@ import {
   getApprovalChain,
   canUserApprove,
 } from '@/lib/approval/approval-chain-service';
+import { getUserRoles } from '@/lib/auth/roles';
+import { canViewReimbursement } from '@/lib/department/department-service';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -57,12 +59,40 @@ export async function GET(
       return NextResponse.json({ error: '报销单不存在' }, { status: 404 });
     }
 
-    // 检查权限：必须是自己的报销或同一租户（审批人）
+    // 检查权限：使用部门级数据隔离
     const isOwner = reimbursement.userId === session.user.id;
-    const isSameTenant = session.user.tenantId && reimbursement.tenantId === session.user.tenantId;
 
-    if (!isOwner && !isSameTenant) {
-      return NextResponse.json({ error: '无权查看此报销单' }, { status: 403 });
+    if (!isOwner) {
+      // 不是自己的报销，需要检查部门级权限
+      const isSameTenant = session.user.tenantId && reimbursement.tenantId === session.user.tenantId;
+
+      if (!isSameTenant) {
+        return NextResponse.json({ error: '无权查看此报销单' }, { status: 403 });
+      }
+
+      // 获取当前用户完整信息和角色
+      const currentUser = await db.query.users.findFirst({
+        where: eq(users.id, session.user.id),
+      });
+
+      if (!currentUser) {
+        return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+      }
+
+      const userRoles = getUserRoles(currentUser);
+
+      // 检查是否有权限查看该报销单（部门级数据隔离）
+      const canView = await canViewReimbursement(
+        session.user.id,
+        reimbursement.userId,
+        id,
+        reimbursement.tenantId,
+        userRoles
+      );
+
+      if (!canView) {
+        return NextResponse.json({ error: '无权查看此报销单，该报销不在您管理的部门范围内' }, { status: 403 });
+      }
     }
 
     // 获取审批链
@@ -396,9 +426,33 @@ export async function PATCH(
       return NextResponse.json({ error: '报销单不存在' }, { status: 404 });
     }
 
-    // 检查权限：必须是同一租户（审批人）
+    // 检查权限：必须是同一租户
     if (existing.tenantId !== session.user.tenantId) {
       return NextResponse.json({ error: '无权操作此报销单' }, { status: 403 });
+    }
+
+    // 获取当前用户完整信息和角色
+    const currentUser = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+    });
+
+    if (!currentUser) {
+      return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+    }
+
+    const userRoles = getUserRoles(currentUser);
+
+    // 检查部门级数据隔离权限
+    const canView = await canViewReimbursement(
+      session.user.id,
+      existing.userId,
+      id,
+      existing.tenantId,
+      userRoles
+    );
+
+    if (!canView) {
+      return NextResponse.json({ error: '无权操作此报销单，该报销不在您管理的部门范围内' }, { status: 403 });
     }
 
     // 检查是否存在审批链
