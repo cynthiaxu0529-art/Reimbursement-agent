@@ -48,12 +48,14 @@ export default function ExchangeRatesPage() {
     }
   }, [baseCurrency, selectedBaseCurrency]);
 
-  // 获取汇率数据
+  // 获取汇率数据 - 根据本位币动态获取
   const fetchRates = useCallback(async () => {
+    if (!baseCurrency) return;
+
     try {
       setRatesLoading(true);
-      // 获取所有货币对 CNY 的汇率
-      const response = await fetch('/api/exchange-rates?target=CNY');
+      // 获取所有货币对本位币的汇率
+      const response = await fetch(`/api/exchange-rates?target=${baseCurrency}`);
       if (response.ok) {
         const data = await response.json();
         if (data.rates) {
@@ -66,8 +68,12 @@ export default function ExchangeRatesPage() {
               source: (info.source === 'manual' || info.source === 'manual_calculated') ? 'custom' : 'system',
             };
           });
-          // 按货币代码排序
-          rateList.sort((a, b) => a.currency.localeCompare(b.currency));
+          // 按货币代码排序，但把本位币放在最前面
+          rateList.sort((a, b) => {
+            if (a.currency === baseCurrency) return -1;
+            if (b.currency === baseCurrency) return 1;
+            return a.currency.localeCompare(b.currency);
+          });
           setRates(rateList);
         }
       }
@@ -76,7 +82,7 @@ export default function ExchangeRatesPage() {
     } finally {
       setRatesLoading(false);
     }
-  }, []);
+  }, [baseCurrency]);
 
   // 获取自定义汇率
   const fetchCustomRates = useCallback(async () => {
@@ -93,10 +99,17 @@ export default function ExchangeRatesPage() {
     }
   }, []);
 
+  // 当本位币加载完成后获取汇率
   useEffect(() => {
-    fetchRates();
+    if (baseCurrency) {
+      fetchRates();
+    }
+  }, [baseCurrency, fetchRates]);
+
+  // 获取自定义汇率
+  useEffect(() => {
     fetchCustomRates();
-  }, [fetchRates, fetchCustomRates]);
+  }, [fetchCustomRates]);
 
   // 更新本位币
   const handleBaseCurrencyChange = async (currency: CurrencyType) => {
@@ -241,7 +254,7 @@ export default function ExchangeRatesPage() {
           <div>
             <h2 className="text-base font-semibold text-gray-900">当前汇率</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              系统支持的货币及其兑换人民币汇率（每月初自动更新）
+              各货币兑换 {CURRENCY_NAMES[baseCurrency]?.zh || baseCurrency} ({baseCurrency}) 的汇率（每月初自动更新）
             </p>
           </div>
           <Button
@@ -307,7 +320,7 @@ export default function ExchangeRatesPage() {
               <tr>
                 <th className="text-left px-4 py-3 font-medium">货币</th>
                 <th className="text-left px-4 py-3 font-medium">代码</th>
-                <th className="text-right px-4 py-3 font-medium">兑人民币汇率</th>
+                <th className="text-right px-4 py-3 font-medium">兑{CURRENCY_NAMES[baseCurrency]?.zh || baseCurrency}汇率</th>
                 <th className="text-center px-4 py-3 font-medium">来源</th>
                 <th className="text-center px-4 py-3 font-medium w-20">操作</th>
               </tr>
@@ -348,7 +361,7 @@ export default function ExchangeRatesPage() {
                         <span className="text-sm font-medium text-gray-900">
                           {rate.rate.toFixed(4)}
                         </span>
-                        <span className="text-xs text-gray-400 ml-1">CNY</span>
+                        <span className="text-xs text-gray-400 ml-1">{baseCurrency}</span>
                       </td>
                       <td className="px-4 py-3 text-center">
                         {isCustom ? (
@@ -385,10 +398,10 @@ export default function ExchangeRatesPage() {
       <Card className="p-4 bg-gray-50 border-gray-200">
         <h3 className="text-sm font-semibold text-gray-700 mb-2">使用说明</h3>
         <ul className="text-xs text-gray-500 space-y-1.5">
-          <li>• <strong>记账本位币</strong>：公司核算使用的货币，所有报销金额会自动折算为此货币</li>
-          <li>• <strong>系统汇率</strong>：每月初自动获取各主要货币对人民币的汇率</li>
-          <li>• <strong>手动添加</strong>：当员工报销的货币不在系统中时，可手动添加汇率</li>
-          <li>• 汇率换算公式：报销金额(原币) × 汇率(兑CNY) ÷ 本位币汇率(兑CNY) = 折算金额(本位币)</li>
+          <li>• <strong>记账本位币</strong>：当前为 {CURRENCY_NAMES[baseCurrency]?.zh || baseCurrency}，所有报销金额会自动折算为此货币</li>
+          <li>• <strong>系统汇率</strong>：每月初自动获取各主要货币的汇率</li>
+          <li>• <strong>手动添加</strong>：当员工报销的货币不在系统中时，可手动添加（输入对人民币汇率，系统自动换算）</li>
+          <li>• <strong>汇率显示</strong>：表格中的汇率表示 1 单位原币 = X {baseCurrency}</li>
         </ul>
       </Card>
     </div>
