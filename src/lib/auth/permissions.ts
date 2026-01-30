@@ -214,3 +214,21 @@ export function checkPermission(role: string, permission: Permission): Permissio
   }
   return { allowed: true };
 }
+
+// ============ 部门数据隔离权限检查 ============
+
+/**
+ * 检查用户是否可以查看所有报销（不受部门限制）
+ * Finance/Admin/Super Admin 可以查看同租户所有报销
+ */
+export function canViewAllReimbursements(role: Role | string): boolean {
+  return hasFinancePermission(role) || hasAdminPermission(role);
+}
+
+/**
+ * 检查用户是否只能查看部门内的报销
+ * Manager 角色只能查看自己管理的部门的报销
+ */
+export function canOnlyViewDepartmentReimbursements(role: Role | string): boolean {
+  return hasApproverPermission(role) && !canViewAllReimbursements(role);
+}

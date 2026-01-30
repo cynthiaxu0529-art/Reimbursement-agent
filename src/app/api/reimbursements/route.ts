@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
-import { eq, desc, and, or } from 'drizzle-orm';
+import { eq, desc, and, or, inArray } from 'drizzle-orm';
 import { getUserRoles, canApprove, canProcessPayment } from '@/lib/auth/roles';
+import { getVisibleUserIds } from '@/lib/department/department-service';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -40,13 +41,32 @@ export async function GET(request: NextRequest) {
     // 构建查询条件
     const conditions: any[] = [];
 
-    // 验证角色权限
+    // 验证角色权限并应用部门级数据隔离
     if (role === 'approver' && currentUser.tenantId) {
       // 检查用户是否有审批权限
       if (!canApprove(userRoles)) {
         return NextResponse.json({ error: '无审批权限' }, { status: 403 });
       }
-      conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
+
+      // 获取用户可以查看的报销提交人ID列表（部门级数据隔离）
+      const visibleUserIds = await getVisibleUserIds(
+        session.user.id,
+        currentUser.tenantId,
+        userRoles
+      );
+
+      if (visibleUserIds === null) {
+        // Finance/Admin/Super Admin 可以看同租户所有报销
+        conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
+      } else if (visibleUserIds.length > 0) {
+        // Manager 只能看管理部门（含子部门）的成员报销
+        conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
+        conditions.push(inArray(reimbursements.userId, visibleUserIds));
+      } else {
+        // 没有管理任何部门，只能看自己的
+        conditions.push(eq(reimbursements.userId, session.user.id));
+      }
+
       // 如果只看自己处理的（批准或驳回）
       if (myApprovals) {
         conditions.push(or(
@@ -59,6 +79,7 @@ export async function GET(request: NextRequest) {
       if (!canProcessPayment(userRoles)) {
         return NextResponse.json({ error: '无财务权限' }, { status: 403 });
       }
+      // 财务可以看同租户所有报销（需要处理付款）
       conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
     } else {
       // 员工模式：只看自己的
