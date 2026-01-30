@@ -128,8 +128,18 @@ export default function NewReimbursementPage() {
         if (amount > 0 && currency) {
           // 使用封装好的本位币转换，无需手动指定目标货币
           const conversion = convertToBase(amount, currency);
-          updatedItem.exchangeRate = conversion.rate;
-          updatedItem.amountInUSD = conversion.amount;
+
+          if (conversion.success) {
+            updatedItem.exchangeRate = conversion.rate;
+            updatedItem.amountInUSD = conversion.amount;
+          } else {
+            // 汇率获取失败，显示警告
+            updatedItem.exchangeRate = undefined;
+            updatedItem.amountInUSD = undefined;
+            console.warn(conversion.error);
+            // 显示用户提示
+            alert(`汇率警告：${conversion.error}`);
+          }
         }
       }
 
@@ -276,6 +286,11 @@ export default function NewReimbursementPage() {
       // 使用封装好的本位币转换，无需手动指定目标货币
       const conversion = amount > 0 ? convertToBase(amount, currency as CurrencyType) : null;
 
+      // 如果汇率获取失败，收集错误信息
+      if (conversion && !conversion.success) {
+        console.warn(`OCR 项目汇率警告: ${conversion.error}`);
+      }
+
       newItems.push({
         id: Date.now().toString() + index + Math.random().toString(36).substr(2, 9),
         description: itemDescription,
@@ -289,8 +304,8 @@ export default function NewReimbursementPage() {
         trainNumber: ocrData.trainNumber || '',
         flightNumber: ocrData.flightNumber || '',
         seatClass: ocrData.seatClass || '',
-        exchangeRate: conversion?.rate,
-        amountInUSD: conversion?.amount,
+        exchangeRate: conversion?.success ? conversion.rate : undefined,
+        amountInUSD: conversion?.success ? conversion.amount : undefined,
         receiptUrl: ocrData.receiptUrl || '',
         receiptFileName: ocrData.receiptFileName || '',
       });

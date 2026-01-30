@@ -123,6 +123,8 @@ export function useExchangeRate(
 
   /**
    * 获取从 from 到 to 的汇率
+   *
+   * 注意：如果货币不在系统支持列表中，会返回 null 并打印警告
    */
   const getRate = useCallback(
     (from: CurrencyType, to: CurrencyType): number => {
@@ -130,8 +132,21 @@ export function useExchangeRate(
 
       // rates 是相对于 baseCurrency 的
       // 例如 rates['USD'] = 7.24 表示 1 USD = 7.24 CNY（当 baseCurrency = CNY）
-      const fromRate = rates[from]?.rate || 1;
-      const toRate = rates[to]?.rate || 1;
+      const fromRateInfo = rates[from];
+      const toRateInfo = rates[to];
+
+      // 检查货币是否在支持列表中
+      if (!fromRateInfo) {
+        console.warn(`[汇率警告] 货币 ${from} 不在支持列表中，无法获取汇率`);
+      }
+      if (!toRateInfo) {
+        console.warn(`[汇率警告] 货币 ${to} 不在支持列表中，无法获取汇率`);
+      }
+
+      // 如果任一货币缺失汇率，返回 NaN 以便上层检测
+      if (!fromRateInfo || !toRateInfo) {
+        return NaN;
+      }
 
       // 计算 from -> to 的汇率
       // from -> baseCurrency -> to
@@ -139,7 +154,7 @@ export function useExchangeRate(
       //   1 CAD = 5.32 CNY (fromRate)
       //   1 USD = 7.24 CNY (toRate)
       //   1 CAD = 5.32 / 7.24 USD = 0.735 USD
-      return fromRate / toRate;
+      return fromRateInfo.rate / toRateInfo.rate;
     },
     [rates]
   );

@@ -14,14 +14,18 @@ import { useTenantConfig } from './useTenantConfig';
 import { CURRENCY_SYMBOLS, SYSTEM_BASE_CURRENCY } from '@/lib/currency/base-currency';
 
 interface ConversionResult {
-  /** 转换后的本位币金额 */
+  /** 转换后的本位币金额（如果汇率缺失则为 NaN） */
   amount: number;
-  /** 使用的汇率（原币 → 本位币） */
+  /** 使用的汇率（原币 → 本位币，如果缺失则为 NaN） */
   rate: number;
   /** 本位币代码 */
   baseCurrency: CurrencyType;
   /** 本位币符号 */
   symbol: string;
+  /** 是否成功转换 */
+  success: boolean;
+  /** 错误信息（如果转换失败） */
+  error?: string;
 }
 
 interface UseBaseCurrencyConversionReturn {
@@ -102,6 +106,8 @@ export function useBaseCurrencyConversion(): UseBaseCurrencyConversionReturn {
 
   /**
    * 转换到本位币
+   *
+   * 如果货币不在支持列表中，返回 success: false 和错误信息
    */
   const convertToBase = useCallback(
     (amount: number, fromCurrency: CurrencyType): ConversionResult => {
@@ -111,10 +117,24 @@ export function useBaseCurrencyConversion(): UseBaseCurrencyConversionReturn {
           rate: 1,
           baseCurrency,
           symbol: baseCurrencySymbol,
+          success: true,
         };
       }
 
       const rate = getRate(fromCurrency, baseCurrency);
+
+      // 检查汇率是否有效
+      if (isNaN(rate)) {
+        return {
+          amount: NaN,
+          rate: NaN,
+          baseCurrency,
+          symbol: baseCurrencySymbol,
+          success: false,
+          error: `货币 ${fromCurrency} 暂不支持，请联系管理员添加汇率`,
+        };
+      }
+
       const convertedAmount = convert(amount, fromCurrency, baseCurrency);
 
       return {
@@ -122,6 +142,7 @@ export function useBaseCurrencyConversion(): UseBaseCurrencyConversionReturn {
         rate,
         baseCurrency,
         symbol: baseCurrencySymbol,
+        success: true,
       };
     },
     [getRate, convert, baseCurrency, baseCurrencySymbol]
