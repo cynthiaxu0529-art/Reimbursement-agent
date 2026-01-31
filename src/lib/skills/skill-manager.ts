@@ -553,6 +553,346 @@ export function createInvoiceLearnerSkill(tenantId: string): Skill {
 }
 
 /**
+ * 创建预算预警通知 Skill
+ * 检测技术费用是否接近或超过月度预算限额
+ */
+export function createBudgetAlertSkill(tenantId: string): Skill {
+  return {
+    id: 'builtin_budget_alert',
+    tenantId,
+    name: '预算预警通知',
+    description: '检测技术费用是否接近或超过月度预算限额，避免超支',
+    category: SkillCategory.NOTIFICATION,
+    version: '1.0.0',
+    isActive: true,
+    isBuiltIn: true,
+    triggers: [
+      { type: SkillTrigger.ON_SCHEDULE }, // 定时触发（每日）
+      { type: SkillTrigger.ON_EXPENSE_ADD, conditions: [
+        { field: 'expenseItem.category', operator: 'in', value: ['ai_token', 'cloud_resource', 'software', 'api_service', 'hosting'] },
+      ]},
+      { type: SkillTrigger.ON_CHAT_COMMAND }, // AI 助手触发
+    ],
+    executor: {
+      type: 'javascript',
+      code: `
+        // 获取技术费用类别
+        const TECH_CATEGORIES = ['ai_token', 'cloud_resource', 'software', 'api_service', 'hosting', 'domain'];
+
+        // 从 context.params 获取当前月度费用数据
+        const monthlyExpenses = context.params?.monthlyExpenses || {};
+        const budgetLimits = context.params?.budgetLimits || {
+          ai_token: 5000,      // AI Token 月度限额
+          cloud_resource: 10000, // 云资源月度限额
+          software: 3000,       // 软件订阅月度限额
+          total_tech: 20000,    // 技术费用总限额
+        };
+
+        const alerts = [];
+        let totalTechExpense = 0;
+
+        // 检查各类别预算
+        for (const category of TECH_CATEGORIES) {
+          const spent = monthlyExpenses[category] || 0;
+          const limit = budgetLimits[category];
+          totalTechExpense += spent;
+
+          if (limit) {
+            const percentage = (spent / limit) * 100;
+
+            if (percentage >= 100) {
+              alerts.push({
+                level: 'critical',
+                category,
+                message: category + ' 费用已超支！已使用 ¥' + spent.toFixed(2) + '，限额 ¥' + limit,
+                percentage: percentage.toFixed(1),
+                spent,
+                limit,
+              });
+            } else if (percentage >= 80) {
+              alerts.push({
+                level: 'warning',
+                category,
+                message: category + ' 费用已达 ' + percentage.toFixed(1) + '%，请注意控制',
+                percentage: percentage.toFixed(1),
+                spent,
+                limit,
+              });
+            } else if (percentage >= 60) {
+              alerts.push({
+                level: 'info',
+                category,
+                message: category + ' 费用已使用 ' + percentage.toFixed(1) + '%',
+                percentage: percentage.toFixed(1),
+                spent,
+                limit,
+              });
+            }
+          }
+        }
+
+        // 检查技术费用总预算
+        const totalLimit = budgetLimits.total_tech;
+        if (totalLimit) {
+          const totalPercentage = (totalTechExpense / totalLimit) * 100;
+          if (totalPercentage >= 80) {
+            alerts.unshift({
+              level: totalPercentage >= 100 ? 'critical' : 'warning',
+              category: 'total_tech',
+              message: '技术费用总计已达 ' + totalPercentage.toFixed(1) + '% (¥' + totalTechExpense.toFixed(2) + ' / ¥' + totalLimit + ')',
+              percentage: totalPercentage.toFixed(1),
+              spent: totalTechExpense,
+              limit: totalLimit,
+            });
+          }
+        }
+
+        return {
+          hasAlerts: alerts.length > 0,
+          alertCount: alerts.length,
+          criticalCount: alerts.filter(a => a.level === 'critical').length,
+          warningCount: alerts.filter(a => a.level === 'warning').length,
+          alerts,
+          summary: {
+            totalTechExpense,
+            totalLimit,
+            usagePercentage: totalLimit ? ((totalTechExpense / totalLimit) * 100).toFixed(1) : null,
+          },
+        };
+      `,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        monthlyExpenses: { type: 'object', description: '当月各类别费用' },
+        budgetLimits: { type: 'object', description: '各类别预算限额' },
+      },
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        hasAlerts: { type: 'boolean', description: '是否有预警' },
+        alertCount: { type: 'number', description: '预警数量' },
+        alerts: { type: 'array', description: '预警详情列表' },
+      },
+    },
+    permissions: [
+      { resource: 'reimbursement', actions: ['read'] },
+    ],
+    configSchema: {
+      fields: [
+        { key: 'ai_token_limit', type: 'number', label: 'AI Token 月度限额', default: 5000 },
+        { key: 'cloud_resource_limit', type: 'number', label: '云资源月度限额', default: 10000 },
+        { key: 'software_limit', type: 'number', label: '软件订阅月度限额', default: 3000 },
+        { key: 'total_tech_limit', type: 'number', label: '技术费用总限额', default: 20000 },
+        { key: 'warning_threshold', type: 'number', label: '预警阈值(%)', default: 80 },
+      ],
+    },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+/**
+ * 创建异常消费检测 Skill
+ * 检测异常高额的技术费用支出
+ */
+export function createAnomalyDetectorSkill(tenantId: string): Skill {
+  return {
+    id: 'builtin_anomaly_detector',
+    tenantId,
+    name: '异常消费检测',
+    description: '检测异常高额的技术费用支出，及时发现问题',
+    category: SkillCategory.VALIDATION,
+    version: '1.0.0',
+    isActive: true,
+    isBuiltIn: true,
+    triggers: [
+      { type: SkillTrigger.ON_EXPENSE_ADD, conditions: [
+        { field: 'expenseItem.category', operator: 'in', value: ['ai_token', 'cloud_resource', 'software', 'api_service', 'hosting'] },
+      ]},
+      { type: SkillTrigger.ON_REIMBURSEMENT_SUBMIT },
+      { type: SkillTrigger.ON_CHAT_COMMAND },
+    ],
+    executor: {
+      type: 'javascript',
+      code: `
+        const TECH_CATEGORIES = ['ai_token', 'cloud_resource', 'software', 'api_service', 'hosting', 'domain'];
+
+        // 获取历史平均值和当前费用
+        const historicalAvg = context.params?.historicalAvg || {};
+        const currentExpenses = context.params?.currentExpenses || [];
+        const thresholdMultiplier = context.params?.thresholdMultiplier || 2.0; // 超过平均值2倍视为异常
+
+        const anomalies = [];
+
+        // ========== 1. 重复提交检测 ==========
+        const expenseKeys = new Map(); // 用于检测重复
+        const duplicates = [];
+
+        for (const expense of currentExpenses) {
+          // 生成唯一键：供应商 + 金额 + 日期（精确到天）
+          const dateStr = expense.date ? new Date(expense.date).toISOString().split('T')[0] : '';
+          const key = (expense.vendor || '') + '|' + expense.amount + '|' + dateStr;
+
+          if (expenseKeys.has(key)) {
+            const existing = expenseKeys.get(key);
+            // 标记为潜在重复
+            if (!duplicates.find(d => d.key === key)) {
+              duplicates.push({
+                key,
+                items: [existing, expense],
+                vendor: expense.vendor,
+                amount: expense.amount,
+                date: dateStr,
+              });
+            } else {
+              duplicates.find(d => d.key === key).items.push(expense);
+            }
+          } else {
+            expenseKeys.set(key, expense);
+          }
+        }
+
+        // 添加重复提交异常
+        for (const dup of duplicates) {
+          anomalies.push({
+            type: 'duplicate',
+            level: 'warning',
+            vendor: dup.vendor,
+            amount: dup.amount,
+            date: dup.date,
+            count: dup.items.length,
+            message: '检测到疑似重复提交：' + (dup.vendor || '未知供应商') + ' ¥' + dup.amount.toFixed(2) + ' (' + dup.date + ') 出现 ' + dup.items.length + ' 次',
+            suggestion: '请核实这 ' + dup.items.length + ' 笔费用是否为同一笔消费的重复提交',
+            items: dup.items.map(i => i.id),
+          });
+        }
+
+        // ========== 2. 高额异常检测 ==========
+        for (const expense of currentExpenses) {
+          if (!TECH_CATEGORIES.includes(expense.category)) continue;
+
+          const avgAmount = historicalAvg[expense.category]?.avgAmount || 0;
+          const stdDev = historicalAvg[expense.category]?.stdDev || avgAmount * 0.5;
+
+          // 异常检测：超过平均值 + N倍标准差
+          const threshold = avgAmount + (stdDev * thresholdMultiplier);
+
+          if (avgAmount > 0 && expense.amount > threshold) {
+            const ratio = expense.amount / avgAmount;
+            anomalies.push({
+              type: 'high_amount',
+              id: expense.id,
+              category: expense.category,
+              vendor: expense.vendor,
+              amount: expense.amount,
+              avgAmount: avgAmount.toFixed(2),
+              threshold: threshold.toFixed(2),
+              ratio: ratio.toFixed(1),
+              level: ratio > 5 ? 'critical' : ratio > 3 ? 'warning' : 'info',
+              message: (expense.vendor || '未知') + ' 消费 ¥' + expense.amount.toFixed(2) + ' 是历史平均的 ' + ratio.toFixed(1) + ' 倍',
+              suggestion: ratio > 3
+                ? '建议核实此笔费用是否正常，可能存在异常消费或错误录入'
+                : '此笔费用高于平均水平，建议关注',
+            });
+          }
+        }
+
+        // ========== 3. 供应商集中度检测 ==========
+        const vendorSpending = {};
+        let totalAmount = 0;
+        for (const expense of currentExpenses) {
+          if (!TECH_CATEGORIES.includes(expense.category)) continue;
+          const vendor = expense.vendor || '未知';
+          vendorSpending[vendor] = (vendorSpending[vendor] || 0) + expense.amount;
+          totalAmount += expense.amount;
+        }
+
+        // 单一供应商占比超过70%视为集中度过高
+        for (const [vendor, amount] of Object.entries(vendorSpending)) {
+          const percentage = (amount / totalAmount) * 100;
+          if (percentage > 70 && totalAmount > 1000) {
+            anomalies.push({
+              type: 'concentration',
+              vendor,
+              amount,
+              percentage: percentage.toFixed(1),
+              level: 'info',
+              message: vendor + ' 占技术费用的 ' + percentage.toFixed(1) + '%，供应商集中度较高',
+              suggestion: '建议评估是否需要分散供应商风险',
+            });
+          }
+        }
+
+        // ========== 4. 月度突增检测 ==========
+        const lastMonthTotal = context.params?.lastMonthTotal || 0;
+        const currentTotal = totalAmount;
+        if (lastMonthTotal > 0 && currentTotal > lastMonthTotal * 1.5) {
+          const growthRate = ((currentTotal - lastMonthTotal) / lastMonthTotal * 100).toFixed(1);
+          anomalies.unshift({
+            type: 'monthly_spike',
+            level: currentTotal > lastMonthTotal * 2 ? 'warning' : 'info',
+            currentTotal,
+            lastMonthTotal,
+            growthRate,
+            message: '本月技术费用较上月增长 ' + growthRate + '%',
+            suggestion: '建议分析费用增长原因',
+          });
+        }
+
+        // 统计各类异常数量
+        const duplicateCount = anomalies.filter(a => a.type === 'duplicate').length;
+
+        return {
+          hasAnomalies: anomalies.length > 0,
+          anomalyCount: anomalies.length,
+          criticalCount: anomalies.filter(a => a.level === 'critical').length,
+          warningCount: anomalies.filter(a => a.level === 'warning').length,
+          duplicateCount,
+          anomalies,
+          summary: {
+            totalAnalyzed: currentExpenses.length,
+            totalAmount,
+            lastMonthTotal,
+            duplicateCount,
+          },
+        };
+      `,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        currentExpenses: { type: 'array', description: '当前待检测的费用列表' },
+        historicalAvg: { type: 'object', description: '各类别历史平均值' },
+        lastMonthTotal: { type: 'number', description: '上月技术费用总额' },
+        thresholdMultiplier: { type: 'number', description: '异常阈值倍数', default: 2.0 },
+      },
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        hasAnomalies: { type: 'boolean', description: '是否检测到异常' },
+        anomalyCount: { type: 'number', description: '异常数量' },
+        anomalies: { type: 'array', description: '异常详情列表' },
+      },
+    },
+    permissions: [
+      { resource: 'reimbursement', actions: ['read'] },
+    ],
+    configSchema: {
+      fields: [
+        { key: 'threshold_multiplier', type: 'number', label: '异常阈值倍数', default: 2.0 },
+        { key: 'min_amount_check', type: 'number', label: '最小检测金额', default: 100 },
+        { key: 'concentration_threshold', type: 'number', label: '供应商集中度阈值(%)', default: 70 },
+      ],
+    },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+/**
  * 获取所有内置 Skills
  */
 export function getBuiltInSkills(tenantId: string): Skill[] {
@@ -561,6 +901,8 @@ export function getBuiltInSkills(tenantId: string): Skill[] {
     createDuplicateDetectorSkill(tenantId),
     createSmartCategorizerSkill(tenantId),
     createInvoiceLearnerSkill(tenantId),
+    createBudgetAlertSkill(tenantId),
+    createAnomalyDetectorSkill(tenantId),
   ];
 }
 

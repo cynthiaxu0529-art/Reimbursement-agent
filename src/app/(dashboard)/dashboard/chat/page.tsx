@@ -106,15 +106,15 @@ const limitTypeLabels: Record<string, string> = {
 const samplePrompts = [
   { text: '报销政策是什么', icon: '📋' },
   { text: '分析本月技术费用', icon: '📊' },
-  { text: 'AI消耗分析', icon: '🤖' },
-  { text: 'SaaS订阅分析', icon: '☁️' },
+  { text: '预算预警检查', icon: '⚠️' },
+  { text: '异常消费检测', icon: '🔍' },
 ];
 
 const capabilities = [
   { icon: '📋', title: '政策查询', desc: '了解公司报销政策' },
   { icon: '📊', title: '费用分析', desc: '技术费用统计分析' },
-  { icon: '🤖', title: 'AI消耗', desc: 'AI Token使用分析' },
-  { icon: '💡', title: '优化建议', desc: '成本优化建议' },
+  { icon: '⚠️', title: '预算预警', desc: '检测是否接近超支' },
+  { icon: '🔍', title: '异常检测', desc: '发现异常消费' },
 ];
 
 export default function ChatPage() {
@@ -166,6 +166,131 @@ export default function ChatPage() {
       console.error('Fetch tech expenses error:', error);
       return null;
     }
+  };
+
+  // 执行 Skill
+  const executeSkill = async (skillId: string): Promise<any> => {
+    try {
+      const response = await fetch('/api/skills/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skillId }),
+      });
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error('Execute skill error:', error);
+      return null;
+    }
+  };
+
+  // 格式化预算预警结果
+  const formatBudgetAlertResponse = (result: any): string => {
+    if (!result?.success || !result?.data) {
+      return '获取预算预警数据失败，请稍后重试。';
+    }
+
+    const data = result.data;
+    let response = '**⚠️ 预算预警检查**\n\n';
+
+    if (!data.hasAlerts) {
+      response += '✅ 当前技术费用预算使用正常，无预警。\n\n';
+      if (data.summary) {
+        response += `**预算使用情况：**\n`;
+        response += `• 本月技术费用总计：¥${data.summary.totalTechExpense?.toLocaleString() || 0}\n`;
+        if (data.summary.totalLimit) {
+          response += `• 预算限额：¥${data.summary.totalLimit.toLocaleString()}\n`;
+          response += `• 使用比例：${data.summary.usagePercentage || 0}%\n`;
+        }
+      }
+      return response;
+    }
+
+    response += `检测到 **${data.alertCount}** 条预警`;
+    if (data.criticalCount > 0) {
+      response += `（其中 ${data.criticalCount} 条严重）`;
+    }
+    response += '\n\n';
+
+    // 按级别排序显示预警
+    const sortedAlerts = [...(data.alerts || [])].sort((a: any, b: any) => {
+      const levelOrder: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+      return (levelOrder[a.level] || 2) - (levelOrder[b.level] || 2);
+    });
+
+    for (const alert of sortedAlerts) {
+      const icon = alert.level === 'critical' ? '🔴' : alert.level === 'warning' ? '🟡' : '🟢';
+      response += `${icon} **${categoryLabels[alert.category] || alert.category}**\n`;
+      response += `   ${alert.message}\n\n`;
+    }
+
+    return response;
+  };
+
+  // 格式化异常检测结果
+  const formatAnomalyResponse = (result: any): string => {
+    if (!result?.success || !result?.data) {
+      return '获取异常检测数据失败，请稍后重试。';
+    }
+
+    const data = result.data;
+    let response = '**🔍 异常消费检测**\n\n';
+
+    if (!data.hasAnomalies) {
+      response += '✅ 未检测到异常消费，所有技术费用在正常范围内。\n\n';
+      if (data.summary) {
+        response += `**检测摘要：**\n`;
+        response += `• 分析费用笔数：${data.summary.totalAnalyzed || 0}\n`;
+        response += `• 本月总额：¥${data.summary.totalAmount?.toLocaleString() || 0}\n`;
+        if (data.summary.lastMonthTotal) {
+          response += `• 上月总额：¥${data.summary.lastMonthTotal.toLocaleString()}\n`;
+        }
+      }
+      return response;
+    }
+
+    response += `检测到 **${data.anomalyCount}** 个异常`;
+    if (data.criticalCount > 0) {
+      response += `（其中 ${data.criticalCount} 个需要立即关注）`;
+    }
+    if (data.duplicateCount > 0) {
+      response += `\n⚠️ 包含 **${data.duplicateCount}** 个疑似重复提交`;
+    }
+    response += '\n\n';
+
+    // 按类型和级别分组显示
+    const anomalies = data.anomalies || [];
+
+    // 1. 先显示重复提交（优先级最高）
+    const duplicates = anomalies.filter((a: any) => a.type === 'duplicate');
+    if (duplicates.length > 0) {
+      response += '**📋 疑似重复提交**\n';
+      for (const dup of duplicates) {
+        response += `🟡 ${dup.message}\n`;
+        response += `   💡 ${dup.suggestion}\n\n`;
+      }
+    }
+
+    // 2. 显示其他异常（按级别排序）
+    const otherAnomalies = anomalies.filter((a: any) => a.type !== 'duplicate');
+    const sortedAnomalies = [...otherAnomalies].sort((a: any, b: any) => {
+      const levelOrder: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+      return (levelOrder[a.level] || 2) - (levelOrder[b.level] || 2);
+    });
+
+    if (sortedAnomalies.length > 0) {
+      response += '**📊 其他异常**\n';
+      for (const anomaly of sortedAnomalies) {
+        const icon = anomaly.level === 'critical' ? '🔴' : anomaly.level === 'warning' ? '🟡' : '🟢';
+        response += `${icon} ${anomaly.message}\n`;
+        if (anomaly.suggestion) {
+          response += `   💡 ${anomaly.suggestion}\n`;
+        }
+        response += '\n';
+      }
+    }
+
+    return response;
   };
 
   // 格式化政策回复
@@ -307,8 +432,28 @@ export default function ChatPage() {
       let response: Message;
       const lowerText = messageText.toLowerCase();
 
+      // 预算预警检查
+      if (lowerText.includes('预算') || lowerText.includes('预警') || lowerText.includes('超支')) {
+        const result = await executeSkill('builtin_budget_alert');
+        response = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: formatBudgetAlertResponse(result),
+          timestamp: new Date(),
+        };
+      }
+      // 异常消费检测
+      else if (lowerText.includes('异常') || lowerText.includes('检测') || lowerText.includes('风险')) {
+        const result = await executeSkill('builtin_anomaly_detector');
+        response = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: formatAnomalyResponse(result),
+          timestamp: new Date(),
+        };
+      }
       // 政策查询
-      if (lowerText.includes('政策') || lowerText.includes('规定') || lowerText.includes('限额') || lowerText.includes('标准')) {
+      else if (lowerText.includes('政策') || lowerText.includes('规定') || lowerText.includes('限额') || lowerText.includes('标准')) {
         const policyData = await fetchPolicies();
         response = {
           id: (Date.now() + 1).toString(),
@@ -414,7 +559,7 @@ export default function ChatPage() {
         response = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: '我可以帮你：\n\n• **查询政策** - 说"报销政策是什么"\n• **技术费用分析** - 说"分析本月技术费用"\n• **AI消耗分析** - 说"AI消耗分析"\n• **SaaS订阅分析** - 说"SaaS订阅分析"\n• **优化建议** - 说"给我一些优化建议"\n\n请告诉我你想了解什么？',
+          content: '我可以帮你：\n\n• **查询政策** - 说"报销政策是什么"\n• **技术费用分析** - 说"分析本月技术费用"\n• **预算预警** - 说"预算预警检查"\n• **异常检测** - 说"异常消费检测"\n• **优化建议** - 说"给我一些优化建议"\n\n请告诉我你想了解什么？',
           timestamp: new Date(),
         };
       }
