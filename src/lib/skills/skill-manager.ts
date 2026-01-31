@@ -726,6 +726,50 @@ export function createAnomalyDetectorSkill(tenantId: string): Skill {
 
         const anomalies = [];
 
+        // ========== 1. 重复提交检测 ==========
+        const expenseKeys = new Map(); // 用于检测重复
+        const duplicates = [];
+
+        for (const expense of currentExpenses) {
+          // 生成唯一键：供应商 + 金额 + 日期（精确到天）
+          const dateStr = expense.date ? new Date(expense.date).toISOString().split('T')[0] : '';
+          const key = (expense.vendor || '') + '|' + expense.amount + '|' + dateStr;
+
+          if (expenseKeys.has(key)) {
+            const existing = expenseKeys.get(key);
+            // 标记为潜在重复
+            if (!duplicates.find(d => d.key === key)) {
+              duplicates.push({
+                key,
+                items: [existing, expense],
+                vendor: expense.vendor,
+                amount: expense.amount,
+                date: dateStr,
+              });
+            } else {
+              duplicates.find(d => d.key === key).items.push(expense);
+            }
+          } else {
+            expenseKeys.set(key, expense);
+          }
+        }
+
+        // 添加重复提交异常
+        for (const dup of duplicates) {
+          anomalies.push({
+            type: 'duplicate',
+            level: 'warning',
+            vendor: dup.vendor,
+            amount: dup.amount,
+            date: dup.date,
+            count: dup.items.length,
+            message: '检测到疑似重复提交：' + (dup.vendor || '未知供应商') + ' ¥' + dup.amount.toFixed(2) + ' (' + dup.date + ') 出现 ' + dup.items.length + ' 次',
+            suggestion: '请核实这 ' + dup.items.length + ' 笔费用是否为同一笔消费的重复提交',
+            items: dup.items.map(i => i.id),
+          });
+        }
+
+        // ========== 2. 高额异常检测 ==========
         for (const expense of currentExpenses) {
           if (!TECH_CATEGORIES.includes(expense.category)) continue;
 
@@ -738,6 +782,7 @@ export function createAnomalyDetectorSkill(tenantId: string): Skill {
           if (avgAmount > 0 && expense.amount > threshold) {
             const ratio = expense.amount / avgAmount;
             anomalies.push({
+              type: 'high_amount',
               id: expense.id,
               category: expense.category,
               vendor: expense.vendor,
@@ -746,7 +791,7 @@ export function createAnomalyDetectorSkill(tenantId: string): Skill {
               threshold: threshold.toFixed(2),
               ratio: ratio.toFixed(1),
               level: ratio > 5 ? 'critical' : ratio > 3 ? 'warning' : 'info',
-              message: expense.vendor + ' 消费 ¥' + expense.amount.toFixed(2) + ' 是历史平均的 ' + ratio.toFixed(1) + ' 倍',
+              message: (expense.vendor || '未知') + ' 消费 ¥' + expense.amount.toFixed(2) + ' 是历史平均的 ' + ratio.toFixed(1) + ' 倍',
               suggestion: ratio > 3
                 ? '建议核实此笔费用是否正常，可能存在异常消费或错误录入'
                 : '此笔费用高于平均水平，建议关注',
@@ -754,7 +799,7 @@ export function createAnomalyDetectorSkill(tenantId: string): Skill {
           }
         }
 
-        // 检测供应商集中度异常
+        // ========== 3. 供应商集中度检测 ==========
         const vendorSpending = {};
         let totalAmount = 0;
         for (const expense of currentExpenses) {
@@ -780,7 +825,7 @@ export function createAnomalyDetectorSkill(tenantId: string): Skill {
           }
         }
 
-        // 检测突增（与上月对比）
+        // ========== 4. 月度突增检测 ==========
         const lastMonthTotal = context.params?.lastMonthTotal || 0;
         const currentTotal = totalAmount;
         if (lastMonthTotal > 0 && currentTotal > lastMonthTotal * 1.5) {
@@ -796,16 +841,21 @@ export function createAnomalyDetectorSkill(tenantId: string): Skill {
           });
         }
 
+        // 统计各类异常数量
+        const duplicateCount = anomalies.filter(a => a.type === 'duplicate').length;
+
         return {
           hasAnomalies: anomalies.length > 0,
           anomalyCount: anomalies.length,
           criticalCount: anomalies.filter(a => a.level === 'critical').length,
           warningCount: anomalies.filter(a => a.level === 'warning').length,
+          duplicateCount,
           anomalies,
           summary: {
             totalAnalyzed: currentExpenses.length,
             totalAmount,
             lastMonthTotal,
+            duplicateCount,
           },
         };
       `,

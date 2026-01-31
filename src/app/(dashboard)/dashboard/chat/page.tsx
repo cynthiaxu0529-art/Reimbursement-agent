@@ -253,21 +253,41 @@ export default function ChatPage() {
     if (data.criticalCount > 0) {
       response += `（其中 ${data.criticalCount} 个需要立即关注）`;
     }
+    if (data.duplicateCount > 0) {
+      response += `\n⚠️ 包含 **${data.duplicateCount}** 个疑似重复提交`;
+    }
     response += '\n\n';
 
-    // 按级别排序显示异常
-    const sortedAnomalies = [...(data.anomalies || [])].sort((a: any, b: any) => {
+    // 按类型和级别分组显示
+    const anomalies = data.anomalies || [];
+
+    // 1. 先显示重复提交（优先级最高）
+    const duplicates = anomalies.filter((a: any) => a.type === 'duplicate');
+    if (duplicates.length > 0) {
+      response += '**📋 疑似重复提交**\n';
+      for (const dup of duplicates) {
+        response += `🟡 ${dup.message}\n`;
+        response += `   💡 ${dup.suggestion}\n\n`;
+      }
+    }
+
+    // 2. 显示其他异常（按级别排序）
+    const otherAnomalies = anomalies.filter((a: any) => a.type !== 'duplicate');
+    const sortedAnomalies = [...otherAnomalies].sort((a: any, b: any) => {
       const levelOrder: Record<string, number> = { critical: 0, warning: 1, info: 2 };
       return (levelOrder[a.level] || 2) - (levelOrder[b.level] || 2);
     });
 
-    for (const anomaly of sortedAnomalies) {
-      const icon = anomaly.level === 'critical' ? '🔴' : anomaly.level === 'warning' ? '🟡' : '🟢';
-      response += `${icon} ${anomaly.message}\n`;
-      if (anomaly.suggestion) {
-        response += `   💡 ${anomaly.suggestion}\n`;
+    if (sortedAnomalies.length > 0) {
+      response += '**📊 其他异常**\n';
+      for (const anomaly of sortedAnomalies) {
+        const icon = anomaly.level === 'critical' ? '🔴' : anomaly.level === 'warning' ? '🟡' : '🟢';
+        response += `${icon} ${anomaly.message}\n`;
+        if (anomaly.suggestion) {
+          response += `   💡 ${anomaly.suggestion}\n`;
+        }
+        response += '\n';
       }
-      response += '\n';
     }
 
     return response;
