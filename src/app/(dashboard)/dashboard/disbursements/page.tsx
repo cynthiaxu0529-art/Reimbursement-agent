@@ -112,14 +112,28 @@ export default function DisbursementsPage() {
   const [roleChecked, setRoleChecked] = useState(false);
   const [payoutStatuses, setPayoutStatuses] = useState<Record<string, any>>({});
 
-  // 检查用户角色，非财务角色重定向
+  // 检查用户角色，非财务角色重定向 - 从API获取而不是localStorage
   useEffect(() => {
-    const savedRole = localStorage.getItem('userRole');
-    if (savedRole !== 'finance') {
-      router.push('/dashboard');
-    } else {
-      setRoleChecked(true);
-    }
+    const checkRoles = async () => {
+      try {
+        const response = await fetch('/api/settings/role');
+        const result = await response.json();
+        if (result.success && result.roles) {
+          // 检查是否有财务权限（finance 或 super_admin）
+          const hasFinanceAccess = result.roles.includes('finance') || result.roles.includes('super_admin');
+          if (!hasFinanceAccess) {
+            router.push('/dashboard');
+          } else {
+            setRoleChecked(true);
+          }
+        } else {
+          router.push('/dashboard');
+        }
+      } catch {
+        router.push('/dashboard');
+      }
+    };
+    checkRoles();
   }, [router]);
 
   useEffect(() => {
