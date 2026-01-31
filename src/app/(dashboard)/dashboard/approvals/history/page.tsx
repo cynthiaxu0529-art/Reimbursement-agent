@@ -119,15 +119,41 @@ export default function ApprovalHistoryPage() {
     setPreviewImage(null);
   };
   const [roleChecked, setRoleChecked] = useState(false);
+  const [userRoles, setUserRoles] = useState<string[]>([]);
 
-  // 检查用户角色
+  // 检查用户角色 - 从API获取而不是localStorage
   useEffect(() => {
-    const savedRole = localStorage.getItem('userRole');
-    if (savedRole !== 'approver' && savedRole !== 'admin') {
-      router.push('/dashboard');
-    } else {
-      setRoleChecked(true);
-    }
+    const checkRoles = async () => {
+      try {
+        const response = await fetch('/api/settings/role');
+        const result = await response.json();
+        if (result.success && result.roles) {
+          // 转换数据库角色到前端角色
+          const dbToFrontend: Record<string, string> = {
+            employee: 'employee',
+            manager: 'approver',
+            finance: 'finance',
+            admin: 'admin',
+            super_admin: 'super_admin',
+          };
+          const frontendRoles = result.roles.map((r: string) => dbToFrontend[r] || r);
+          setUserRoles(frontendRoles);
+
+          // 检查是否有审批权限（approver 或 super_admin）
+          const hasApprovalAccess = frontendRoles.includes('approver') || frontendRoles.includes('super_admin');
+          if (!hasApprovalAccess) {
+            router.push('/dashboard');
+          } else {
+            setRoleChecked(true);
+          }
+        } else {
+          router.push('/dashboard');
+        }
+      } catch {
+        router.push('/dashboard');
+      }
+    };
+    checkRoles();
   }, [router]);
 
   // 获取审批历史数据 - 只显示当前用户批准的记录
