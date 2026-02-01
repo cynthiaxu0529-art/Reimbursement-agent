@@ -619,7 +619,8 @@ export default function ReimbursementsPage() {
 
                   {/* 原币金额 */}
                   <div style={{ textAlign: 'right', fontSize: '13px', fontWeight: 600, color: '#111827' }}>
-                    ¥{item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                    {currencySymbols[item.items?.[0]?.currency] || '¥'}
+                    {item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
                   </div>
 
                   {/* 汇率 */}
@@ -864,7 +865,7 @@ export default function ReimbursementsPage() {
                                 </span>
                               </div>
                               <div style={{ textAlign: 'right', fontWeight: 500, color: '#111827' }}>
-                                {lineItem.currency === 'USD' ? '$' : '¥'}
+                                {currencySymbols[lineItem.currency] || lineItem.currency}
                                 {lineItem.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
                                 <span style={{ fontSize: '10px', color: '#6b7280', marginLeft: '2px' }}>
                                   {lineItem.currency}
