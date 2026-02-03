@@ -45,10 +45,48 @@ interface Policy {
   updatedAt: string;
 }
 
+interface SkillItem {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  version: string;
+  author?: string;
+  isActive: boolean;
+  isBuiltIn: boolean;
+  source: 'builtin' | 'custom';
+  triggers: any[];
+  executor: {
+    type: string;
+    code?: string;
+    webhookUrl?: string;
+    prompt?: string;
+  };
+  config?: Record<string, any>;
+  configSchema?: {
+    fields: {
+      key: string;
+      type: string;
+      label: string;
+      description?: string;
+      default?: any;
+    }[];
+  };
+  stats?: {
+    totalExecutions: number;
+    successfulExecutions: number;
+    failedExecutions: number;
+    averageExecutionTime: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
 const allTabs = [
   { id: 'profile', label: '个人信息', icon: '👤', adminOnly: false },
   { id: 'company', label: '公司设置', icon: '🏢', adminOnly: true },
   { id: 'policies', label: '报销政策', icon: '📋', adminOnly: true },
+  { id: 'skills', label: 'Skill 管理', icon: '🔧', adminOnly: true },
 ];
 
 const categoryLabels: Record<string, string> = {
@@ -69,6 +107,24 @@ const limitTypeLabels: Record<string, string> = {
   per_item: '每次',
   per_day: '每天',
   per_month: '每月',
+};
+
+const skillCategoryLabels: Record<string, string> = {
+  data_extraction: '数据提取',
+  validation: '验证',
+  calculation: '计算',
+  integration: '集成',
+  notification: '通知',
+  approval: '审批',
+  report: '报表',
+  ai_enhancement: 'AI 增强',
+};
+
+const executorTypeLabels: Record<string, string> = {
+  javascript: 'JavaScript',
+  webhook: 'Webhook',
+  ai_prompt: 'AI Prompt',
+  mcp: 'MCP',
 };
 
 export default function SettingsPage() {
@@ -103,6 +159,13 @@ export default function SettingsPage() {
   const [policiesList, setPoliciesList] = useState<Policy[]>([]);
   const [policiesLoading, setPoliciesLoading] = useState(false);
   const [expandedPolicyId, setExpandedPolicyId] = useState<string | null>(null);
+
+  // Skills data
+  const [skillsList, setSkillsList] = useState<SkillItem[]>([]);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [expandedSkillId, setExpandedSkillId] = useState<string | null>(null);
+  const [skillFilter, setSkillFilter] = useState<'all' | 'builtin' | 'custom'>('all');
+  const [skillsSummary, setSkillsSummary] = useState({ total: 0, builtIn: 0, custom: 0, active: 0 });
 
   // 从 API 获取用户角色
   useEffect(() => {
@@ -181,6 +244,13 @@ export default function SettingsPage() {
     }
   }, [activeTab, isAdmin]);
 
+  // 获取 Skills 列表
+  useEffect(() => {
+    if (activeTab === 'skills' && isAdmin) {
+      fetchSkills();
+    }
+  }, [activeTab, isAdmin, skillFilter]);
+
   const fetchPolicies = async () => {
     setPoliciesLoading(true);
     try {
@@ -193,6 +263,62 @@ export default function SettingsPage() {
       console.error('Failed to fetch policies:', error);
     } finally {
       setPoliciesLoading(false);
+    }
+  };
+
+  const fetchSkills = async () => {
+    setSkillsLoading(true);
+    try {
+      const response = await fetch(`/api/skills?type=${skillFilter}`);
+      const result = await response.json();
+      if (result.success) {
+        setSkillsList(result.data.skills || []);
+        setSkillsSummary(result.data.summary || { total: 0, builtIn: 0, custom: 0, active: 0 });
+      }
+    } catch (error) {
+      console.error('Failed to fetch skills:', error);
+    } finally {
+      setSkillsLoading(false);
+    }
+  };
+
+  const toggleSkillActive = async (skillId: string, isActive: boolean) => {
+    try {
+      const response = await fetch(`/api/skills/${skillId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        setSkillsList(skillsList.map(s =>
+          s.id === skillId ? { ...s, isActive } : s
+        ));
+        showMessage(isActive ? 'Skill 已启用' : 'Skill 已停用');
+      } else {
+        showMessage(result.error || '操作失败', true);
+      }
+    } catch (error) {
+      showMessage('操作失败', true);
+    }
+  };
+
+  const deleteSkill = async (skillId: string) => {
+    if (!confirm('确定要删除此 Skill 吗？此操作不可恢复。')) return;
+
+    try {
+      const response = await fetch(`/api/skills/${skillId}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      if (result.success) {
+        setSkillsList(skillsList.filter(s => s.id !== skillId));
+        showMessage('Skill 已删除');
+      } else {
+        showMessage(result.error || '删除失败', true);
+      }
+    } catch (error) {
+      showMessage('删除失败', true);
     }
   };
 
@@ -731,6 +857,290 @@ export default function SettingsPage() {
               </ul>
             </Card>
           </div>
+        </div>
+      )}
+
+      {/* Skills Tab */}
+      {activeTab === 'skills' && (
+        <div>
+          {/* Summary Cards */}
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            <Card className="p-4">
+              <p className="text-sm text-gray-500">总计</p>
+              <p className="text-2xl font-bold text-gray-900">{skillsSummary.total}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-sm text-gray-500">内置</p>
+              <p className="text-2xl font-bold text-blue-600">{skillsSummary.builtIn}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-sm text-gray-500">自定义</p>
+              <p className="text-2xl font-bold text-purple-600">{skillsSummary.custom}</p>
+            </Card>
+            <Card className="p-4">
+              <p className="text-sm text-gray-500">已启用</p>
+              <p className="text-2xl font-bold text-green-600">{skillsSummary.active}</p>
+            </Card>
+          </div>
+
+          <Card>
+            <div className="p-4 border-b flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">Skill 管理</h3>
+                <p className="text-sm text-gray-500">查看、启用/停用和管理所有 Skill 插件</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Filter */}
+                <select
+                  value={skillFilter}
+                  onChange={(e) => setSkillFilter(e.target.value as any)}
+                  className="px-3 py-1.5 text-sm border rounded-lg"
+                >
+                  <option value="all">全部</option>
+                  <option value="builtin">内置</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </div>
+            </div>
+
+            {skillsLoading ? (
+              <div className="p-8 text-center text-gray-500">加载中...</div>
+            ) : skillsList.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">暂无 Skill</div>
+            ) : (
+              <div>
+                {skillsList.map((skill) => {
+                  const isExpanded = expandedSkillId === skill.id;
+
+                  return (
+                    <div key={skill.id} className="border-b last:border-b-0">
+                      {/* Skill Header */}
+                      <div
+                        className={`p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors ${
+                          isExpanded ? 'bg-blue-50' : ''
+                        }`}
+                        onClick={() => setExpandedSkillId(isExpanded ? null : skill.id)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={`text-xs transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+                            ▶
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-gray-900">{skill.name}</p>
+                              <Badge variant={skill.isActive ? 'success' : 'default'}>
+                                {skill.isActive ? '启用' : '停用'}
+                              </Badge>
+                              <span className={`px-2 py-0.5 rounded text-xs ${
+                                skill.source === 'builtin'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : 'bg-purple-100 text-purple-700'
+                              }`}>
+                                {skill.source === 'builtin' ? '内置' : '自定义'}
+                              </span>
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+                                {skillCategoryLabels[skill.category] || skill.category}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-500 mt-0.5">
+                              {skill.description}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSkillActive(skill.id, !skill.isActive);
+                            }}
+                            className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                              skill.isActive
+                                ? 'text-gray-600 border-gray-300 hover:bg-gray-100'
+                                : 'text-green-600 border-green-300 hover:bg-green-50'
+                            }`}
+                          >
+                            {skill.isActive ? '停用' : '启用'}
+                          </button>
+                          {skill.source === 'custom' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteSkill(skill.id);
+                              }}
+                              className="px-3 py-1.5 text-sm rounded-lg border border-red-300 text-red-600 hover:bg-red-50"
+                            >
+                              删除
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Expanded Detail */}
+                      {isExpanded && (
+                        <div className="px-4 pb-4 bg-blue-50">
+                          <div className="pl-6 space-y-4">
+                            {/* Basic Info */}
+                            <div className="pt-2">
+                              <h4 className="text-sm font-semibold text-gray-700 mb-2">基本信息</h4>
+                              <div className="bg-white rounded-lg border p-4">
+                                <div className="grid grid-cols-2 gap-3 text-sm">
+                                  <div>
+                                    <span className="text-gray-500">ID: </span>
+                                    <span className="font-mono text-gray-700">{skill.id}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500">版本: </span>
+                                    <span className="text-gray-700">v{skill.version}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500">执行器: </span>
+                                    <span className="text-gray-700">{executorTypeLabels[skill.executor.type] || skill.executor.type}</span>
+                                  </div>
+                                  {skill.author && (
+                                    <div>
+                                      <span className="text-gray-500">作者: </span>
+                                      <span className="text-gray-700">{skill.author}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Triggers */}
+                            {skill.triggers && skill.triggers.length > 0 && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-2">触发器</h4>
+                                <div className="bg-white rounded-lg border p-4">
+                                  <div className="flex flex-wrap gap-2">
+                                    {skill.triggers.map((trigger: any, idx: number) => (
+                                      <span
+                                        key={idx}
+                                        className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs"
+                                      >
+                                        {trigger.type || trigger}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Executor Code Preview */}
+                            {skill.executor.code && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-2">执行代码</h4>
+                                <div className="bg-white rounded-lg border">
+                                  <pre className="p-4 text-xs text-gray-700 overflow-x-auto max-h-64 overflow-y-auto">
+                                    <code>{skill.executor.code.trim()}</code>
+                                  </pre>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Webhook URL */}
+                            {skill.executor.webhookUrl && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-2">Webhook URL</h4>
+                                <div className="bg-white rounded-lg border p-4">
+                                  <code className="text-sm text-gray-700">{skill.executor.webhookUrl}</code>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* AI Prompt */}
+                            {skill.executor.prompt && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-2">AI Prompt</h4>
+                                <div className="bg-white rounded-lg border p-4">
+                                  <pre className="text-xs text-gray-700 whitespace-pre-wrap">{skill.executor.prompt}</pre>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Config Schema */}
+                            {skill.configSchema && skill.configSchema.fields && skill.configSchema.fields.length > 0 && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-2">配置项</h4>
+                                <div className="bg-white rounded-lg border p-4">
+                                  <table className="w-full text-sm">
+                                    <thead>
+                                      <tr className="text-left text-gray-500">
+                                        <th className="pb-2">参数</th>
+                                        <th className="pb-2">类型</th>
+                                        <th className="pb-2">默认值</th>
+                                        <th className="pb-2">说明</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {skill.configSchema.fields.map((field) => (
+                                        <tr key={field.key} className="border-t">
+                                          <td className="py-2 font-mono text-gray-700">{field.key}</td>
+                                          <td className="py-2 text-gray-500">{field.type}</td>
+                                          <td className="py-2 text-gray-700">{field.default !== undefined ? String(field.default) : '-'}</td>
+                                          <td className="py-2 text-gray-500">{field.label}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Stats */}
+                            {skill.stats && (
+                              <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-2">执行统计</h4>
+                                <div className="bg-white rounded-lg border p-4">
+                                  <div className="grid grid-cols-4 gap-4 text-sm">
+                                    <div>
+                                      <span className="text-gray-500">总执行: </span>
+                                      <span className="font-medium">{skill.stats.totalExecutions}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-500">成功: </span>
+                                      <span className="font-medium text-green-600">{skill.stats.successfulExecutions}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-500">失败: </span>
+                                      <span className="font-medium text-red-600">{skill.stats.failedExecutions}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-500">平均耗时: </span>
+                                      <span className="font-medium">{skill.stats.averageExecutionTime}ms</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Export JSON */}
+                            <div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const blob = new Blob([JSON.stringify(skill, null, 2)], { type: 'application/json' });
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = `skill-${skill.id}.json`;
+                                  a.click();
+                                  URL.revokeObjectURL(url);
+                                  showMessage('Skill 配置已导出');
+                                }}
+                                className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
+                              >
+                                导出 JSON
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
         </div>
       )}
     </div>

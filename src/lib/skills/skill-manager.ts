@@ -917,3 +917,74 @@ export function createSkillManager(
   const builtInSkills = getBuiltInSkills(tenantId);
   return new SkillManager([...builtInSkills, ...customSkills]);
 }
+
+/**
+ * 从数据库动态加载自定义 Skill 并合并内置 Skill
+ * 支持数据库中对内置 Skill 的配置覆盖（isActive, config）
+ */
+export async function createSkillManagerWithDB(
+  tenantId: string
+): Promise<SkillManager> {
+  // 延迟导入避免循环依赖
+  const { db } = await import('@/lib/db');
+  const { skills: skillsTable } = await import('@/lib/db/schema');
+  const { eq } = await import('drizzle-orm');
+
+  // 获取内置 Skills
+  const builtInSkills = getBuiltInSkills(tenantId);
+
+  // 从数据库加载自定义和覆盖配置
+  const dbSkills = await db.query.skills.findMany({
+    where: eq(skillsTable.tenantId, tenantId),
+  });
+
+  // 数据库中的内置 Skill 覆盖记录 (id 以 builtin_ 开头)
+  const builtInOverrides = new Map<string, typeof dbSkills[0]>();
+  // 数据库中的自定义 Skill
+  const customDbSkills: Skill[] = [];
+
+  for (const dbSkill of dbSkills) {
+    if (dbSkill.isBuiltIn) {
+      builtInOverrides.set(dbSkill.id, dbSkill);
+    } else {
+      // 将数据库记录转换为 Skill 类型
+      customDbSkills.push({
+        id: dbSkill.id,
+        tenantId: dbSkill.tenantId,
+        name: dbSkill.name,
+        description: dbSkill.description || '',
+        category: dbSkill.category as any,
+        icon: dbSkill.icon || undefined,
+        version: dbSkill.version,
+        author: dbSkill.author || undefined,
+        triggers: (dbSkill.triggers || []) as any,
+        executor: dbSkill.executor as any,
+        inputSchema: dbSkill.inputSchema as any,
+        outputSchema: dbSkill.outputSchema as any,
+        permissions: (dbSkill.permissions || []) as any,
+        isActive: dbSkill.isActive,
+        isBuiltIn: false,
+        config: dbSkill.config as any,
+        configSchema: dbSkill.configSchema as any,
+        stats: dbSkill.stats as any,
+        createdAt: dbSkill.createdAt,
+        updatedAt: dbSkill.updatedAt,
+      });
+    }
+  }
+
+  // 应用内置 Skill 的数据库覆盖配置
+  const mergedBuiltIn = builtInSkills.map(skill => {
+    const override = builtInOverrides.get(skill.id);
+    if (override) {
+      return {
+        ...skill,
+        isActive: override.isActive,
+        config: (override.config as any) || skill.config,
+      };
+    }
+    return skill;
+  });
+
+  return new SkillManager([...mergedBuiltIn, ...customDbSkills]);
+}
