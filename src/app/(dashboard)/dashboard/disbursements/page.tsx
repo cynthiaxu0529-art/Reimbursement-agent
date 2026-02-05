@@ -111,6 +111,10 @@ export default function DisbursementsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [roleChecked, setRoleChecked] = useState(false);
   const [payoutStatuses, setPayoutStatuses] = useState<Record<string, any>>({});
+  const [paymentStats, setPaymentStats] = useState<{ processingCount: number; todayPaidCount: number }>({
+    processingCount: 0,
+    todayPaidCount: 0,
+  });
 
   // 检查用户角色，非财务角色重定向 - 从API获取而不是localStorage
   useEffect(() => {
@@ -138,7 +142,20 @@ export default function DisbursementsPage() {
 
   useEffect(() => {
     fetchReimbursements();
+    fetchPaymentStats();
   }, [activeTab]);
+
+  const fetchPaymentStats = async () => {
+    try {
+      const response = await fetch('/api/payments/stats');
+      const result = await response.json();
+      if (result.success && result.stats) {
+        setPaymentStats(result.stats);
+      }
+    } catch (error) {
+      console.error('Failed to fetch payment stats:', error);
+    }
+  };
 
   const fetchReimbursements = async () => {
     setLoading(true);
@@ -444,7 +461,7 @@ export default function DisbursementsPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-gray-500 mb-1">处理中</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
+              <p className="text-2xl font-bold text-gray-900">{paymentStats.processingCount}</p>
               <p className="text-xs text-gray-500 mt-1">正在打款</p>
             </div>
             <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center text-xl">
@@ -457,7 +474,7 @@ export default function DisbursementsPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-gray-500 mb-1">今日已付</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
+              <p className="text-2xl font-bold text-gray-900">{paymentStats.todayPaidCount}</p>
               <p className="text-xs text-gray-500 mt-1">笔</p>
             </div>
             <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center text-xl">
