@@ -5,6 +5,7 @@ import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
 import { eq, desc, and, or, inArray } from 'drizzle-orm';
 import { getUserRoles, canApprove, canProcessPayment, isAdmin } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
+import { applyLimitsToItems } from '@/lib/policy/limit-service';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -199,14 +200,34 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 计算原币总金额
-    const totalAmount = items.reduce(
+    // 应用政策限额约束
+    const limitResult = await applyLimitsToItems(
+      session.user.tenantId,
+      items.map((item: any) => ({
+        category: item.category,
+        amount: parseFloat(item.amount) || 0,
+        currency: item.currency || 'CNY',
+        amountInBaseCurrency: item.amountInBaseCurrency,
+      }))
+    );
+
+    // 使用调整后的金额更新 items
+    const adjustedItems = items.map((item: any, index: number) => ({
+      ...item,
+      amount: limitResult.items[index].adjustedAmount,
+      amountInBaseCurrency: limitResult.items[index].adjustedAmountInBaseCurrency || limitResult.items[index].adjustedAmount,
+      originalAmount: limitResult.items[index].originalAmount,
+      wasAdjusted: limitResult.items[index].wasAdjusted,
+    }));
+
+    // 计算原币总金额（使用调整后的金额）
+    const totalAmount = adjustedItems.reduce(
       (sum: number, item: any) => sum + (parseFloat(item.amount) || 0),
       0
     );
 
     // 计算美元总金额（如果前端未提供则使用原币金额）
-    const usdTotal = totalAmountInBaseCurrency || items.reduce(
+    const usdTotal = adjustedItems.reduce(
       (sum: number, item: any) => sum + (item.amountInBaseCurrency || parseFloat(item.amount) || 0),
       0
     );
@@ -239,8 +260,8 @@ export async function POST(request: NextRequest) {
       .values(reimbursementData)
       .returning();
 
-    // 创建费用明细
-    if (items.length > 0) {
+    // 创建费用明细（使用调整后的金额）
+    if (adjustedItems.length > 0) {
       // 解析日期，支持多种格式
       const parseDate = (dateStr: string): Date => {
         if (!dateStr) return new Date();
@@ -256,7 +277,7 @@ export async function POST(request: NextRequest) {
       };
 
       await db.insert(reimbursementItems).values(
-        items.map((item: any) => {
+        adjustedItems.map((item: any) => {
           const itemData: any = {
             reimbursementId: reimbursement.id,
             category: item.category,
@@ -285,10 +306,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    // 构建返回数据，包含限额调整信息
+    const responseData: any = {
       success: true,
       data: reimbursement,
-    });
+    };
+
+    // 如果有金额被调整，返回提示信息
+    if (limitResult.totalAdjusted > 0) {
+      responseData.limitAdjustments = {
+        count: limitResult.totalAdjusted,
+        items: limitResult.adjustedItems,
+        message: `有 ${limitResult.totalAdjusted} 项费用超过政策限额，已自动调整为限额值`,
+      };
+    }
+
+    return NextResponse.json(responseData);
   } catch (error: any) {
     console.error('Create reimbursement error:', error);
     // 返回详细的错误信息以便调试
