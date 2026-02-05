@@ -75,6 +75,9 @@ export default function DisbursementsPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  // 自定义打款金额（财务可修改）
+  const [customPaymentAmounts, setCustomPaymentAmounts] = useState<Record<string, number>>({});
+  const [editingAmountId, setEditingAmountId] = useState<string | null>(null);
 
   // 预览附件：将base64 data URL转为Blob URL以提高渲染性能
   const handlePreviewReceipt = (url: string | null | undefined) => {
@@ -214,14 +217,34 @@ export default function DisbursementsPage() {
     }
   }, [activeTab, reimbursements.length, loading]);
 
+  // 获取报销单的打款金额（自定义金额或原金额）
+  const getPaymentAmount = (item: Reimbursement) => {
+    const originalAmount = item.totalAmountInBaseCurrency || item.totalAmount * 0.14;
+    return customPaymentAmounts[item.id] ?? originalAmount;
+  };
+
+  // 设置自定义打款金额
+  const setCustomAmount = (id: string, amount: number, maxAmount: number) => {
+    // 确保金额在有效范围内
+    const validAmount = Math.max(0.01, Math.min(amount, maxAmount));
+    setCustomPaymentAmounts(prev => ({ ...prev, [id]: validAmount }));
+  };
+
   const processPayment = async (id: string) => {
     setProcessing(id);
     setErrorMessage(null);
     try {
+      // 获取自定义金额（如果有）
+      const customAmount = customPaymentAmounts[id];
+      const requestBody: any = { reimbursementId: id };
+      if (customAmount !== undefined) {
+        requestBody.customAmount = customAmount;
+      }
+
       const response = await fetch(`/api/payments/process`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reimbursementId: id }),
+        body: JSON.stringify(requestBody),
       });
       const result = await response.json();
 
@@ -762,6 +785,82 @@ export default function DisbursementsPage() {
                                 ${usdAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                               </div>
                             </div>
+
+                            {/* 财务打款金额编辑 - 仅在待付款tab显示 */}
+                            {activeTab === 'ready' && (
+                              <div className="px-4 py-3 bg-emerald-50 border-t border-emerald-200">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-semibold text-emerald-700">💳 打款金额</span>
+                                    <span className="text-xs text-emerald-600">
+                                      (可根据政策限额调整，不超过报销金额)
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {editingAmountId === item.id ? (
+                                      <>
+                                        <span className="text-sm text-gray-600">$</span>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          min="0.01"
+                                          max={usdAmount}
+                                          value={customPaymentAmounts[item.id] ?? usdAmount}
+                                          onChange={(e) => {
+                                            const value = parseFloat(e.target.value) || 0;
+                                            setCustomAmount(item.id, value, usdAmount);
+                                          }}
+                                          className="w-28 px-2 py-1 text-right text-sm font-bold border border-emerald-300 rounded focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                          autoFocus
+                                        />
+                                        <button
+                                          onClick={() => setEditingAmountId(null)}
+                                          className="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                                        >
+                                          确定
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setCustomPaymentAmounts(prev => {
+                                              const next = { ...prev };
+                                              delete next[item.id];
+                                              return next;
+                                            });
+                                            setEditingAmountId(null);
+                                          }}
+                                          className="px-2 py-1 text-xs text-gray-600 hover:text-gray-800"
+                                        >
+                                          重置
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="text-lg font-bold text-emerald-700">
+                                          ${getPaymentAmount(item).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                        </span>
+                                        {customPaymentAmounts[item.id] !== undefined && (
+                                          <span className="text-xs text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">
+                                            已调整
+                                          </span>
+                                        )}
+                                        <button
+                                          onClick={() => setEditingAmountId(item.id)}
+                                          className="px-2 py-1 text-xs text-emerald-600 border border-emerald-300 rounded hover:bg-emerald-100"
+                                        >
+                                          ✏️ 修改
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                                {customPaymentAmounts[item.id] !== undefined && customPaymentAmounts[item.id] < usdAmount && (
+                                  <p className="text-xs text-amber-600 mt-2">
+                                    ⚠️ 打款金额已调整为 ${customPaymentAmounts[item.id].toFixed(2)}，
+                                    比原金额少 ${(usdAmount - customPaymentAmounts[item.id]).toFixed(2)} USDC
+                                  </p>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
 

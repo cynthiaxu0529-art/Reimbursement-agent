@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { getCategoryLimit, applyLimitToAmount } from '@/lib/policy/limit-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -143,10 +144,18 @@ export async function PATCH(
     const body = await request.json();
     const { receiptUrl, vendor, description, amount, currency, category } = body;
 
+    // 获取用户的租户ID
+    const currentUser = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+    });
+
     // Build update object
     const updateData: Record<string, any> = {
       updatedAt: new Date(),
     };
+
+    // 用于记录限额调整信息
+    let limitAdjustment: { wasAdjusted: boolean; message?: string } = { wasAdjusted: false };
 
     if (receiptUrl !== undefined) {
       updateData.receiptUrl = receiptUrl;
@@ -158,8 +167,34 @@ export async function PATCH(
       updateData.description = description;
     }
     if (amount !== undefined) {
-      updateData.amount = parseFloat(amount) || 0;
-      updateData.amountInBaseCurrency = body.amountInBaseCurrency || updateData.amount;
+      let finalAmount = parseFloat(amount) || 0;
+      let finalAmountInBaseCurrency = body.amountInBaseCurrency || finalAmount;
+
+      // 应用政策限额约束
+      const categoryToCheck = category || item.category;
+      const currencyToCheck = currency || item.currency || 'CNY';
+
+      if (currentUser?.tenantId) {
+        const limit = await getCategoryLimit(currentUser.tenantId, categoryToCheck);
+        if (limit) {
+          const limitResult = applyLimitToAmount(finalAmount, currencyToCheck, limit);
+          if (limitResult.wasAdjusted) {
+            finalAmount = limitResult.adjustedAmount;
+            // 按比例调整 base currency 金额
+            if (finalAmountInBaseCurrency && parseFloat(amount) > 0) {
+              const ratio = finalAmount / parseFloat(amount);
+              finalAmountInBaseCurrency = finalAmountInBaseCurrency * ratio;
+            }
+            limitAdjustment = {
+              wasAdjusted: true,
+              message: limitResult.message,
+            };
+          }
+        }
+      }
+
+      updateData.amount = finalAmount;
+      updateData.amountInBaseCurrency = finalAmountInBaseCurrency;
     }
     if (currency !== undefined) {
       updateData.currency = currency;
@@ -199,10 +234,17 @@ export async function PATCH(
         .where(eq(reimbursements.id, id));
     }
 
-    return NextResponse.json({
+    const responseData: any = {
       success: true,
       data: updated,
-    });
+    };
+
+    // 如果金额被调整，返回提示信息
+    if (limitAdjustment.wasAdjusted) {
+      responseData.limitAdjustment = limitAdjustment;
+    }
+
+    return NextResponse.json(responseData);
   } catch (error) {
     console.error('Update item error:', error);
     return NextResponse.json(
