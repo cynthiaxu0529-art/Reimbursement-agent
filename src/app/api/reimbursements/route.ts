@@ -3,7 +3,7 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
 import { eq, desc, and, or, inArray } from 'drizzle-orm';
-import { getUserRoles, canApprove, canProcessPayment } from '@/lib/auth/roles';
+import { getUserRoles, canApprove, canProcessPayment, isAdmin } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
 
 // 强制动态渲染，避免构建时预渲染
@@ -43,8 +43,8 @@ export async function GET(request: NextRequest) {
 
     // 验证角色权限并应用部门级数据隔离
     if (role === 'approver' && currentUser.tenantId) {
-      // 检查用户是否有审批权限
-      if (!canApprove(userRoles)) {
+      // 检查用户是否有审批权限（admin也可以查看和审批）
+      if (!canApprove(userRoles) && !isAdmin(userRoles)) {
         return NextResponse.json({ error: '无审批权限' }, { status: 403 });
       }
 
@@ -98,8 +98,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 是否需要加载提交人信息
-    const isApproverOrFinance = (role === 'approver' && canApprove(userRoles)) ||
+    // 是否需要加载提交人信息（审批人、财务、管理员查看他人报销时需要）
+    const isApproverOrFinance = (role === 'approver' && (canApprove(userRoles) || isAdmin(userRoles))) ||
                                  (role === 'finance' && canProcessPayment(userRoles));
 
     // 查询报销列表

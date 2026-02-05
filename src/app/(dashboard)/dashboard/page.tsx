@@ -40,6 +40,12 @@ interface DashboardStats {
   pendingApproval: number;
   // 管理员统计
   teamMembers: number;
+  // 全公司统计（管理员可见）
+  companyTotal: number;
+  companyPending: number;
+  companyApproved: number;
+  companyPaid: number;
+  companyTotalAmount: number;
 }
 
 export default function DashboardPage() {
@@ -53,6 +59,11 @@ export default function DashboardPage() {
     myTotalAmount: 0,
     pendingApproval: 0,
     teamMembers: 0,
+    companyTotal: 0,
+    companyPending: 0,
+    companyApproved: 0,
+    companyPaid: 0,
+    companyTotalAmount: 0,
   });
   const [recentReimbursements, setRecentReimbursements] = useState<Reimbursement[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<Reimbursement[]>([]);
@@ -125,11 +136,16 @@ export default function DashboardPage() {
           }
         }
 
-        // 4. 如果是管理员，获取团队成员数量
+        // 4. 如果是管理员，获取团队成员数量和全公司报销统计
         const isAdminRole = userRole === UserRole.ADMIN || userRole === UserRole.SUPER_ADMIN;
         if (isAdminRole) {
           try {
-            const teamRes = await fetch('/api/team/members');
+            // 并行获取团队成员和全公司报销数据
+            const [teamRes, companyRes] = await Promise.all([
+              fetch('/api/team/members'),
+              fetch('/api/reimbursements?role=approver&pageSize=1000'),
+            ]);
+
             if (teamRes.ok) {
               const teamData = await teamRes.json();
               setStats(prev => ({
@@ -137,8 +153,29 @@ export default function DashboardPage() {
                 teamMembers: teamData.data?.length || 0,
               }));
             }
+
+            if (companyRes.ok) {
+              const companyData = await companyRes.json();
+              const companyItems: Reimbursement[] = companyData.data || [];
+              const companyPending = companyItems.filter((r) =>
+                r.status === 'pending' || r.status === 'submitted'
+              ).length;
+              const companyApproved = companyItems.filter((r) => r.status === 'approved').length;
+              const companyPaid = companyItems.filter((r) => r.status === 'paid').length;
+              const companyTotalAmount = companyItems.reduce((sum, r) =>
+                sum + (r.totalAmountInBaseCurrency || r.totalAmount || 0), 0
+              );
+              setStats(prev => ({
+                ...prev,
+                companyTotal: companyItems.length,
+                companyPending,
+                companyApproved,
+                companyPaid,
+                companyTotalAmount,
+              }));
+            }
           } catch (e) {
-            console.error('Failed to fetch team members:', e);
+            console.error('Failed to fetch admin data:', e);
           }
         }
 
@@ -330,40 +367,85 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* 管理员额外统计 */}
+      {/* 管理员：全公司统计 */}
       {isAdmin && (
-        <div className="grid grid-cols-2 gap-4">
-          <Card className="p-4 border-l-4 border-l-purple-500">
-            <div className="flex items-center justify-between">
+        <>
+          <div className="flex items-center gap-2 mt-2">
+            <h2 className="text-lg font-semibold text-gray-900">全公司报销概览</h2>
+            <span className="text-xs text-gray-400">（管理员视角）</span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <Card className="p-4 border-l-4 border-l-indigo-500">
               <div>
-                <p className="text-sm text-gray-500">团队成员</p>
-                <p className="text-2xl font-bold text-purple-600 mt-1">{stats.teamMembers}</p>
-                <p className="text-xs text-gray-400 mt-1">已加入公司</p>
+                <p className="text-sm text-gray-500">报销总数</p>
+                <p className="text-2xl font-bold text-indigo-600 mt-1">{stats.companyTotal}</p>
+                <p className="text-xs text-gray-400 mt-1">全公司累计</p>
               </div>
-              <Link
-                href="/dashboard/team"
-                className="px-3 py-1.5 text-sm text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-              >
-                管理 →
-              </Link>
-            </div>
-          </Card>
-          <Card className="p-4 border-l-4 border-l-blue-500">
-            <div className="flex items-center justify-between">
+            </Card>
+            <Card className="p-4 border-l-4 border-l-amber-500">
               <div>
-                <p className="text-sm text-gray-500">待审批总数</p>
-                <p className="text-2xl font-bold text-blue-600 mt-1">{stats.pendingApproval}</p>
-                <p className="text-xs text-gray-400 mt-1">全公司</p>
+                <p className="text-sm text-gray-500">待审批</p>
+                <p className="text-2xl font-bold text-amber-600 mt-1">{stats.companyPending}</p>
+                <p className="text-xs text-gray-400 mt-1">等待处理</p>
               </div>
-              <Link
-                href="/dashboard/approvals"
-                className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              >
-                查看 →
-              </Link>
-            </div>
-          </Card>
-        </div>
+            </Card>
+            <Card className="p-4 border-l-4 border-l-green-500">
+              <div>
+                <p className="text-sm text-gray-500">已批准</p>
+                <p className="text-2xl font-bold text-green-600 mt-1">{stats.companyApproved}</p>
+                <p className="text-xs text-gray-400 mt-1">待打款</p>
+              </div>
+            </Card>
+            <Card className="p-4 border-l-4 border-l-emerald-500">
+              <div>
+                <p className="text-sm text-gray-500">已打款</p>
+                <p className="text-2xl font-bold text-emerald-600 mt-1">{stats.companyPaid}</p>
+                <p className="text-xs text-gray-400 mt-1">已完成</p>
+              </div>
+            </Card>
+            <Card className="p-4 border-l-4 border-l-blue-500">
+              <div>
+                <p className="text-sm text-gray-500">总金额</p>
+                <p className="text-xl font-bold text-blue-600 mt-1">
+                  {formatAmount(stats.companyTotalAmount)}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">全公司累计</p>
+              </div>
+            </Card>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Card className="p-4 border-l-4 border-l-purple-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">团队成员</p>
+                  <p className="text-2xl font-bold text-purple-600 mt-1">{stats.teamMembers}</p>
+                  <p className="text-xs text-gray-400 mt-1">已加入公司</p>
+                </div>
+                <Link
+                  href="/dashboard/team"
+                  className="px-3 py-1.5 text-sm text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                >
+                  管理 →
+                </Link>
+              </div>
+            </Card>
+            <Card className="p-4 border-l-4 border-l-blue-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">待审批总数</p>
+                  <p className="text-2xl font-bold text-blue-600 mt-1">{stats.pendingApproval}</p>
+                  <p className="text-xs text-gray-400 mt-1">全公司</p>
+                </div>
+                <Link
+                  href="/dashboard/approvals"
+                  className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                >
+                  查看 →
+                </Link>
+              </div>
+            </Card>
+          </div>
+        </>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
