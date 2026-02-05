@@ -88,7 +88,7 @@ export interface FluxaPayoutStatusResult {
 // 配置常量
 // ============================================================================
 
-const USDC_ASSET_ADDRESS = '0x833589fCD6Edb6E08f4c7C32D4f71b54bdA02913'; // Base USDC
+const USDC_ASSET_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'; // Base USDC
 const NETWORK = 'base';
 const CURRENCY = 'USDC';
 const DEFAULT_TTL_SECONDS = 600; // 10分钟
