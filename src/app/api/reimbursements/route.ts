@@ -5,7 +5,7 @@ import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
 import { eq, desc, and, or, inArray } from 'drizzle-orm';
 import { getUserRoles, canApprove, canProcessPayment, isAdmin } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
-import { applyLimitsToItems } from '@/lib/policy/limit-service';
+import { checkItemsLimit } from '@/lib/policy/limit-service';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -200,25 +200,37 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 应用政策限额约束
-    const limitResult = await applyLimitsToItems(
+    // 应用政策限额约束（支持 per_day 和 per_month 类型）
+    const limitResult = await checkItemsLimit(
+      session.user.id,
       session.user.tenantId,
       items.map((item: any) => ({
         category: item.category,
         amount: parseFloat(item.amount) || 0,
-        currency: item.currency || 'CNY',
-        amountInBaseCurrency: item.amountInBaseCurrency,
+        amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
+        date: item.date,
+        location: item.location,
       }))
     );
 
     // 使用调整后的金额更新 items
-    const adjustedItems = items.map((item: any, index: number) => ({
-      ...item,
-      amount: limitResult.items[index].adjustedAmount,
-      amountInBaseCurrency: limitResult.items[index].adjustedAmountInBaseCurrency || limitResult.items[index].adjustedAmount,
-      originalAmount: limitResult.items[index].originalAmount,
-      wasAdjusted: limitResult.items[index].wasAdjusted,
-    }));
+    const adjustedItems = items.map((item: any, index: number) => {
+      const limitItem = limitResult.items[index];
+      // 计算调整后的原币金额（按比例调整）
+      const originalUsd = item.amountInBaseCurrency || parseFloat(item.amount) || 0;
+      const adjustedUsd = limitItem.adjustedAmount;
+      const ratio = originalUsd > 0 ? adjustedUsd / originalUsd : 1;
+      const adjustedOriginalAmount = (parseFloat(item.amount) || 0) * ratio;
+
+      return {
+        ...item,
+        amount: adjustedOriginalAmount,
+        amountInBaseCurrency: adjustedUsd,
+        originalAmount: parseFloat(item.amount) || 0,
+        originalAmountInBaseCurrency: originalUsd,
+        wasAdjusted: limitItem.wasAdjusted,
+      };
+    });
 
     // 计算原币总金额（使用调整后的金额）
     const totalAmount = adjustedItems.reduce(
@@ -316,8 +328,8 @@ export async function POST(request: NextRequest) {
     if (limitResult.totalAdjusted > 0) {
       responseData.limitAdjustments = {
         count: limitResult.totalAdjusted,
-        items: limitResult.adjustedItems,
-        message: `有 ${limitResult.totalAdjusted} 项费用超过政策限额，已自动调整为限额值`,
+        messages: limitResult.messages,
+        message: `有 ${limitResult.totalAdjusted} 项费用超过政策限额，已自动调整`,
       };
     }
 

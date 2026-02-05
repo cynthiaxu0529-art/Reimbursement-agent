@@ -3,7 +3,7 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { getCategoryLimit, applyLimitToAmount } from '@/lib/policy/limit-service';
+import { checkItemsLimit } from '@/lib/policy/limit-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -142,7 +142,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { receiptUrl, vendor, description, amount, currency, category } = body;
+    const { receiptUrl, vendor, description, amount, currency, category, date } = body;
 
     // 获取用户的租户ID
     const currentUser = await db.query.users.findFirst({
@@ -170,26 +170,35 @@ export async function PATCH(
       let finalAmount = parseFloat(amount) || 0;
       let finalAmountInBaseCurrency = body.amountInBaseCurrency || finalAmount;
 
-      // 应用政策限额约束
+      // 应用政策限额约束（支持 per_day 和 per_month）
       const categoryToCheck = category || item.category;
-      const currencyToCheck = currency || item.currency || 'CNY';
+      const dateToCheck = date || item.date;
 
       if (currentUser?.tenantId) {
-        const limit = await getCategoryLimit(currentUser.tenantId, categoryToCheck);
-        if (limit) {
-          const limitResult = applyLimitToAmount(finalAmount, currencyToCheck, limit);
-          if (limitResult.wasAdjusted) {
-            finalAmount = limitResult.adjustedAmount;
-            // 按比例调整 base currency 金额
-            if (finalAmountInBaseCurrency && parseFloat(amount) > 0) {
-              const ratio = finalAmount / parseFloat(amount);
-              finalAmountInBaseCurrency = finalAmountInBaseCurrency * ratio;
-            }
-            limitAdjustment = {
-              wasAdjusted: true,
-              message: limitResult.message,
-            };
+        const limitResult = await checkItemsLimit(
+          session.user.id,
+          currentUser.tenantId,
+          [{
+            category: categoryToCheck,
+            amount: finalAmount,
+            amountInBaseCurrency: finalAmountInBaseCurrency,
+            date: typeof dateToCheck === 'string' ? dateToCheck : dateToCheck?.toISOString(),
+            location: body.location || item.location,
+          }]
+        );
+
+        if (limitResult.items[0]?.wasAdjusted) {
+          const adjustedUsd = limitResult.items[0].adjustedAmount;
+          // 按比例调整原币金额
+          if (finalAmountInBaseCurrency > 0) {
+            const ratio = adjustedUsd / finalAmountInBaseCurrency;
+            finalAmount = finalAmount * ratio;
           }
+          finalAmountInBaseCurrency = adjustedUsd;
+          limitAdjustment = {
+            wasAdjusted: true,
+            message: limitResult.messages[0] || '金额已根据政策限额调整',
+          };
         }
       }
 
@@ -201,6 +210,9 @@ export async function PATCH(
     }
     if (category !== undefined) {
       updateData.category = category;
+    }
+    if (date !== undefined) {
+      updateData.date = new Date(date);
     }
 
     // Update the item
