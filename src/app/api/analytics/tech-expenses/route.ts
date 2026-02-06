@@ -104,6 +104,7 @@ interface TechExpenseItem {
  * - startDate: 自定义开始日期
  * - endDate: 自定义结束日期
  * - scope: 范围 (personal, team, company)
+ * - dateFilterType: 日期筛选类型 (expense_date, submission_date, approval_date)
  */
 export async function GET(request: NextRequest) {
   try {
@@ -130,6 +131,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period') || 'month';
     const scope = searchParams.get('scope') || 'personal';
+    const dateFilterType = searchParams.get('dateFilterType') || 'submission_date'; // 默认使用提交日期
 
     // 计算时间范围
     const now = new Date();
@@ -157,15 +159,28 @@ export async function GET(request: NextRequest) {
         break;
     }
 
-    // 构建查询条件
+    // 构建查询条件 - 根据dateFilterType选择不同的日期字段
     const conditions = [
       eq(reimbursements.tenantId, user.tenantId),
-      gte(reimbursementItems.date, startDate),
-      lte(reimbursementItems.date, endDate),
       inArray(reimbursementItems.category, TECH_CATEGORIES),
       // 只统计已批准和已支付的报销单
       inArray(reimbursements.status, ['approved', 'paid']),
     ];
+
+    // 根据日期筛选类型添加日期条件
+    if (dateFilterType === 'expense_date') {
+      // 按费用发生日期筛选
+      conditions.push(gte(reimbursementItems.date, startDate));
+      conditions.push(lte(reimbursementItems.date, endDate));
+    } else if (dateFilterType === 'approval_date') {
+      // 按审批日期筛选
+      conditions.push(gte(reimbursements.approvedAt, startDate));
+      conditions.push(lte(reimbursements.approvedAt, endDate));
+    } else {
+      // 默认按提交日期筛选（submission_date）
+      conditions.push(gte(reimbursements.submittedAt, startDate));
+      conditions.push(lte(reimbursements.submittedAt, endDate));
+    }
 
     // 根据scope过滤
     if (scope === 'personal') {
@@ -276,26 +291,90 @@ export async function GET(request: NextRequest) {
       byUser[expense.userId].categories[category] += amount;
     });
 
-    // 计算总计和同比
+    // 计算总计
     const totalAmount = Object.values(byCategory).reduce((sum, cat) => sum + cat.total, 0);
 
-    // 格式化类别数据
-    const categoryData = Object.entries(byCategory).map(([key, value]) => ({
-      category: key,
-      label: CATEGORY_LABELS[key] || key,
-      total: Math.round(value.total * 100) / 100,
-      count: value.count,
-      percentage: totalAmount > 0 ? Math.round((value.total / totalAmount) * 1000) / 10 : 0,
-      topVendors: Object.entries(
-        value.items.reduce((acc, item) => {
-          acc[item.vendor] = (acc[item.vendor] || 0) + item.amount;
-          return acc;
-        }, {} as Record<string, number>)
-      )
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([name, amount]) => ({ name, amount: Math.round(amount * 100) / 100 })),
-    }));
+    // === 获取上个月数据用于对比 ===
+    const lastMonthStart = new Date(startDate);
+    lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
+    const lastMonthEnd = new Date(startDate);
+    lastMonthEnd.setDate(lastMonthEnd.getDate() - 1);
+
+    const lastMonthConditions = [
+      eq(reimbursements.tenantId, user.tenantId),
+      inArray(reimbursementItems.category, TECH_CATEGORIES),
+      inArray(reimbursements.status, ['approved', 'paid']),
+    ];
+
+    // 使用相同的日期筛选类型
+    if (dateFilterType === 'expense_date') {
+      lastMonthConditions.push(gte(reimbursementItems.date, lastMonthStart));
+      lastMonthConditions.push(lte(reimbursementItems.date, lastMonthEnd));
+    } else if (dateFilterType === 'approval_date') {
+      lastMonthConditions.push(gte(reimbursements.approvedAt, lastMonthStart));
+      lastMonthConditions.push(lte(reimbursements.approvedAt, lastMonthEnd));
+    } else {
+      lastMonthConditions.push(gte(reimbursements.submittedAt, lastMonthStart));
+      lastMonthConditions.push(lte(reimbursements.submittedAt, lastMonthEnd));
+    }
+
+    if (scope === 'personal') {
+      lastMonthConditions.push(eq(reimbursements.userId, session.user.id));
+    }
+
+    const lastMonthExpenses = await db
+      .select({
+        category: reimbursementItems.category,
+        amountInBaseCurrency: reimbursementItems.amountInBaseCurrency,
+      })
+      .from(reimbursementItems)
+      .innerJoin(reimbursements, eq(reimbursementItems.reimbursementId, reimbursements.id))
+      .where(and(...lastMonthConditions));
+
+    const lastMonthByCategory: Record<string, number> = {};
+    TECH_CATEGORIES.forEach(cat => {
+      lastMonthByCategory[cat] = 0;
+    });
+
+    lastMonthExpenses.forEach(expense => {
+      if (lastMonthByCategory[expense.category] !== undefined) {
+        lastMonthByCategory[expense.category] += expense.amountInBaseCurrency;
+      }
+    });
+
+    const lastMonthTotal = Object.values(lastMonthByCategory).reduce((sum, amount) => sum + amount, 0);
+
+    // 计算月环比增长
+    const monthOverMonthGrowth = lastMonthTotal > 0
+      ? Math.round(((totalAmount - lastMonthTotal) / lastMonthTotal) * 1000) / 10
+      : 0;
+
+    // 格式化类别数据（增加月环比）
+    const categoryData = Object.entries(byCategory).map(([key, value]) => {
+      const lastMonthAmount = lastMonthByCategory[key] || 0;
+      const categoryGrowth = lastMonthAmount > 0
+        ? Math.round(((value.total - lastMonthAmount) / lastMonthAmount) * 1000) / 10
+        : value.total > 0 ? 100 : 0;
+
+      return {
+        category: key,
+        label: CATEGORY_LABELS[key] || key,
+        total: Math.round(value.total * 100) / 100,
+        count: value.count,
+        percentage: totalAmount > 0 ? Math.round((value.total / totalAmount) * 1000) / 10 : 0,
+        lastMonthTotal: Math.round(lastMonthAmount * 100) / 100,
+        growth: categoryGrowth,
+        topVendors: Object.entries(
+          value.items.reduce((acc, item) => {
+            acc[item.vendor] = (acc[item.vendor] || 0) + item.amount;
+            return acc;
+          }, {} as Record<string, number>)
+        )
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([name, amount]) => ({ name, amount: Math.round(amount * 100) / 100 })),
+      };
+    });
 
     // 格式化供应商数据
     const vendorData = Object.values(byVendor)
@@ -372,6 +451,17 @@ export async function GET(request: NextRequest) {
         .slice(0, 5),
     };
 
+    // 计算平均值和趋势
+    const avgMonthlyAmount = monthlyTrend.length > 0
+      ? Math.round((monthlyTrend.reduce((sum, m) => sum + m.amount, 0) / monthlyTrend.length) * 100) / 100
+      : 0;
+
+    // 计算趋势方向（最近3个月）
+    const recentMonths = monthlyTrend.slice(-3);
+    const trendDirection = recentMonths.length >= 2
+      ? recentMonths[recentMonths.length - 1].amount > recentMonths[0].amount ? 'up' : 'down'
+      : 'stable';
+
     return NextResponse.json({
       success: true,
       data: {
@@ -379,6 +469,7 @@ export async function GET(request: NextRequest) {
           start: startDate.toISOString(),
           end: endDate.toISOString(),
           label: period,
+          dateFilterType, // 添加日期筛选类型信息
         },
         scope,
         summary: {
@@ -386,6 +477,24 @@ export async function GET(request: NextRequest) {
           currency: tenantBaseCurrency,
           categoryCount: categoryData.filter(c => c.total > 0).length,
           vendorCount: vendorData.length,
+          lastMonthTotal: Math.round(lastMonthTotal * 100) / 100,
+          monthOverMonthGrowth,
+          avgMonthlyAmount,
+          trendDirection,
+        },
+        comparison: {
+          lastMonth: {
+            total: Math.round(lastMonthTotal * 100) / 100,
+            byCategory: Object.entries(lastMonthByCategory).map(([key, value]) => ({
+              category: key,
+              label: CATEGORY_LABELS[key] || key,
+              total: Math.round(value * 100) / 100,
+            })),
+          },
+          growth: {
+            absolute: Math.round((totalAmount - lastMonthTotal) * 100) / 100,
+            percentage: monthOverMonthGrowth,
+          },
         },
         byCategory: categoryData,
         byVendor: vendorData.slice(0, 20), // 返回前20个供应商
