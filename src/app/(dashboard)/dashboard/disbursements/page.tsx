@@ -212,9 +212,11 @@ export default function DisbursementsPage() {
     let errorCount = 0;
 
     for (const item of reimbursements) {
-      const payoutInfo = item.aiSuggestions?.find(
+      // 使用 findLast 获取最新的 payout 记录（避免查询旧的过期记录）
+      const allPayouts = (item.aiSuggestions || []).filter(
         (s: any) => s.type === 'fluxa_payout_initiated'
       );
+      const payoutInfo = allPayouts.length > 0 ? allPayouts[allPayouts.length - 1] : null;
       if (!payoutInfo?.payoutId) {
         console.log('[刷新状态] 跳过, 无 payoutId:', item.id);
         continue;

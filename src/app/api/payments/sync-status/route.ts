@@ -93,32 +93,50 @@ export async function POST(request: NextRequest) {
     }
 
     // 更新 reimbursements 表
-    if (reimbursementId && isSuccess) {
-      await db.update(reimbursements)
-        .set({
-          status: 'paid',
-          paidAt: new Date(),
-          updatedAt: new Date(),
-        })
+    if (reimbursementId) {
+      // 先查询当前状态，避免错误地重置已付款的报销单
+      const [currentReimbursement] = await db.select({ status: reimbursements.status })
+        .from(reimbursements)
         .where(and(
           eq(reimbursements.id, reimbursementId),
           eq(reimbursements.tenantId, session.user.tenantId)
-        ));
-      dbUpdated = true;
-      console.log('[SyncStatus] 已更新 reimbursements 表为 paid');
-    } else if (reimbursementId && (fluxaStatus === 'failed' || fluxaStatus === 'expired')) {
-      // 失败或过期，恢复为 approved
-      await db.update(reimbursements)
-        .set({
-          status: 'approved',
-          updatedAt: new Date(),
-        })
-        .where(and(
-          eq(reimbursements.id, reimbursementId),
-          eq(reimbursements.tenantId, session.user.tenantId)
-        ));
-      dbUpdated = true;
-      console.log('[SyncStatus] 已更新 reimbursements 表为 approved (失败/过期)');
+        ))
+        .limit(1);
+
+      const currentStatus = currentReimbursement?.status;
+      console.log('[SyncStatus] 当前报销单状态:', currentStatus);
+
+      if (isSuccess && currentStatus !== 'paid') {
+        // 成功且当前未标记为paid，更新为paid
+        await db.update(reimbursements)
+          .set({
+            status: 'paid',
+            paidAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(and(
+            eq(reimbursements.id, reimbursementId),
+            eq(reimbursements.tenantId, session.user.tenantId)
+          ));
+        dbUpdated = true;
+        console.log('[SyncStatus] 已更新 reimbursements 表为 paid');
+      } else if ((fluxaStatus === 'failed' || fluxaStatus === 'expired') && currentStatus === 'processing') {
+        // 仅当当前状态是 processing 时才恢复为 approved
+        // 避免把已付款的报销单错误地重置为待付款
+        await db.update(reimbursements)
+          .set({
+            status: 'approved',
+            updatedAt: new Date(),
+          })
+          .where(and(
+            eq(reimbursements.id, reimbursementId),
+            eq(reimbursements.tenantId, session.user.tenantId)
+          ));
+        dbUpdated = true;
+        console.log('[SyncStatus] 已更新 reimbursements 表为 approved (失败/过期)');
+      } else if (currentStatus === 'paid') {
+        console.log('[SyncStatus] 报销单已是 paid 状态，跳过更新');
+      }
     }
 
     return NextResponse.json({
