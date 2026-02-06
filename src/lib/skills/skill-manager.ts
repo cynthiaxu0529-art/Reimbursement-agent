@@ -906,6 +906,7 @@ export function createTimelinessAnalysisSkill(tenantId: string): Skill {
     version: '1.0.0',
     isActive: true,
     isBuiltIn: true,
+    permissions: [],
     triggers: [
       { type: SkillTrigger.ON_REIMBURSEMENT_SUBMIT },
       { type: SkillTrigger.ON_CHAT_COMMAND },
