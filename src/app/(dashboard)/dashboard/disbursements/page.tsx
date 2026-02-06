@@ -193,13 +193,15 @@ export default function DisbursementsPage() {
     }
   };
 
-  // 手动刷新所有处理中的付款状态
+  // 手动刷新所有处理中的付款状态 - 直接调用 Fluxa API
   const refreshAllPayoutStatuses = async () => {
     if (refreshingStatus || reimbursements.length === 0) return;
     setRefreshingStatus(true);
     console.log('[刷新状态] 开始刷新', reimbursements.length, '笔付款状态...');
 
     let updatedCount = 0;
+    let errorCount = 0;
+
     for (const item of reimbursements) {
       const payoutInfo = item.aiSuggestions?.find(
         (s: any) => s.type === 'fluxa_payout_initiated'
@@ -210,17 +212,29 @@ export default function DisbursementsPage() {
       }
 
       try {
-        console.log('[刷新状态] 查询 payoutId:', payoutInfo.payoutId);
-        const res = await fetch(`/api/payments/status/${payoutInfo.payoutId}`);
+        console.log('[刷新状态] 同步 payoutId:', payoutInfo.payoutId);
+        // 使用新的 sync-status API 直接调用 Fluxa
+        const res = await fetch('/api/payments/sync-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            payoutId: payoutInfo.payoutId,
+            reimbursementId: item.id,
+          }),
+        });
         const data = await res.json();
-        console.log('[刷新状态] 响应:', data.success, data.status, data.statusChanged);
+        console.log('[刷新状态] 响应:', data.success, data.status, data.dbUpdated);
 
         if (data.success) {
           setPayoutStatuses(prev => ({ ...prev, [item.id]: data }));
-          if (data.statusChanged) updatedCount++;
+          if (data.dbUpdated) updatedCount++;
+        } else {
+          console.error('[刷新状态] 失败:', data.error);
+          errorCount++;
         }
       } catch (error) {
         console.error('[刷新状态] 错误:', error);
+        errorCount++;
       }
     }
 
@@ -230,8 +244,10 @@ export default function DisbursementsPage() {
       alert(`已更新 ${updatedCount} 笔付款状态，正在刷新列表...`);
       fetchReimbursements();
       fetchPaymentStats();
+    } else if (errorCount > 0) {
+      alert(`刷新失败 ${errorCount} 笔，请检查 Vercel 日志查看详情`);
     } else {
-      alert('状态已刷新，无变化。如 Fluxa 已支付但状态未更新，请检查服务器日志。');
+      alert('所有状态已是最新，无需更新');
     }
   };
 
