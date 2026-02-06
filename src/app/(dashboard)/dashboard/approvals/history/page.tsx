@@ -213,7 +213,7 @@ export default function ApprovalHistoryPage() {
     totalRejected: historyList.filter(r => r.status === 'rejected').length,
     totalPaidAmount: historyList
       .filter(r => r.status === 'paid' || r.status === 'approved' || r.status === 'processing')
-      .reduce((sum, r) => sum + (r.totalAmountInBaseCurrency || r.totalAmount * 0.14), 0),
+      .reduce((sum, r) => sum + (r.totalAmountInBaseCurrency || 0), 0),
   };
 
   // 搜索过滤
@@ -253,7 +253,7 @@ export default function ApprovalHistoryPage() {
   const checkExceedsLimit = (item: ReimbursementItem): boolean => {
     const limit = categoryLimits[item.category];
     if (!limit) return false;
-    const amountUSD = item.amountInBaseCurrency || item.amount * 0.14;
+    const amountUSD = item.amountInBaseCurrency || 0;
     return amountUSD > limit;
   };
 
@@ -426,7 +426,7 @@ export default function ApprovalHistoryPage() {
                 <div>
                   <p className="text-xs text-gray-500 uppercase tracking-wider">TOTAL CLAIMED</p>
                   <p className="text-xl font-bold text-gray-900 mt-1">
-                    ${(selectedData.totalAmountInBaseCurrency || selectedData.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    ${(selectedData.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </p>
                 </div>
                 <div>
@@ -436,7 +436,7 @@ export default function ApprovalHistoryPage() {
                   }`}>
                     {selectedData.status === 'rejected'
                       ? '$0.00'
-                      : `$${(selectedData.totalAmountInBaseCurrency || selectedData.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+                      : `$${(selectedData.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
                     }
                   </p>
                 </div>
@@ -465,8 +465,8 @@ export default function ApprovalHistoryPage() {
                     const catInfo = categoryLabels[item.category] || categoryLabels.other;
                     const itemCurrency = item.currency || 'CNY';
                     const itemSymbol = currencySymbols[itemCurrency] || itemCurrency;
-                    const exchangeRate = itemCurrency === 'USD' ? 1.000 : (item.amountInBaseCurrency && item.amount > 0 ? item.amountInBaseCurrency / item.amount : 0.14);
-                    const convertedAmount = item.amountInBaseCurrency || item.amount * 0.14;
+                    const exchangeRate = itemCurrency === 'USD' ? 1.000 : (item.amountInBaseCurrency && item.amount > 0 ? item.amountInBaseCurrency / item.amount : null);
+                    const convertedAmount = item.amountInBaseCurrency || 0;
                     const exceedsLimit = checkExceedsLimit(item);
 
                     return (
@@ -517,7 +517,7 @@ export default function ApprovalHistoryPage() {
                         {/* Exchange Rate */}
                         <div className="text-center">
                           <p className="text-sm text-gray-600 font-mono">
-                            {exchangeRate.toFixed(3)}
+                            {exchangeRate !== null ? exchangeRate.toFixed(3) : 'N/A'}
                           </p>
                         </div>
 

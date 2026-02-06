@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, tenants } from '@/lib/db/schema';
 import { eq, desc, and, or, inArray } from 'drizzle-orm';
-import { getUserRoles, canApprove, canProcessPayment } from '@/lib/auth/roles';
+import { getUserRoles, canApprove, canProcessPayment, isAdmin } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
+import { checkItemsLimit } from '@/lib/policy/limit-service';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -43,8 +44,8 @@ export async function GET(request: NextRequest) {
 
     // 验证角色权限并应用部门级数据隔离
     if (role === 'approver' && currentUser.tenantId) {
-      // 检查用户是否有审批权限
-      if (!canApprove(userRoles)) {
+      // 检查用户是否有审批权限（admin也可以查看和审批）
+      if (!canApprove(userRoles) && !isAdmin(userRoles)) {
         return NextResponse.json({ error: '无审批权限' }, { status: 403 });
       }
 
@@ -98,8 +99,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 是否需要加载提交人信息
-    const isApproverOrFinance = (role === 'approver' && canApprove(userRoles)) ||
+    // 是否需要加载提交人信息（审批人、财务、管理员查看他人报销时需要）
+    const isApproverOrFinance = (role === 'approver' && (canApprove(userRoles) || isAdmin(userRoles))) ||
                                  (role === 'finance' && canProcessPayment(userRoles));
 
     // 查询报销列表
@@ -176,6 +177,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 获取租户本位币
+    const tenantRecord = await db.query.tenants.findFirst({
+      where: eq(tenants.id, session.user.tenantId),
+      columns: { baseCurrency: true },
+    });
+    const tenantBaseCurrency = tenantRecord?.baseCurrency || 'USD';
+
     // 验证每项费用的必填字段
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -199,14 +207,46 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 计算原币总金额
-    const totalAmount = items.reduce(
+    // 应用政策限额约束（支持 per_day 和 per_month 类型）
+    const limitResult = await checkItemsLimit(
+      session.user.id,
+      session.user.tenantId,
+      items.map((item: any) => ({
+        category: item.category,
+        amount: parseFloat(item.amount) || 0,
+        amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
+        date: item.date,
+        location: item.location,
+      }))
+    );
+
+    // 使用调整后的金额更新 items
+    const adjustedItems = items.map((item: any, index: number) => {
+      const limitItem = limitResult.items[index];
+      // 计算调整后的原币金额（按比例调整）
+      const originalUsd = item.amountInBaseCurrency || parseFloat(item.amount) || 0;
+      const adjustedUsd = limitItem.adjustedAmount;
+      const ratio = originalUsd > 0 ? adjustedUsd / originalUsd : 1;
+      const adjustedOriginalAmount = (parseFloat(item.amount) || 0) * ratio;
+
+      return {
+        ...item,
+        amount: adjustedOriginalAmount,
+        amountInBaseCurrency: adjustedUsd,
+        originalAmount: parseFloat(item.amount) || 0,
+        originalAmountInBaseCurrency: originalUsd,
+        wasAdjusted: limitItem.wasAdjusted,
+      };
+    });
+
+    // 计算原币总金额（使用调整后的金额）
+    const totalAmount = adjustedItems.reduce(
       (sum: number, item: any) => sum + (parseFloat(item.amount) || 0),
       0
     );
 
     // 计算美元总金额（如果前端未提供则使用原币金额）
-    const usdTotal = totalAmountInBaseCurrency || items.reduce(
+    const usdTotal = adjustedItems.reduce(
       (sum: number, item: any) => sum + (item.amountInBaseCurrency || parseFloat(item.amount) || 0),
       0
     );
@@ -219,7 +259,7 @@ export async function POST(request: NextRequest) {
       description: description || null,
       totalAmount,
       totalAmountInBaseCurrency: usdTotal,
-      baseCurrency: 'USD',
+      baseCurrency: tenantBaseCurrency,
       status: submitStatus === 'pending' ? 'pending' : 'draft',
       autoCollected: false,
       sourceType: 'manual',
@@ -239,8 +279,8 @@ export async function POST(request: NextRequest) {
       .values(reimbursementData)
       .returning();
 
-    // 创建费用明细
-    if (items.length > 0) {
+    // 创建费用明细（使用调整后的金额）
+    if (adjustedItems.length > 0) {
       // 解析日期，支持多种格式
       const parseDate = (dateStr: string): Date => {
         if (!dateStr) return new Date();
@@ -256,7 +296,7 @@ export async function POST(request: NextRequest) {
       };
 
       await db.insert(reimbursementItems).values(
-        items.map((item: any) => {
+        adjustedItems.map((item: any) => {
           const itemData: any = {
             reimbursementId: reimbursement.id,
             category: item.category,
@@ -285,10 +325,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    // 构建返回数据，包含限额调整信息
+    const responseData: any = {
       success: true,
       data: reimbursement,
-    });
+    };
+
+    // 如果有金额被调整，返回提示信息
+    if (limitResult.totalAdjusted > 0) {
+      responseData.limitAdjustments = {
+        count: limitResult.totalAdjusted,
+        messages: limitResult.messages,
+        message: `有 ${limitResult.totalAdjusted} 项费用超过政策限额，已自动调整`,
+      };
+    }
+
+    return NextResponse.json(responseData);
   } catch (error: any) {
     console.error('Create reimbursement error:', error);
     // 返回详细的错误信息以便调试

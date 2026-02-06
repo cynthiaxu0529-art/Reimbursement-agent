@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/card';
 import { UserRole } from '@/types';
+import { CURRENCY_SYMBOLS } from '@/lib/constants/reimbursement';
 
 interface UserInfo {
   id: string;
@@ -29,30 +30,48 @@ interface Reimbursement {
 }
 
 interface DashboardStats {
+  baseCurrency: string;
   // 员工统计
   myTotal: number;
   myPending: number;
   myApproved: number;
+  myProcessing: number;
   myPaid: number;
   myRejected: number;
   myTotalAmount: number;
   // 审批人统计
   pendingApproval: number;
+  pendingApprovalAmount: number;
   // 管理员统计
   teamMembers: number;
+  companyTotal: number;
+  companyPending: number;
+  companyApproved: number;
+  companyProcessing: number;
+  companyPaid: number;
+  companyTotalAmount: number;
 }
 
 export default function DashboardPage() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [stats, setStats] = useState<DashboardStats>({
+    baseCurrency: 'USD',
     myTotal: 0,
     myPending: 0,
     myApproved: 0,
+    myProcessing: 0,
     myPaid: 0,
     myRejected: 0,
     myTotalAmount: 0,
     pendingApproval: 0,
+    pendingApprovalAmount: 0,
     teamMembers: 0,
+    companyTotal: 0,
+    companyPending: 0,
+    companyApproved: 0,
+    companyProcessing: 0,
+    companyPaid: 0,
+    companyTotalAmount: 0,
   });
   const [recentReimbursements, setRecentReimbursements] = useState<Reimbursement[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<Reimbursement[]>([]);
@@ -70,75 +89,40 @@ export default function DashboardPage() {
           setUser(userData);
         }
 
-        // 2. 获取我的报销列表（员工视角）
-        const myReimbursementsRes = await fetch('/api/reimbursements?pageSize=100');
-        if (myReimbursementsRes.ok) {
-          const myData = await myReimbursementsRes.json();
-          const items: Reimbursement[] = myData.data || [];
-
-          // 最近5笔用于展示
-          setRecentReimbursements(items.slice(0, 5));
-
-          // 计算统计数据
-          const myPending = items.filter((r) =>
-            r.status === 'pending' || r.status === 'submitted'
-          ).length;
-          const myApproved = items.filter((r) => r.status === 'approved').length;
-          const myPaid = items.filter((r) => r.status === 'paid').length;
-          const myRejected = items.filter((r) => r.status === 'rejected').length;
-          const myTotalAmount = items.reduce((sum, r) =>
-            sum + (r.totalAmountInBaseCurrency || r.totalAmount || 0), 0
-          );
-
-          setStats(prev => ({
-            ...prev,
-            myTotal: items.length,
-            myPending,
-            myApproved,
-            myPaid,
-            myRejected,
-            myTotalAmount,
-          }));
-        }
-
-        // 3. 如果是审批人，获取待审批列表
         const userRole = userData?.role;
         const canApproveRole = userRole === UserRole.MANAGER ||
                                userRole === UserRole.FINANCE ||
                                userRole === UserRole.ADMIN ||
                                userRole === UserRole.SUPER_ADMIN;
+        const isAdminRole = userRole === UserRole.ADMIN || userRole === UserRole.SUPER_ADMIN;
 
-        if (canApproveRole) {
-          try {
-            const approvalRes = await fetch('/api/reimbursements?role=approver&status=pending,submitted');
-            if (approvalRes.ok) {
-              const approvalData = await approvalRes.json();
-              const approvalItems: Reimbursement[] = approvalData.data || [];
-              setPendingApprovals(approvalItems.slice(0, 5));
-              setStats(prev => ({
-                ...prev,
-                pendingApproval: approvalItems.length,
-              }));
-            }
-          } catch (e) {
-            console.error('Failed to fetch pending approvals:', e);
+        // 2. 使用后端聚合统计 API（避免 pageSize 截断）
+        const statsRole = isAdminRole ? 'admin' : canApproveRole ? 'approver' : 'employee';
+        const statsRes = await fetch(`/api/reimbursements/stats?role=${statsRole}`);
+        if (statsRes.ok) {
+          const statsJson = await statsRes.json();
+          if (statsJson.success && statsJson.stats) {
+            setStats(prev => ({ ...prev, ...statsJson.stats }));
           }
         }
 
-        // 4. 如果是管理员，获取团队成员数量
-        const isAdminRole = userRole === UserRole.ADMIN || userRole === UserRole.SUPER_ADMIN;
-        if (isAdminRole) {
+        // 3. 获取最近5笔报销用于列表展示
+        const myReimbursementsRes = await fetch('/api/reimbursements?pageSize=5');
+        if (myReimbursementsRes.ok) {
+          const myData = await myReimbursementsRes.json();
+          setRecentReimbursements(myData.data || []);
+        }
+
+        // 4. 如果是审批人，获取待审批列表（展示用，最多5条）
+        if (canApproveRole) {
           try {
-            const teamRes = await fetch('/api/team/members');
-            if (teamRes.ok) {
-              const teamData = await teamRes.json();
-              setStats(prev => ({
-                ...prev,
-                teamMembers: teamData.data?.length || 0,
-              }));
+            const approvalRes = await fetch('/api/reimbursements?role=approver&status=pending,under_review&pageSize=5');
+            if (approvalRes.ok) {
+              const approvalData = await approvalRes.json();
+              setPendingApprovals(approvalData.data || []);
             }
           } catch (e) {
-            console.error('Failed to fetch team members:', e);
+            console.error('Failed to fetch pending approvals:', e);
           }
         }
 
@@ -158,7 +142,6 @@ export default function DashboardPage() {
   const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.SUPER_ADMIN;
   const canApprove = isManager || isFinance || isAdmin;
 
-  // 根据角色显示不同的欢迎语
   const getWelcomeMessage = () => {
     const name = user?.name || '';
     if (isAdmin) {
@@ -187,21 +170,23 @@ export default function DashboardPage() {
 
   const welcome = getWelcomeMessage();
 
-  const formatAmount = (amount: number, currency?: string) => {
-    return new Intl.NumberFormat('zh-CN', {
-      style: 'currency',
-      currency: currency || 'USD',
+  const currencySymbol = CURRENCY_SYMBOLS[stats.baseCurrency] || '$';
+
+  const formatAmount = (amount: number) => {
+    return `${currencySymbol}${new Intl.NumberFormat('en-US', {
       minimumFractionDigits: 2,
-    }).format(amount);
+      maximumFractionDigits: 2,
+    }).format(amount)}`;
   };
 
   const getStatusLabel = (status: string) => {
     const labels: Record<string, { text: string; color: string; bg: string }> = {
       draft: { text: '草稿', color: '#6b7280', bg: '#f3f4f6' },
       pending: { text: '待审批', color: '#d97706', bg: '#fef3c7' },
-      submitted: { text: '待审批', color: '#d97706', bg: '#fef3c7' },
+      under_review: { text: '审核中', color: '#2563eb', bg: '#dbeafe' },
       approved: { text: '已批准', color: '#16a34a', bg: '#dcfce7' },
       rejected: { text: '已拒绝', color: '#dc2626', bg: '#fee2e2' },
+      processing: { text: '处理中', color: '#2563eb', bg: '#dbeafe' },
       paid: { text: '已打款', color: '#059669', bg: '#d1fae5' },
     };
     return labels[status] || { text: status, color: '#6b7280', bg: '#f3f4f6' };
@@ -330,40 +315,85 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* 管理员额外统计 */}
+      {/* 管理员：全公司统计 */}
       {isAdmin && (
-        <div className="grid grid-cols-2 gap-4">
-          <Card className="p-4 border-l-4 border-l-purple-500">
-            <div className="flex items-center justify-between">
+        <>
+          <div className="flex items-center gap-2 mt-2">
+            <h2 className="text-lg font-semibold text-gray-900">全公司报销概览</h2>
+            <span className="text-xs text-gray-400">（管理员视角）</span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <Card className="p-4 border-l-4 border-l-indigo-500">
               <div>
-                <p className="text-sm text-gray-500">团队成员</p>
-                <p className="text-2xl font-bold text-purple-600 mt-1">{stats.teamMembers}</p>
-                <p className="text-xs text-gray-400 mt-1">已加入公司</p>
+                <p className="text-sm text-gray-500">报销总数</p>
+                <p className="text-2xl font-bold text-indigo-600 mt-1">{stats.companyTotal}</p>
+                <p className="text-xs text-gray-400 mt-1">全公司累计</p>
               </div>
-              <Link
-                href="/dashboard/team"
-                className="px-3 py-1.5 text-sm text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-              >
-                管理 →
-              </Link>
-            </div>
-          </Card>
-          <Card className="p-4 border-l-4 border-l-blue-500">
-            <div className="flex items-center justify-between">
+            </Card>
+            <Card className="p-4 border-l-4 border-l-amber-500">
               <div>
-                <p className="text-sm text-gray-500">待审批总数</p>
-                <p className="text-2xl font-bold text-blue-600 mt-1">{stats.pendingApproval}</p>
-                <p className="text-xs text-gray-400 mt-1">全公司</p>
+                <p className="text-sm text-gray-500">待审批</p>
+                <p className="text-2xl font-bold text-amber-600 mt-1">{stats.companyPending}</p>
+                <p className="text-xs text-gray-400 mt-1">等待处理</p>
               </div>
-              <Link
-                href="/dashboard/approvals"
-                className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              >
-                查看 →
-              </Link>
-            </div>
-          </Card>
-        </div>
+            </Card>
+            <Card className="p-4 border-l-4 border-l-green-500">
+              <div>
+                <p className="text-sm text-gray-500">已批准</p>
+                <p className="text-2xl font-bold text-green-600 mt-1">{stats.companyApproved}</p>
+                <p className="text-xs text-gray-400 mt-1">待打款</p>
+              </div>
+            </Card>
+            <Card className="p-4 border-l-4 border-l-emerald-500">
+              <div>
+                <p className="text-sm text-gray-500">已打款</p>
+                <p className="text-2xl font-bold text-emerald-600 mt-1">{stats.companyPaid}</p>
+                <p className="text-xs text-gray-400 mt-1">已完成</p>
+              </div>
+            </Card>
+            <Card className="p-4 border-l-4 border-l-blue-500">
+              <div>
+                <p className="text-sm text-gray-500">总金额</p>
+                <p className="text-xl font-bold text-blue-600 mt-1">
+                  {formatAmount(stats.companyTotalAmount)}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">全公司累计</p>
+              </div>
+            </Card>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Card className="p-4 border-l-4 border-l-purple-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">团队成员</p>
+                  <p className="text-2xl font-bold text-purple-600 mt-1">{stats.teamMembers}</p>
+                  <p className="text-xs text-gray-400 mt-1">已加入公司</p>
+                </div>
+                <Link
+                  href="/dashboard/team"
+                  className="px-3 py-1.5 text-sm text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                >
+                  管理 →
+                </Link>
+              </div>
+            </Card>
+            <Card className="p-4 border-l-4 border-l-blue-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">待审批总数</p>
+                  <p className="text-2xl font-bold text-blue-600 mt-1">{stats.pendingApproval}</p>
+                  <p className="text-xs text-gray-400 mt-1">全公司</p>
+                </div>
+                <Link
+                  href="/dashboard/approvals"
+                  className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                >
+                  查看 →
+                </Link>
+              </div>
+            </Card>
+          </div>
+        </>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -466,10 +496,11 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="divide-y">
-            {/* 如果是审批人且有待审批，优先显示待审批列表 */}
             {canApprove && pendingApprovals.length > 0 ? (
               pendingApprovals.map((item) => {
                 const status = getStatusLabel(item.status);
+                const displayAmount = item.totalAmountInBaseCurrency ?? item.totalAmount;
+                const displayCurrency = item.baseCurrency || stats.baseCurrency;
                 return (
                   <Link
                     key={item.id}
@@ -492,7 +523,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="text-right">
                       <p className="font-medium text-gray-900">
-                        {formatAmount(item.totalAmountInBaseCurrency || item.totalAmount || 0, item.baseCurrency)}
+                        {(CURRENCY_SYMBOLS[displayCurrency] || '$')}{displayAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
                       <span
                         className="inline-block text-xs px-2 py-0.5 rounded-full"
@@ -520,6 +551,8 @@ export default function DashboardPage() {
             ) : (
               recentReimbursements.map((item) => {
                 const status = getStatusLabel(item.status);
+                const displayAmount = item.totalAmountInBaseCurrency ?? item.totalAmount;
+                const displayCurrency = item.baseCurrency || stats.baseCurrency;
                 return (
                   <Link
                     key={item.id}
@@ -543,7 +576,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="text-right">
                       <p className="font-medium text-gray-900">
-                        {formatAmount(item.totalAmountInBaseCurrency || item.totalAmount || 0, item.baseCurrency)}
+                        {(CURRENCY_SYMBOLS[displayCurrency] || '$')}{displayAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
                       <span
                         className="inline-block text-xs px-2 py-0.5 rounded-full"

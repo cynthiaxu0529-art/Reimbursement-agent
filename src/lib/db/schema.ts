@@ -78,7 +78,7 @@ export const tenants = pgTable('tenants', {
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
   plan: text('plan').notNull().default('free'),
-  baseCurrency: text('base_currency').notNull().default('CNY'),
+  baseCurrency: text('base_currency').notNull().default('USD'),
   settings: jsonb('settings').default({}),
   coaMappings: jsonb('coa_mappings').default([]),
   createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -257,7 +257,7 @@ export const reimbursements = pgTable('reimbursements', {
 
   totalAmount: real('total_amount').notNull().default(0),
   totalAmountInBaseCurrency: real('total_amount_in_base_currency').notNull().default(0),
-  baseCurrency: text('base_currency').notNull().default('CNY'),
+  baseCurrency: text('base_currency').notNull().default('USD'),
 
   status: reimbursementStatusEnum('status').notNull().default('draft'),
 
