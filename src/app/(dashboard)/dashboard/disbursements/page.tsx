@@ -115,8 +115,17 @@ export default function DisbursementsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [roleChecked, setRoleChecked] = useState(false);
   const [payoutStatuses, setPayoutStatuses] = useState<Record<string, any>>({});
-  const [paymentStats, setPaymentStats] = useState<{ processingCount: number; todayPaidCount: number }>({
+  const [paymentStats, setPaymentStats] = useState<{
+    pendingCount: number;
+    pendingTotal: number;
+    processingCount: number;
+    totalPaidCount: number;
+    todayPaidCount: number;
+  }>({
+    pendingCount: 0,
+    pendingTotal: 0,
     processingCount: 0,
+    totalPaidCount: 0,
     todayPaidCount: 0,
   });
 
@@ -203,9 +212,11 @@ export default function DisbursementsPage() {
     let errorCount = 0;
 
     for (const item of reimbursements) {
-      const payoutInfo = item.aiSuggestions?.find(
+      // 使用 findLast 获取最新的 payout 记录（避免查询旧的过期记录）
+      const allPayouts = (item.aiSuggestions || []).filter(
         (s: any) => s.type === 'fluxa_payout_initiated'
       );
+      const payoutInfo = allPayouts.length > 0 ? allPayouts[allPayouts.length - 1] : null;
       if (!payoutInfo?.payoutId) {
         console.log('[刷新状态] 跳过, 无 payoutId:', item.id);
         continue;
@@ -496,12 +507,7 @@ export default function DisbursementsPage() {
     }
   };
 
-  // Stats - 使用自定义打款金额（如果有）
-  const readyForPayment = reimbursements.filter(r => r.status === 'approved').length;
-  const totalPayable = reimbursements.reduce((sum, r) => {
-    const originalAmount = r.totalAmountInBaseCurrency || 0;
-    return sum + (customPaymentAmounts[r.id] ?? originalAmount);
-  }, 0);
+  // Stats - 计算选中项的总金额
   const selectedTotal = reimbursements
     .filter(r => selectedIds.includes(r.id))
     .reduce((sum, r) => {
@@ -587,10 +593,10 @@ export default function DisbursementsPage() {
             <div>
               <p className="text-xs text-gray-500 mb-1">待付款总额</p>
               <p className="text-2xl font-bold text-gray-900">
-                ${totalPayable.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                ${paymentStats.pendingTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
               </p>
               <p className="text-xs text-amber-600 mt-1">
-                {readyForPayment} 笔待处理
+                {paymentStats.pendingCount} 笔待处理
               </p>
             </div>
             <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center text-xl">
@@ -615,9 +621,11 @@ export default function DisbursementsPage() {
         <Card className="p-4 border-l-4 border-l-green-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-gray-500 mb-1">今日已付</p>
-              <p className="text-2xl font-bold text-gray-900">{paymentStats.todayPaidCount}</p>
-              <p className="text-xs text-gray-500 mt-1">笔</p>
+              <p className="text-xs text-gray-500 mb-1">已付款</p>
+              <p className="text-2xl font-bold text-gray-900">{paymentStats.totalPaidCount}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                今日 {paymentStats.todayPaidCount} 笔
+              </p>
             </div>
             <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center text-xl">
               ✅
@@ -627,56 +635,63 @@ export default function DisbursementsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 mb-4 border-b">
-        <button
-          onClick={() => { setActiveTab('ready'); setSelectedIds([]); }}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
-            activeTab === 'ready'
-              ? 'text-blue-600 border-blue-600'
-              : 'text-gray-500 border-transparent hover:text-gray-700'
-          }`}
-        >
-          待付款
-          {readyForPayment > 0 && (
-            <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">
-              {readyForPayment}
-            </span>
-          )}
-        </button>
-        <button
-          onClick={() => { setActiveTab('processing'); setSelectedIds([]); }}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
-            activeTab === 'processing'
-              ? 'text-purple-600 border-purple-600'
-              : 'text-gray-500 border-transparent hover:text-gray-700'
-          }`}
-        >
-          处理中
-          {paymentStats.processingCount > 0 && (
-            <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-600 rounded-full">
-              {paymentStats.processingCount}
-            </span>
-          )}
-        </button>
+      <div className="flex items-center justify-between mb-4 border-b">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => { setActiveTab('ready'); setSelectedIds([]); }}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
+              activeTab === 'ready'
+                ? 'text-blue-600 border-blue-600'
+                : 'text-gray-500 border-transparent hover:text-gray-700'
+            }`}
+          >
+            待付款
+            {paymentStats.pendingCount > 0 && (
+              <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">
+                {paymentStats.pendingCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => { setActiveTab('processing'); setSelectedIds([]); }}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
+              activeTab === 'processing'
+                ? 'text-purple-600 border-purple-600'
+                : 'text-gray-500 border-transparent hover:text-gray-700'
+            }`}
+          >
+            处理中
+            {paymentStats.processingCount > 0 && (
+              <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-600 rounded-full">
+                {paymentStats.processingCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => { setActiveTab('history'); setSelectedIds([]); }}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
+              activeTab === 'history'
+                ? 'text-green-600 border-green-600'
+                : 'text-gray-500 border-transparent hover:text-gray-700'
+            }`}
+          >
+            付款历史
+            {paymentStats.totalPaidCount > 0 && (
+              <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-600 rounded-full">
+                {paymentStats.totalPaidCount}
+              </span>
+            )}
+          </button>
+        </div>
         {activeTab === 'processing' && (
           <button
             onClick={refreshAllPayoutStatuses}
             disabled={refreshingStatus}
-            className="ml-auto px-3 py-1.5 text-sm font-medium text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
+            className="px-3 py-1.5 text-sm font-medium text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
           >
             {refreshingStatus ? '刷新中...' : '🔄 刷新状态'}
           </button>
         )}
-        <button
-          onClick={() => { setActiveTab('history'); setSelectedIds([]); }}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
-            activeTab === 'history'
-              ? 'text-green-600 border-green-600'
-              : 'text-gray-500 border-transparent hover:text-gray-700'
-          }`}
-        >
-          付款历史
-        </button>
       </div>
 
       {/* Search & Filter */}
