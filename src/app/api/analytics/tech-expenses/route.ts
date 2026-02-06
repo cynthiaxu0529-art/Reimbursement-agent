@@ -276,26 +276,80 @@ export async function GET(request: NextRequest) {
       byUser[expense.userId].categories[category] += amount;
     });
 
-    // 计算总计和同比
+    // 计算总计
     const totalAmount = Object.values(byCategory).reduce((sum, cat) => sum + cat.total, 0);
 
-    // 格式化类别数据
-    const categoryData = Object.entries(byCategory).map(([key, value]) => ({
-      category: key,
-      label: CATEGORY_LABELS[key] || key,
-      total: Math.round(value.total * 100) / 100,
-      count: value.count,
-      percentage: totalAmount > 0 ? Math.round((value.total / totalAmount) * 1000) / 10 : 0,
-      topVendors: Object.entries(
-        value.items.reduce((acc, item) => {
-          acc[item.vendor] = (acc[item.vendor] || 0) + item.amount;
-          return acc;
-        }, {} as Record<string, number>)
-      )
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([name, amount]) => ({ name, amount: Math.round(amount * 100) / 100 })),
-    }));
+    // === 获取上个月数据用于对比 ===
+    const lastMonthStart = new Date(startDate);
+    lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
+    const lastMonthEnd = new Date(startDate);
+    lastMonthEnd.setDate(lastMonthEnd.getDate() - 1);
+
+    const lastMonthConditions = [
+      eq(reimbursements.tenantId, user.tenantId),
+      gte(reimbursementItems.date, lastMonthStart),
+      lte(reimbursementItems.date, lastMonthEnd),
+      inArray(reimbursementItems.category, TECH_CATEGORIES),
+      inArray(reimbursements.status, ['approved', 'paid']),
+    ];
+
+    if (scope === 'personal') {
+      lastMonthConditions.push(eq(reimbursements.userId, session.user.id));
+    }
+
+    const lastMonthExpenses = await db
+      .select({
+        category: reimbursementItems.category,
+        amountInBaseCurrency: reimbursementItems.amountInBaseCurrency,
+      })
+      .from(reimbursementItems)
+      .innerJoin(reimbursements, eq(reimbursementItems.reimbursementId, reimbursements.id))
+      .where(and(...lastMonthConditions));
+
+    const lastMonthByCategory: Record<string, number> = {};
+    TECH_CATEGORIES.forEach(cat => {
+      lastMonthByCategory[cat] = 0;
+    });
+
+    lastMonthExpenses.forEach(expense => {
+      if (lastMonthByCategory[expense.category] !== undefined) {
+        lastMonthByCategory[expense.category] += expense.amountInBaseCurrency;
+      }
+    });
+
+    const lastMonthTotal = Object.values(lastMonthByCategory).reduce((sum, amount) => sum + amount, 0);
+
+    // 计算月环比增长
+    const monthOverMonthGrowth = lastMonthTotal > 0
+      ? Math.round(((totalAmount - lastMonthTotal) / lastMonthTotal) * 1000) / 10
+      : 0;
+
+    // 格式化类别数据（增加月环比）
+    const categoryData = Object.entries(byCategory).map(([key, value]) => {
+      const lastMonthAmount = lastMonthByCategory[key] || 0;
+      const categoryGrowth = lastMonthAmount > 0
+        ? Math.round(((value.total - lastMonthAmount) / lastMonthAmount) * 1000) / 10
+        : value.total > 0 ? 100 : 0;
+
+      return {
+        category: key,
+        label: CATEGORY_LABELS[key] || key,
+        total: Math.round(value.total * 100) / 100,
+        count: value.count,
+        percentage: totalAmount > 0 ? Math.round((value.total / totalAmount) * 1000) / 10 : 0,
+        lastMonthTotal: Math.round(lastMonthAmount * 100) / 100,
+        growth: categoryGrowth,
+        topVendors: Object.entries(
+          value.items.reduce((acc, item) => {
+            acc[item.vendor] = (acc[item.vendor] || 0) + item.amount;
+            return acc;
+          }, {} as Record<string, number>)
+        )
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([name, amount]) => ({ name, amount: Math.round(amount * 100) / 100 })),
+      };
+    });
 
     // 格式化供应商数据
     const vendorData = Object.values(byVendor)
@@ -372,6 +426,17 @@ export async function GET(request: NextRequest) {
         .slice(0, 5),
     };
 
+    // 计算平均值和趋势
+    const avgMonthlyAmount = monthlyTrend.length > 0
+      ? Math.round((monthlyTrend.reduce((sum, m) => sum + m.amount, 0) / monthlyTrend.length) * 100) / 100
+      : 0;
+
+    // 计算趋势方向（最近3个月）
+    const recentMonths = monthlyTrend.slice(-3);
+    const trendDirection = recentMonths.length >= 2
+      ? recentMonths[recentMonths.length - 1].amount > recentMonths[0].amount ? 'up' : 'down'
+      : 'stable';
+
     return NextResponse.json({
       success: true,
       data: {
@@ -386,6 +451,24 @@ export async function GET(request: NextRequest) {
           currency: tenantBaseCurrency,
           categoryCount: categoryData.filter(c => c.total > 0).length,
           vendorCount: vendorData.length,
+          lastMonthTotal: Math.round(lastMonthTotal * 100) / 100,
+          monthOverMonthGrowth,
+          avgMonthlyAmount,
+          trendDirection,
+        },
+        comparison: {
+          lastMonth: {
+            total: Math.round(lastMonthTotal * 100) / 100,
+            byCategory: Object.entries(lastMonthByCategory).map(([key, value]) => ({
+              category: key,
+              label: CATEGORY_LABELS[key] || key,
+              total: Math.round(value * 100) / 100,
+            })),
+          },
+          growth: {
+            absolute: Math.round((totalAmount - lastMonthTotal) * 100) / 100,
+            percentage: monthOverMonthGrowth,
+          },
         },
         byCategory: categoryData,
         byVendor: vendorData.slice(0, 20), // 返回前20个供应商

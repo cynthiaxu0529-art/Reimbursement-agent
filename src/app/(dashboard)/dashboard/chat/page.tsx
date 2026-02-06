@@ -22,6 +22,24 @@ interface TechExpenseData {
     currency: string;
     categoryCount: number;
     vendorCount: number;
+    lastMonthTotal?: number;
+    monthOverMonthGrowth?: number;
+    avgMonthlyAmount?: number;
+    trendDirection?: 'up' | 'down' | 'stable';
+  };
+  comparison?: {
+    lastMonth: {
+      total: number;
+      byCategory: {
+        category: string;
+        label: string;
+        total: number;
+      }[];
+    };
+    growth: {
+      absolute: number;
+      percentage: number;
+    };
   };
   byCategory: {
     category: string;
@@ -29,6 +47,8 @@ interface TechExpenseData {
     total: number;
     count: number;
     percentage: number;
+    lastMonthTotal?: number;
+    growth?: number;
     topVendors: { name: string; amount: number }[];
   }[];
   byVendor: {
@@ -37,6 +57,10 @@ interface TechExpenseData {
     totalAmount: number;
     count: number;
     userCount: number;
+  }[];
+  monthlyTrend?: {
+    month: string;
+    amount: number;
   }[];
   aiTokenAnalysis: {
     total: number;
@@ -342,25 +366,90 @@ export default function ChatPage() {
 
     if (type === 'all' || type === 'ai') {
       response += `**📊 本月技术费用分析**\n\n`;
+
+      // 总计与月环比
       response += `**总计：${cs}${data.summary.totalAmount.toLocaleString()}**\n`;
+
+      // 月环比增长
+      if (data.summary.lastMonthTotal !== undefined && data.summary.monthOverMonthGrowth !== undefined) {
+        const growthIcon = data.summary.monthOverMonthGrowth > 0 ? '📈' : data.summary.monthOverMonthGrowth < 0 ? '📉' : '➡️';
+        const growthText = data.summary.monthOverMonthGrowth > 0
+          ? `增长 ${data.summary.monthOverMonthGrowth}%`
+          : data.summary.monthOverMonthGrowth < 0
+          ? `下降 ${Math.abs(data.summary.monthOverMonthGrowth)}%`
+          : '持平';
+        response += `${growthIcon} 较上月${growthText}（上月：${cs}${data.summary.lastMonthTotal.toLocaleString()}）\n`;
+
+        if (data.comparison) {
+          response += `变化：${data.comparison.growth.absolute >= 0 ? '+' : ''}${cs}${data.comparison.growth.absolute.toLocaleString()}\n`;
+        }
+      }
+
       response += `涉及 ${data.summary.vendorCount} 个供应商，${data.summary.categoryCount} 个类别\n\n`;
 
-      // 按类别统计
-      response += `**按类别分布：**\n`;
-      data.byCategory
-        .filter(c => c.total > 0)
-        .sort((a, b) => b.total - a.total)
-        .forEach(cat => {
-          response += `• ${cat.label}：${cs}${cat.total.toLocaleString()} (${cat.percentage}%)\n`;
-        });
+      // 趋势摘要
+      if (data.summary.avgMonthlyAmount && data.summary.trendDirection) {
+        const trendEmoji = data.summary.trendDirection === 'up' ? '📈' : data.summary.trendDirection === 'down' ? '📉' : '➡️';
+        const trendText = data.summary.trendDirection === 'up' ? '上升' : data.summary.trendDirection === 'down' ? '下降' : '稳定';
+        response += `**趋势：** ${trendEmoji} 最近趋势${trendText}（月均：${cs}${data.summary.avgMonthlyAmount.toLocaleString()}）\n\n`;
+      }
+
+      // 按类别统计（增加月环比）
+      response += `**📦 按类别分布：**\n`;
+      const categoriesWithData = data.byCategory.filter(c => c.total > 0).sort((a, b) => b.total - a.total);
+
+      categoriesWithData.forEach((cat, index) => {
+        response += `${index + 1}. **${cat.label}**：${cs}${cat.total.toLocaleString()} (${cat.percentage}%)`;
+
+        // 添加月环比
+        if (cat.growth !== undefined && cat.lastMonthTotal !== undefined) {
+          const growthIcon = cat.growth > 5 ? '🔺' : cat.growth < -5 ? '🔻' : '•';
+          response += ` ${growthIcon} ${cat.growth > 0 ? '+' : ''}${cat.growth}%`;
+        }
+        response += `\n`;
+
+        // 显示Top供应商
+        if (cat.topVendors && cat.topVendors.length > 0) {
+          response += `   主要供应商：${cat.topVendors.map(v => `${v.name}(${cs}${v.amount.toLocaleString()})`).join(', ')}\n`;
+        }
+      });
       response += '\n';
+
+      // 供应商集中度分析
+      if (data.byVendor && data.byVendor.length > 0) {
+        response += `**🏢 供应商分析：**\n`;
+        const topVendors = data.byVendor.slice(0, 5);
+        topVendors.forEach((v, i) => {
+          const percentage = data.summary.totalAmount > 0
+            ? Math.round((v.totalAmount / data.summary.totalAmount) * 100)
+            : 0;
+          response += `${i + 1}. ${v.name}（${v.categoryLabel}）：${cs}${v.totalAmount.toLocaleString()} (${percentage}%) - ${v.userCount}位用户\n`;
+        });
+        response += '\n';
+      }
+
+      // 月度趋势
+      if (data.monthlyTrend && data.monthlyTrend.length > 1) {
+        response += `**📅 月度趋势：**\n`;
+        const recentMonths = data.monthlyTrend.slice(-3);
+        recentMonths.forEach((m) => {
+          response += `• ${m.month}：${cs}${m.amount.toLocaleString()}\n`;
+        });
+        response += '\n';
+      }
     }
 
     if (type === 'all' || type === 'ai') {
       // AI Token 分析
       if (data.aiTokenAnalysis && data.aiTokenAnalysis.total > 0) {
         response += `**🤖 AI Token 分析**\n`;
-        response += `总消耗：${cs}${data.aiTokenAnalysis.total.toLocaleString()}\n\n`;
+        response += `总消耗：${cs}${data.aiTokenAnalysis.total.toLocaleString()}`;
+
+        // AI Token占比
+        const aiPercentage = data.summary.totalAmount > 0
+          ? Math.round((data.aiTokenAnalysis.total / data.summary.totalAmount) * 100)
+          : 0;
+        response += ` (占总费用 ${aiPercentage}%)\n\n`;
 
         if (data.aiTokenAnalysis.topProviders && data.aiTokenAnalysis.topProviders.length > 0) {
           response += `供应商分布：\n`;
@@ -368,6 +457,16 @@ export default function ChatPage() {
             const percentage = Math.round((p.totalAmount / data.aiTokenAnalysis.total) * 100);
             response += `${i + 1}. ${p.name}：${cs}${p.totalAmount.toLocaleString()} (${percentage}%)\n`;
           });
+
+          // 供应商集中度分析
+          if (data.aiTokenAnalysis.topProviders.length === 1) {
+            response += `\n⚠️ **供应商风险：** 目前仅使用单一AI供应商，存在供应商锁定风险\n`;
+          } else if (data.aiTokenAnalysis.topProviders.length > 0) {
+            const topProviderPercentage = Math.round((data.aiTokenAnalysis.topProviders[0].totalAmount / data.aiTokenAnalysis.total) * 100);
+            if (topProviderPercentage > 70) {
+              response += `\n⚠️ **供应商集中度：** ${data.aiTokenAnalysis.topProviders[0].name}占比${topProviderPercentage}%，建议分散供应商风险\n`;
+            }
+          }
           response += '\n';
         }
 
@@ -386,14 +485,26 @@ export default function ChatPage() {
       // SaaS 订阅分析
       if (data.saasAnalysis && data.saasAnalysis.total > 0) {
         response += `**☁️ SaaS 订阅分析**\n`;
-        response += `总费用：${cs}${data.saasAnalysis.total.toLocaleString()}\n`;
+        response += `总费用：${cs}${data.saasAnalysis.total.toLocaleString()}`;
+
+        // SaaS占比
+        const saasPercentage = data.summary.totalAmount > 0
+          ? Math.round((data.saasAnalysis.total / data.summary.totalAmount) * 100)
+          : 0;
+        response += ` (占总费用 ${saasPercentage}%)\n`;
         response += `活跃订阅：${data.saasAnalysis.activeSubscriptions} 个\n\n`;
 
         if (data.saasAnalysis.topSubscriptions && data.saasAnalysis.topSubscriptions.length > 0) {
           response += `Top 订阅：\n`;
           data.saasAnalysis.topSubscriptions.forEach((s, i) => {
-            response += `${i + 1}. ${s.name}：${cs}${s.totalAmount.toLocaleString()}\n`;
+            const percentage = Math.round((s.totalAmount / data.saasAnalysis.total) * 100);
+            response += `${i + 1}. ${s.name}：${cs}${s.totalAmount.toLocaleString()} (${percentage}%)\n`;
           });
+
+          // 订阅数量建议
+          if (data.saasAnalysis.activeSubscriptions > 10) {
+            response += `\n💡 **订阅优化：** 当前订阅数量较多(${data.saasAnalysis.activeSubscriptions}个)，建议审查重复或低使用率工具\n`;
+          }
           response += '\n';
         }
       }
@@ -403,8 +514,13 @@ export default function ChatPage() {
     if (data.userRanking && data.userRanking.length > 0) {
       response += `**👥 技术费用 Top 5 用户**\n`;
       data.userRanking.slice(0, 5).forEach((u, i) => {
-        response += `${i + 1}. ${u.name}：${cs}${u.total.toLocaleString()}\n`;
+        const userPercentage = data.summary.totalAmount > 0
+          ? Math.round((u.total / data.summary.totalAmount) * 100)
+          : 0;
+        const categoryLabel = u.topCategory ? (categoryLabels[u.topCategory] || u.topCategory) : '未分类';
+        response += `${i + 1}. ${u.name}：${cs}${u.total.toLocaleString()} (${userPercentage}%) - 主要：${categoryLabel}\n`;
       });
+      response += '\n';
     }
 
     if (!response) {
