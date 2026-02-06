@@ -26,6 +26,8 @@ export async function GET(
 
     const { payoutId } = await params;
 
+    console.log('[PaymentStatus API] 查询 payoutId:', payoutId);
+
     if (!payoutId) {
       return NextResponse.json({ error: '缺少 payoutId' }, { status: 400 });
     }
@@ -37,8 +39,11 @@ export async function GET(
       .limit(1);
 
     if (!payment) {
+      console.log('[PaymentStatus API] 本地支付记录不存在, payoutId:', payoutId);
       return NextResponse.json({ error: '支付记录不存在' }, { status: 404 });
     }
+
+    console.log('[PaymentStatus API] 找到本地支付记录, 当前状态:', payment.payoutStatus);
 
     // 获取关联的报销单，验证租户权限
     const [reimbursement] = await db.select()
@@ -54,8 +59,10 @@ export async function GET(
     }
 
     // 从 Fluxa API 获取最新状态
+    console.log('[PaymentStatus API] 开始调用 Fluxa API 查询状态...');
     const payoutService = createFluxaPayoutService();
     const result = await payoutService.checkPayoutStatus(payoutId);
+    console.log('[PaymentStatus API] Fluxa API 响应:', result.success ? '成功' : '失败', result.error?.message || '');
 
     if (result.success && result.payout) {
       const payout = result.payout;
