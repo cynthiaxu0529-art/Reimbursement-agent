@@ -122,9 +122,9 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // 计算付款金额（使用美元/USDC）
+    // 计算付款金额（使用本位币/USDC）
     const originalAmountUSD = reimbursement.totalAmountInBaseCurrency ||
-      Number(reimbursement.totalAmount) * 0.14;
+      Number(reimbursement.totalAmount);
 
     // 如果财务提供了自定义金额，使用自定义金额（但不能超过原金额）
     let amountUSD = originalAmountUSD;

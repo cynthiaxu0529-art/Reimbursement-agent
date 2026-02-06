@@ -219,7 +219,7 @@ export default function DisbursementsPage() {
 
   // 获取报销单的打款金额（自定义金额或原金额）
   const getPaymentAmount = (item: Reimbursement) => {
-    const originalAmount = item.totalAmountInBaseCurrency || item.totalAmount * 0.14;
+    const originalAmount = item.totalAmountInBaseCurrency || 0;
     return customPaymentAmounts[item.id] ?? originalAmount;
   };
 
@@ -384,11 +384,11 @@ export default function DisbursementsPage() {
   // Stats
   const readyForPayment = reimbursements.filter(r => r.status === 'approved').length;
   const totalPayable = reimbursements.reduce((sum, r) =>
-    sum + (r.totalAmountInBaseCurrency || r.totalAmount * 0.14), 0
+    sum + (r.totalAmountInBaseCurrency || 0), 0
   );
   const selectedTotal = reimbursements
     .filter(r => selectedIds.includes(r.id))
-    .reduce((sum, r) => sum + (r.totalAmountInBaseCurrency || r.totalAmount * 0.14), 0);
+    .reduce((sum, r) => sum + (r.totalAmountInBaseCurrency || 0), 0);
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('zh-CN', {
@@ -630,7 +630,7 @@ export default function DisbursementsPage() {
               const isExpanded = expandedId === item.id;
               const isSelected = selectedIds.includes(item.id);
               const formId = generateFormId(item.createdAt, item.id);
-              const usdAmount = item.totalAmountInBaseCurrency || item.totalAmount * 0.14;
+              const usdAmount = item.totalAmountInBaseCurrency || 0;
 
               return (
                 <div key={item.id}>
@@ -748,7 +748,7 @@ export default function DisbursementsPage() {
                             </div>
                             {item.items?.map((lineItem, idx) => {
                               const catInfo = categoryLabels[lineItem.category] || categoryLabels.other;
-                              const itemUsd = lineItem.amountInBaseCurrency || lineItem.amount * 0.14;
+                              const itemUsd = lineItem.amountInBaseCurrency || 0;
                               return (
                                 <div key={idx} className={`grid grid-cols-[100px_1fr_120px_100px] gap-2 px-4 py-3 items-center ${
                                   idx < (item.items?.length || 0) - 1 ? 'border-b border-gray-100' : ''
@@ -949,7 +949,7 @@ export default function DisbursementsPage() {
                             const statusDesc = liveStatus?.statusDescription || '等待 Fluxa 钱包审批';
                             const approvalUrl = liveStatus?.approvalUrl || payoutInfo?.approvalUrl;
                             const isFailed = liveStatus?.status === 'failed' || liveStatus?.status === 'expired';
-                            const usdAmt = item.totalAmountInBaseCurrency || item.totalAmount * 0.14;
+                            const usdAmt = item.totalAmountInBaseCurrency || 0;
 
                             return (
                               <div className="pt-2 border-t space-y-2">
@@ -1036,7 +1036,7 @@ export default function DisbursementsPage() {
                                     已完成付款
                                   </p>
                                   <div className="text-xs text-green-700 space-y-1">
-                                    <p>金额: ${(item.totalAmountInBaseCurrency || item.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</p>
+                                    <p>金额: ${(item.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</p>
                                     {payoutInfo?.initiatedAt && (
                                       <p>发起时间: {formatDate(payoutInfo.initiatedAt)}</p>
                                     )}
