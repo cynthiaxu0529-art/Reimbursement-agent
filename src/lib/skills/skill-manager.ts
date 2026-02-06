@@ -902,7 +902,7 @@ export function createTimelinessAnalysisSkill(tenantId: string): Skill {
     tenantId,
     name: '报销时效性分析',
     description: '分析费用发生到报销提交的时间间隔，识别跨期报销和延迟提交问题',
-    category: SkillCategory.ANALYTICS,
+    category: SkillCategory.REPORT,
     version: '1.0.0',
     isActive: true,
     isBuiltIn: true,
