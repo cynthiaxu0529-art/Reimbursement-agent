@@ -18,6 +18,7 @@ export type PayoutStatus =
   | 'authorized'             // 已授权
   | 'signed'                 // 已签名
   | 'broadcasting'           // 广播中
+  | 'confirmed'              // 已确认（链上确认）
   | 'succeeded'              // 成功
   | 'failed'                 // 失败
   | 'expired';               // 已过期
@@ -347,14 +348,14 @@ export class FluxaPayoutClient {
    * 检查 Payout 状态是否为终态
    */
   static isTerminalStatus(status: PayoutStatus): boolean {
-    return ['succeeded', 'failed', 'expired'].includes(status);
+    return ['succeeded', 'confirmed', 'failed', 'expired'].includes(status);
   }
 
   /**
    * 检查 Payout 是否成功
    */
   static isSuccessStatus(status: PayoutStatus): boolean {
-    return status === 'succeeded';
+    return status === 'succeeded' || status === 'confirmed';
   }
 
   /**
@@ -366,6 +367,7 @@ export class FluxaPayoutClient {
       authorized: '已授权，准备签名',
       signed: '已签名，准备广播',
       broadcasting: '交易广播中',
+      confirmed: '打款成功（已确认）',
       succeeded: '打款成功',
       failed: '打款失败',
       expired: '已过期',
