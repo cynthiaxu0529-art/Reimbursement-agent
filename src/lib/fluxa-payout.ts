@@ -279,15 +279,21 @@ export class FluxaPayoutClient {
     }
 
     try {
-      const response = await fetch(`${this.walletApiUrl}/api/payouts/${payoutId}`, {
+      const requestUrl = `${this.walletApiUrl}/api/payouts/${payoutId}`;
+      console.log('[Fluxa] 查询 Payout 状态, URL:', requestUrl);
+
+      const response = await fetch(requestUrl, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${jwt}`,
         },
       });
 
+      console.log('[Fluxa] 响应状态码:', response.status);
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('[Fluxa] 查询失败:', response.status, errorData);
         return {
           success: false,
           error: {
@@ -299,13 +305,14 @@ export class FluxaPayoutClient {
       }
 
       const data: PayoutStatusResponse = await response.json();
+      console.log('[Fluxa] 查询成功, 状态:', data.payout?.status, 'payoutId:', data.payout?.payoutId);
 
       return {
         success: true,
         payout: data.payout,
       };
     } catch (error) {
-      console.error('Fluxa get payout status error:', error);
+      console.error('[Fluxa] 网络请求错误:', error);
       return {
         success: false,
         error: {
