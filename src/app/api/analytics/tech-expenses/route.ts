@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { users, reimbursements, reimbursementItems } from '@/lib/db/schema';
+import { users, reimbursements, reimbursementItems, tenants } from '@/lib/db/schema';
 import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
 
 // 技术费用类别
@@ -119,6 +119,13 @@ export async function GET(request: NextRequest) {
     if (!user?.tenantId) {
       return NextResponse.json({ error: '未关联公司' }, { status: 404 });
     }
+
+    // 获取租户本位币
+    const tenant = await db.query.tenants.findFirst({
+      where: eq(tenants.id, user.tenantId),
+      columns: { baseCurrency: true },
+    });
+    const tenantBaseCurrency = tenant?.baseCurrency || 'USD';
 
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period') || 'month';
@@ -376,7 +383,7 @@ export async function GET(request: NextRequest) {
         scope,
         summary: {
           totalAmount: Math.round(totalAmount * 100) / 100,
-          currency: 'CNY',
+          currency: tenantBaseCurrency,
           categoryCount: categoryData.filter(c => c.total > 0).length,
           vendorCount: vendorData.length,
         },

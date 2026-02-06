@@ -197,9 +197,9 @@ export default function ChatPage() {
       response += '✅ 当前技术费用预算使用正常，无预警。\n\n';
       if (data.summary) {
         response += `**预算使用情况：**\n`;
-        response += `• 本月技术费用总计：¥${data.summary.totalTechExpense?.toLocaleString() || 0}\n`;
+        response += `• 本月技术费用总计：$${data.summary.totalTechExpense?.toLocaleString() || 0}\n`;
         if (data.summary.totalLimit) {
-          response += `• 预算限额：¥${data.summary.totalLimit.toLocaleString()}\n`;
+          response += `• 预算限额：$${data.summary.totalLimit.toLocaleString()}\n`;
           response += `• 使用比例：${data.summary.usagePercentage || 0}%\n`;
         }
       }
@@ -241,9 +241,9 @@ export default function ChatPage() {
       if (data.summary) {
         response += `**检测摘要：**\n`;
         response += `• 分析费用笔数：${data.summary.totalAnalyzed || 0}\n`;
-        response += `• 本月总额：¥${data.summary.totalAmount?.toLocaleString() || 0}\n`;
+        response += `• 本月总额：$${data.summary.totalAmount?.toLocaleString() || 0}\n`;
         if (data.summary.lastMonthTotal) {
-          response += `• 上月总额：¥${data.summary.lastMonthTotal.toLocaleString()}\n`;
+          response += `• 上月总额：$${data.summary.lastMonthTotal.toLocaleString()}\n`;
         }
       }
       return response;
@@ -338,10 +338,11 @@ export default function ChatPage() {
   // 格式化技术费用分析回复
   const formatTechExpenseResponse = (data: TechExpenseData, type: 'all' | 'ai' | 'saas' = 'all'): string => {
     let response = '';
+    const cs = data.summary.currency === 'CNY' ? '¥' : data.summary.currency === 'GBP' ? '£' : data.summary.currency === 'EUR' ? '€' : '$';
 
     if (type === 'all' || type === 'ai') {
       response += `**📊 本月技术费用分析**\n\n`;
-      response += `**总计：¥${data.summary.totalAmount.toLocaleString()}**\n`;
+      response += `**总计：${cs}${data.summary.totalAmount.toLocaleString()}**\n`;
       response += `涉及 ${data.summary.vendorCount} 个供应商，${data.summary.categoryCount} 个类别\n\n`;
 
       // 按类别统计
@@ -350,7 +351,7 @@ export default function ChatPage() {
         .filter(c => c.total > 0)
         .sort((a, b) => b.total - a.total)
         .forEach(cat => {
-          response += `• ${cat.label}：¥${cat.total.toLocaleString()} (${cat.percentage}%)\n`;
+          response += `• ${cat.label}：${cs}${cat.total.toLocaleString()} (${cat.percentage}%)\n`;
         });
       response += '\n';
     }
@@ -359,13 +360,13 @@ export default function ChatPage() {
       // AI Token 分析
       if (data.aiTokenAnalysis && data.aiTokenAnalysis.total > 0) {
         response += `**🤖 AI Token 分析**\n`;
-        response += `总消耗：¥${data.aiTokenAnalysis.total.toLocaleString()}\n\n`;
+        response += `总消耗：${cs}${data.aiTokenAnalysis.total.toLocaleString()}\n\n`;
 
         if (data.aiTokenAnalysis.topProviders && data.aiTokenAnalysis.topProviders.length > 0) {
           response += `供应商分布：\n`;
           data.aiTokenAnalysis.topProviders.forEach((p, i) => {
             const percentage = Math.round((p.totalAmount / data.aiTokenAnalysis.total) * 100);
-            response += `${i + 1}. ${p.name}：¥${p.totalAmount.toLocaleString()} (${percentage}%)\n`;
+            response += `${i + 1}. ${p.name}：${cs}${p.totalAmount.toLocaleString()} (${percentage}%)\n`;
           });
           response += '\n';
         }
@@ -385,13 +386,13 @@ export default function ChatPage() {
       // SaaS 订阅分析
       if (data.saasAnalysis && data.saasAnalysis.total > 0) {
         response += `**☁️ SaaS 订阅分析**\n`;
-        response += `总费用：¥${data.saasAnalysis.total.toLocaleString()}\n`;
+        response += `总费用：${cs}${data.saasAnalysis.total.toLocaleString()}\n`;
         response += `活跃订阅：${data.saasAnalysis.activeSubscriptions} 个\n\n`;
 
         if (data.saasAnalysis.topSubscriptions && data.saasAnalysis.topSubscriptions.length > 0) {
           response += `Top 订阅：\n`;
           data.saasAnalysis.topSubscriptions.forEach((s, i) => {
-            response += `${i + 1}. ${s.name}：¥${s.totalAmount.toLocaleString()}\n`;
+            response += `${i + 1}. ${s.name}：${cs}${s.totalAmount.toLocaleString()}\n`;
           });
           response += '\n';
         }
@@ -402,7 +403,7 @@ export default function ChatPage() {
     if (data.userRanking && data.userRanking.length > 0) {
       response += `**👥 技术费用 Top 5 用户**\n`;
       data.userRanking.slice(0, 5).forEach((u, i) => {
-        response += `${i + 1}. ${u.name}：¥${u.total.toLocaleString()}\n`;
+        response += `${i + 1}. ${u.name}：${cs}${u.total.toLocaleString()}\n`;
       });
     }
 
