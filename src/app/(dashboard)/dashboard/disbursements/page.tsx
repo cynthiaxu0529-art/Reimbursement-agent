@@ -1092,14 +1092,17 @@ export default function DisbursementsPage() {
 
                           {/* Processing tab - show payout status & approval link */}
                           {activeTab === 'processing' && (() => {
-                            const payoutInfo = item.aiSuggestions?.find(
+                            // 使用 filter + 取最后一个，获取最新的 payout 记录
+                            const allPayouts = (item.aiSuggestions || []).filter(
                               (s: any) => s.type === 'fluxa_payout_initiated'
                             );
+                            const payoutInfo = allPayouts.length > 0 ? allPayouts[allPayouts.length - 1] : null;
                             const liveStatus = payoutStatuses[item.id];
                             const statusDesc = liveStatus?.statusDescription || '等待 Fluxa 钱包审批';
                             const approvalUrl = liveStatus?.approvalUrl || payoutInfo?.approvalUrl;
                             const isFailed = liveStatus?.status === 'failed' || liveStatus?.status === 'expired';
-                            const usdAmt = item.totalAmountInBaseCurrency || 0;
+                            // 优先使用实际打款金额，而非原始报销金额
+                            const usdAmt = payoutInfo?.amountUSDC || item.totalAmountInBaseCurrency || 0;
 
                             return (
                               <div className="pt-2 border-t space-y-2">
