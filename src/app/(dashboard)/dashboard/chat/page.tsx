@@ -78,6 +78,19 @@ interface TechExpenseData {
     activeSubscriptions: number;
     topSubscriptions: { name: string; totalAmount: number }[];
   };
+  timelinessAnalysis?: {
+    averageDays: number;
+    maxDays: number;
+    minDays: number;
+    medianDays: number;
+    within7Days: number;
+    within30Days: number;
+    over30Days: number;
+    over60Days: number;
+    over90Days: number;
+    totalCount: number;
+    complianceRate: number;
+  };
   userRanking?: {
     name: string;
     total: number;
@@ -186,7 +199,7 @@ export default function ChatPage() {
   // 获取技术费用分析（支持自定义日期范围）
   const fetchTechExpenses = async (
     scope: string = 'company',
-    dateFilterType: string = 'submission_date',
+    dateFilterType: string = 'expense_date', // 默认使用费用发生日期
     startDate?: string,
     endDate?: string
   ): Promise<TechExpenseData | null> => {
@@ -755,6 +768,37 @@ export default function ChatPage() {
       response += '\n';
     }
 
+    // 报销时效性分析
+    if (data.timelinessAnalysis && data.timelinessAnalysis.totalCount > 0) {
+      response += `**⏱️ 报销时效性分析**\n`;
+      response += `平均间隔：${data.timelinessAnalysis.averageDays}天 | 中位数：${data.timelinessAnalysis.medianDays}天\n`;
+      response += `最长间隔：${data.timelinessAnalysis.maxDays}天 | 最短间隔：${data.timelinessAnalysis.minDays}天\n\n`;
+
+      response += `**时效性分布：**\n`;
+      response += `• 7天内提交：${data.timelinessAnalysis.within7Days}笔 (${Math.round((data.timelinessAnalysis.within7Days / data.timelinessAnalysis.totalCount) * 100)}%)\n`;
+      response += `• 30天内提交：${data.timelinessAnalysis.within30Days}笔 (${data.timelinessAnalysis.complianceRate}%)\n`;
+
+      if (data.timelinessAnalysis.over30Days > 0) {
+        response += `• ⚠️ 超过30天：${data.timelinessAnalysis.over30Days}笔`;
+        if (data.timelinessAnalysis.over60Days > 0) {
+          response += ` (其中超60天: ${data.timelinessAnalysis.over60Days}笔`;
+          if (data.timelinessAnalysis.over90Days > 0) {
+            response += `, 超90天: ${data.timelinessAnalysis.over90Days}笔`;
+          }
+          response += ')';
+        }
+        response += '\n';
+      }
+
+      // 时效性建议
+      if (data.timelinessAnalysis.complianceRate < 80) {
+        response += `\n💡 **时效性建议：** 当前30天内提交率${data.timelinessAnalysis.complianceRate}%，建议提醒员工及时提交报销，避免跨期费用\n`;
+      } else if (data.timelinessAnalysis.complianceRate >= 95) {
+        response += `\n✅ **时效性评价：** 报销提交及时性良好（${data.timelinessAnalysis.complianceRate}%在30天内）\n`;
+      }
+      response += '\n';
+    }
+
     if (!response) {
       response = '本月暂无技术费用记录。';
     }
@@ -832,7 +876,7 @@ export default function ChatPage() {
 
             const data = await fetchTechExpenses(
               'company',
-              'submission_date',
+              'expense_date', // 使用费用发生日期
               startDate.toISOString().split('T')[0],
               endDate.toISOString().split('T')[0]
             );
@@ -902,7 +946,7 @@ export default function ChatPage() {
 
             const data = await fetchTechExpenses(
               'company',
-              'submission_date',
+              'expense_date', // 使用费用发生日期
               startDate.toISOString().split('T')[0],
               endDate.toISOString().split('T')[0]
             );
@@ -940,7 +984,7 @@ export default function ChatPage() {
 
           const techData = await fetchTechExpenses(
             'company',
-            'submission_date',
+            'expense_date', // 使用费用发生日期
             startDate.toISOString().split('T')[0],
             endDate.toISOString().split('T')[0]
           );
