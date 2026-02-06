@@ -339,7 +339,8 @@ export default function ReimbursementsPage() {
   const stats = {
     total: reimbursements.length,
     pending: reimbursements.filter(r => r.status === 'pending' || r.status === 'under_review').length,
-    approved: reimbursements.filter(r => r.status === 'approved').length,
+    // 已批准：包含 approved、processing、paid（都是审批通过的）
+    approved: reimbursements.filter(r => r.status === 'approved' || r.status === 'processing' || r.status === 'paid').length,
     totalAmount: reimbursements.reduce((sum, r) => sum + r.totalAmount, 0),
     totalAmountUSD: reimbursements.reduce((sum, r) => {
       return sum + (r.totalAmountInBaseCurrency || 0);

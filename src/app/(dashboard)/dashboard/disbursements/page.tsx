@@ -1186,7 +1186,7 @@ export default function DisbursementsPage() {
                                     已完成付款
                                   </p>
                                   <div className="text-xs text-green-700 space-y-1">
-                                    <p>金额: ${(item.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</p>
+                                    <p>金额: ${(payoutInfo?.amountUSDC || item.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</p>
                                     {payoutInfo?.initiatedAt && (
                                       <p>发起时间: {formatDate(payoutInfo.initiatedAt)}</p>
                                     )}
