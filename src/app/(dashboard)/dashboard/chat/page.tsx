@@ -17,6 +17,12 @@ interface Message {
 }
 
 interface TechExpenseData {
+  period?: {
+    start: string;
+    end: string;
+    label: string;
+    dateFilterType?: string;
+  };
   summary: {
     totalAmount: number;
     currency: string;
@@ -178,9 +184,9 @@ export default function ChatPage() {
   };
 
   // 获取技术费用分析
-  const fetchTechExpenses = async (scope: string = 'company'): Promise<TechExpenseData | null> => {
+  const fetchTechExpenses = async (scope: string = 'company', dateFilterType: string = 'submission_date'): Promise<TechExpenseData | null> => {
     try {
-      const response = await fetch(`/api/analytics/tech-expenses?period=month&scope=${scope}`);
+      const response = await fetch(`/api/analytics/tech-expenses?period=month&scope=${scope}&dateFilterType=${dateFilterType}`);
       const result = await response.json();
       if (result.success && result.data) {
         return result.data;
@@ -365,7 +371,14 @@ export default function ChatPage() {
     const cs = data.summary.currency === 'CNY' ? '¥' : data.summary.currency === 'GBP' ? '£' : data.summary.currency === 'EUR' ? '€' : '$';
 
     if (type === 'all' || type === 'ai') {
-      response += `**📊 本月技术费用分析**\n\n`;
+      // 添加统计维度说明
+      const dateFilterLabel = data.period?.dateFilterType === 'expense_date'
+        ? '（按费用发生日期统计）'
+        : data.period?.dateFilterType === 'approval_date'
+        ? '（按审批日期统计）'
+        : '（按提交日期统计）';
+
+      response += `**📊 本月技术费用分析** ${dateFilterLabel}\n\n`;
 
       // 总计与月环比
       response += `**总计：${cs}${data.summary.totalAmount.toLocaleString()}**\n`;
