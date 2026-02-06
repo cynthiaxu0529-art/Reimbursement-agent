@@ -183,10 +183,23 @@ export default function ChatPage() {
     }
   };
 
-  // 获取技术费用分析
-  const fetchTechExpenses = async (scope: string = 'company', dateFilterType: string = 'submission_date'): Promise<TechExpenseData | null> => {
+  // 获取技术费用分析（支持自定义日期范围）
+  const fetchTechExpenses = async (
+    scope: string = 'company',
+    dateFilterType: string = 'submission_date',
+    startDate?: string,
+    endDate?: string
+  ): Promise<TechExpenseData | null> => {
     try {
-      const response = await fetch(`/api/analytics/tech-expenses?period=month&scope=${scope}&dateFilterType=${dateFilterType}`);
+      let url = `/api/analytics/tech-expenses?scope=${scope}&dateFilterType=${dateFilterType}`;
+
+      if (startDate && endDate) {
+        url += `&period=custom&startDate=${startDate}&endDate=${endDate}`;
+      } else {
+        url += '&period=month';
+      }
+
+      const response = await fetch(url);
       const result = await response.json();
       if (result.success && result.data) {
         return result.data;
@@ -196,6 +209,219 @@ export default function ChatPage() {
       console.error('Fetch tech expenses error:', error);
       return null;
     }
+  };
+
+  // 解析用户输入中的月份信息
+  const parseMonthsFromQuery = (query: string): { months: string[]; year: number } | null => {
+    const currentYear = new Date().getFullYear();
+    const lastYear = currentYear - 1;
+
+    // 匹配月份模式：12月、1月、2月等
+    const monthPattern = /(\d{1,2})月/g;
+    const matches = [...query.matchAll(monthPattern)];
+
+    if (matches.length === 0) return null;
+
+    const months = matches.map(m => parseInt(m[1]));
+
+    // 判断年份（如果提到去年，或者12月和1月同时出现可能跨年）
+    let year = currentYear;
+    if (query.includes('去年') || query.includes(lastYear.toString())) {
+      year = lastYear;
+    } else if (months.includes(12) && months.some(m => m <= 2)) {
+      // 12月和1-2月同时出现，可能是跨年对比
+      // 12月使用去年，1-2月使用今年
+    }
+
+    return { months: months.map(String), year };
+  };
+
+  // 格式化多月对比分析
+  const formatMultiMonthComparison = (monthsData: { month: string; data: TechExpenseData }[]): string => {
+    if (monthsData.length === 0) return '未找到数据。';
+
+    const cs = monthsData[0].data.summary.currency === 'CNY' ? '¥'
+      : monthsData[0].data.summary.currency === 'GBP' ? '£'
+      : monthsData[0].data.summary.currency === 'EUR' ? '€' : '$';
+
+    let response = `**📊 多月份技术费用对比分析**\n\n`;
+
+    // 总览对比（使用表格格式）
+    response += `**💰 总费用对比：**\n\n`;
+    response += `| 月份 | 总费用 | 供应商数 | 类别数 |\n`;
+    response += `|------|--------|---------|--------|\n`;
+    monthsData.forEach(({ month, data }) => {
+      response += `| ${month} | ${cs}${data.summary.totalAmount.toLocaleString()} | ${data.summary.vendorCount} | ${data.summary.categoryCount} |\n`;
+    });
+    response += '\n';
+
+    // 计算变化
+    if (monthsData.length === 2) {
+      const [first, second] = monthsData;
+      const diff = second.data.summary.totalAmount - first.data.summary.totalAmount;
+      const growthRate = first.data.summary.totalAmount > 0
+        ? Math.round((diff / first.data.summary.totalAmount) * 1000) / 10
+        : 0;
+
+      const icon = diff > 0 ? '📈' : diff < 0 ? '📉' : '➡️';
+      response += `**📊 变化趋势：**\n`;
+      response += `${icon} ${second.month} 较 ${first.month} ${diff >= 0 ? '增加' : '减少'} ${cs}${Math.abs(diff).toLocaleString()}`;
+      if (growthRate !== 0) {
+        response += ` (${growthRate > 0 ? '+' : ''}${growthRate}%)`;
+      }
+      response += '\n\n';
+    }
+
+    // 供应商对比
+    response += `**🏢 供应商分布对比：**\n\n`;
+    const allVendors = new Set<string>();
+    monthsData.forEach(m => {
+      m.data.byVendor.slice(0, 5).forEach(v => allVendors.add(v.name));
+    });
+
+    if (allVendors.size > 0) {
+      response += `| 供应商 | ${monthsData.map(m => m.month).join(' | ')} |\n`;
+      response += `|--------|${monthsData.map(() => '--------').join('|')}|\n`;
+
+      Array.from(allVendors).forEach(vendorName => {
+        response += `| ${vendorName} |`;
+
+        monthsData.forEach(({ data }) => {
+          const vendor = data.byVendor.find(v => v.name === vendorName);
+          if (vendor) {
+            response += ` ${cs}${vendor.totalAmount.toLocaleString()} |`;
+          } else {
+            response += ` ${cs}0 |`;
+          }
+        });
+        response += '\n';
+      });
+      response += '\n';
+    }
+
+    // AI Token 详细对比
+    const hasAIToken = monthsData.some(m => m.data.aiTokenAnalysis?.total > 0);
+    if (hasAIToken) {
+      response += `**🤖 AI Token 对比：**\n\n`;
+      response += `| 月份 | AI费用 | 占总费用比 | 主要供应商 |\n`;
+      response += `|------|--------|-----------|------------|\n`;
+
+      monthsData.forEach(({ month, data }) => {
+        const aiTotal = data.aiTokenAnalysis?.total || 0;
+        const aiPercentage = data.summary.totalAmount > 0
+          ? Math.round((aiTotal / data.summary.totalAmount) * 100)
+          : 0;
+
+        const topProvider = data.aiTokenAnalysis?.topProviders && data.aiTokenAnalysis.topProviders.length > 0
+          ? data.aiTokenAnalysis.topProviders[0].name
+          : '-';
+
+        response += `| ${month} | ${cs}${aiTotal.toLocaleString()} | ${aiPercentage}% | ${topProvider} |\n`;
+      });
+      response += '\n';
+    }
+
+    // 按类别对比（表格格式）
+    response += `**📦 按类别对比：**\n\n`;
+    const allCategories = new Set<string>();
+    monthsData.forEach(m => {
+      m.data.byCategory.forEach(cat => {
+        if (cat.total > 0) allCategories.add(cat.category);
+      });
+    });
+
+    // 为每个类别创建对比表格
+    Array.from(allCategories).forEach(category => {
+      const categoryLabel = categoryLabels[category] || category;
+      response += `**${categoryLabel}：**\n`;
+      response += `| 月份 | 费用 | 占比 | 主要供应商 |\n`;
+      response += `|------|------|------|------------|\n`;
+
+      monthsData.forEach(({ month, data }) => {
+        const catData = data.byCategory.find(c => c.category === category);
+        if (catData) {
+          const topVendor = catData.topVendors && catData.topVendors.length > 0
+            ? catData.topVendors[0].name
+            : '-';
+          response += `| ${month} | ${cs}${catData.total.toLocaleString()} | ${catData.percentage}% | ${topVendor} |\n`;
+        } else {
+          response += `| ${month} | ${cs}0 | 0% | - |\n`;
+        }
+      });
+      response += '\n';
+    });
+
+    // 优化建议
+    response += `**💡 对比分析与建议：**\n\n`;
+
+    if (monthsData.length === 2) {
+      const [first, second] = monthsData;
+      const diff = second.data.summary.totalAmount - first.data.summary.totalAmount;
+      const growthRate = first.data.summary.totalAmount > 0
+        ? Math.round((diff / first.data.summary.totalAmount) * 100)
+        : 0;
+
+      // 总体趋势分析
+      if (Math.abs(growthRate) >= 30) {
+        const direction = diff > 0 ? '增长' : '下降';
+        response += `• ⚠️ **费用${direction}显著**：${second.month}较${first.month}${direction}${Math.abs(growthRate)}%（${diff >= 0 ? '+' : ''}${cs}${Math.abs(diff).toLocaleString()}），建议详细审查变化原因\n`;
+      } else if (Math.abs(growthRate) >= 10) {
+        const direction = diff > 0 ? '增长' : '下降';
+        response += `• 📊 **费用${direction}**：${second.month}较${first.month}${direction}${Math.abs(growthRate)}%\n`;
+      } else {
+        response += `• ✅ **费用稳定**：${second.month}较${first.month}基本持平，成本控制良好\n`;
+      }
+
+      // 类别变化分析
+      const categoryChanges: { category: string; change: number }[] = [];
+      allCategories.forEach(category => {
+        const firstCat = first.data.byCategory.find(c => c.category === category);
+        const secondCat = second.data.byCategory.find(c => c.category === category);
+        const firstTotal = firstCat?.total || 0;
+        const secondTotal = secondCat?.total || 0;
+        const change = secondTotal - firstTotal;
+
+        if (Math.abs(change) > 0) {
+          categoryChanges.push({
+            category: categoryLabels[category] || category,
+            change
+          });
+        }
+      });
+
+      if (categoryChanges.length > 0) {
+        const topChanges = categoryChanges.sort((a, b) => Math.abs(b.change) - Math.abs(a.change)).slice(0, 3);
+        response += `• 📈 **主要变化类别**：\n`;
+        topChanges.forEach(({ category, change }) => {
+          response += `  - ${category}: ${change >= 0 ? '+' : ''}${cs}${Math.abs(change).toLocaleString()}\n`;
+        });
+      }
+
+      // 检查供应商变化
+      const firstVendors = new Set(first.data.byVendor.map(v => v.name));
+      const secondVendors = new Set(second.data.byVendor.map(v => v.name));
+      const newVendors = Array.from(secondVendors).filter(v => !firstVendors.has(v));
+      const removedVendors = Array.from(firstVendors).filter(v => !secondVendors.has(v));
+
+      if (newVendors.length > 0) {
+        response += `• 🆕 **新增供应商**：${newVendors.slice(0, 3).join('、')}\n`;
+      }
+
+      if (removedVendors.length > 0) {
+        response += `• ❌ **停用供应商**：${removedVendors.slice(0, 3).join('、')}\n`;
+      }
+    }
+
+    // 通用建议
+    const latestData = monthsData[monthsData.length - 1].data;
+    if (latestData.aiTokenAnalysis?.suggestions && latestData.aiTokenAnalysis.suggestions.length > 0) {
+      response += `\n**优化建议：**\n`;
+      latestData.aiTokenAnalysis.suggestions.forEach(s => {
+        response += `• ${s}\n`;
+      });
+    }
+
+    return response;
   };
 
   // 执行 Skill
@@ -371,14 +597,7 @@ export default function ChatPage() {
     const cs = data.summary.currency === 'CNY' ? '¥' : data.summary.currency === 'GBP' ? '£' : data.summary.currency === 'EUR' ? '€' : '$';
 
     if (type === 'all' || type === 'ai') {
-      // 添加统计维度说明
-      const dateFilterLabel = data.period?.dateFilterType === 'expense_date'
-        ? '（按费用发生日期统计）'
-        : data.period?.dateFilterType === 'approval_date'
-        ? '（按审批日期统计）'
-        : '（按提交日期统计）';
-
-      response += `**📊 本月技术费用分析** ${dateFilterLabel}\n\n`;
+      response += `**📊 本月技术费用分析**\n\n`;
 
       // 总计与月环比
       response += `**总计：${cs}${data.summary.totalAmount.toLocaleString()}**\n`;
@@ -596,15 +815,60 @@ export default function ChatPage() {
       }
       // AI 消耗分析
       else if (lowerText.includes('ai') || lowerText.includes('token') || lowerText.includes('openai') || lowerText.includes('claude')) {
-        const techData = await fetchTechExpenses('company');
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: techData ? formatTechExpenseResponse(techData, 'ai') : '获取 AI 消耗数据失败，请稍后重试。',
-          timestamp: new Date(),
-          data: techData,
-          dataType: 'tech_expense',
-        };
+        // 检查是否有月份指定
+        const monthsInfo = parseMonthsFromQuery(messageText);
+
+        if (monthsInfo && monthsInfo.months.length >= 2) {
+          // 多月AI对比
+          const monthsData: { month: string; data: TechExpenseData }[] = [];
+          const currentYear = new Date().getFullYear();
+
+          for (const month of monthsInfo.months) {
+            const monthNum = parseInt(month);
+            const year = (monthNum === 12 && monthsInfo.months.some(m => parseInt(m) <= 2)) ? currentYear - 1 : currentYear;
+
+            const startDate = new Date(year, monthNum - 1, 1);
+            const endDate = new Date(year, monthNum, 0);
+
+            const data = await fetchTechExpenses(
+              'company',
+              'submission_date',
+              startDate.toISOString().split('T')[0],
+              endDate.toISOString().split('T')[0]
+            );
+
+            if (data) {
+              monthsData.push({ month: `${year}年${month}月`, data });
+            }
+          }
+
+          if (monthsData.length > 0) {
+            response = {
+              id: (Date.now() + 1).toString(),
+              role: 'assistant',
+              content: formatMultiMonthComparison(monthsData),
+              timestamp: new Date(),
+            };
+          } else {
+            response = {
+              id: (Date.now() + 1).toString(),
+              role: 'assistant',
+              content: '未找到指定月份的AI费用数据。',
+              timestamp: new Date(),
+            };
+          }
+        } else {
+          // 默认当前月份或指定单月
+          const techData = await fetchTechExpenses('company');
+          response = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: techData ? formatTechExpenseResponse(techData, 'ai') : '获取 AI 消耗数据失败，请稍后重试。',
+            timestamp: new Date(),
+            data: techData,
+            dataType: 'tech_expense',
+          };
+        }
       }
       // SaaS 分析
       else if (lowerText.includes('saas') || lowerText.includes('订阅') || lowerText.includes('软件')) {
@@ -620,15 +884,89 @@ export default function ChatPage() {
       }
       // 技术费用/费用分析
       else if (lowerText.includes('技术') || lowerText.includes('费用') || lowerText.includes('分析') || lowerText.includes('统计') || lowerText.includes('云') || lowerText.includes('消耗')) {
-        const techData = await fetchTechExpenses('company');
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: techData ? formatTechExpenseResponse(techData, 'all') : '获取技术费用数据失败，请稍后重试。',
-          timestamp: new Date(),
-          data: techData,
-          dataType: 'tech_expense',
-        };
+        // 检查是否有月份指定
+        const monthsInfo = parseMonthsFromQuery(messageText);
+
+        if (monthsInfo && monthsInfo.months.length >= 2) {
+          // 多月对比
+          const monthsData: { month: string; data: TechExpenseData }[] = [];
+          const currentYear = new Date().getFullYear();
+
+          for (const month of monthsInfo.months) {
+            const monthNum = parseInt(month);
+            // 判断年份：12月使用去年，1-2月使用今年
+            const year = (monthNum === 12 && monthsInfo.months.some(m => parseInt(m) <= 2)) ? currentYear - 1 : currentYear;
+
+            const startDate = new Date(year, monthNum - 1, 1);
+            const endDate = new Date(year, monthNum, 0); // 月份最后一天
+
+            const data = await fetchTechExpenses(
+              'company',
+              'submission_date',
+              startDate.toISOString().split('T')[0],
+              endDate.toISOString().split('T')[0]
+            );
+
+            if (data) {
+              monthsData.push({
+                month: `${year}年${month}月`,
+                data,
+              });
+            }
+          }
+
+          if (monthsData.length > 0) {
+            response = {
+              id: (Date.now() + 1).toString(),
+              role: 'assistant',
+              content: formatMultiMonthComparison(monthsData),
+              timestamp: new Date(),
+            };
+          } else {
+            response = {
+              id: (Date.now() + 1).toString(),
+              role: 'assistant',
+              content: '未找到指定月份的数据，请确认时间范围。',
+              timestamp: new Date(),
+            };
+          }
+        } else if (monthsInfo && monthsInfo.months.length === 1) {
+          // 单个月份指定
+          const monthNum = parseInt(monthsInfo.months[0]);
+          const year = monthsInfo.year;
+
+          const startDate = new Date(year, monthNum - 1, 1);
+          const endDate = new Date(year, monthNum, 0);
+
+          const techData = await fetchTechExpenses(
+            'company',
+            'submission_date',
+            startDate.toISOString().split('T')[0],
+            endDate.toISOString().split('T')[0]
+          );
+
+          response = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: techData
+              ? `**📊 ${year}年${monthsInfo.months[0]}月技术费用分析**\n\n` + formatTechExpenseResponse(techData, 'all')
+              : `获取${year}年${monthsInfo.months[0]}月数据失败，请稍后重试。`,
+            timestamp: new Date(),
+            data: techData,
+            dataType: 'tech_expense',
+          };
+        } else {
+          // 默认当前月份
+          const techData = await fetchTechExpenses('company');
+          response = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: techData ? formatTechExpenseResponse(techData, 'all') : '获取技术费用数据失败，请稍后重试。',
+            timestamp: new Date(),
+            data: techData,
+            dataType: 'tech_expense',
+          };
+        }
       }
       // 我的费用
       else if (lowerText.includes('我的') || lowerText.includes('个人')) {
