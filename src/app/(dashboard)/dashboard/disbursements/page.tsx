@@ -170,7 +170,20 @@ export default function DisbursementsPage() {
       const response = await fetch(`/api/reimbursements?status=${status}&role=finance`);
       const result = await response.json();
       if (result.success) {
-        setReimbursements(result.data || []);
+        const data = result.data || [];
+        setReimbursements(data);
+
+        // 从报销单的 aiSuggestions 中读取已保存的自定义打款金额
+        const savedAmounts: Record<string, number> = {};
+        for (const item of data) {
+          const customAmountInfo = item.aiSuggestions?.find(
+            (s: any) => s.type === 'custom_payment_amount'
+          );
+          if (customAmountInfo?.amount) {
+            savedAmounts[item.id] = customAmountInfo.amount;
+          }
+        }
+        setCustomPaymentAmounts(savedAmounts);
       }
     } catch (error) {
       console.error('Failed to fetch:', error);
@@ -223,11 +236,54 @@ export default function DisbursementsPage() {
     return customPaymentAmounts[item.id] ?? originalAmount;
   };
 
-  // 设置自定义打款金额
+  // 设置自定义打款金额（仅更新本地状态，不保存到后端）
   const setCustomAmount = (id: string, amount: number, maxAmount: number) => {
     // 确保金额在有效范围内
     const validAmount = Math.max(0.01, Math.min(amount, maxAmount));
     setCustomPaymentAmounts(prev => ({ ...prev, [id]: validAmount }));
+  };
+
+  // 保存自定义打款金额到后端
+  const saveCustomAmount = async (id: string, amount: number) => {
+    try {
+      const response = await fetch(`/api/reimbursements/${id}/payment-amount`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customPaymentAmount: amount }),
+      });
+      const result = await response.json();
+      if (!result.success) {
+        setErrorMessage(result.error || '保存打款金额失败');
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error('Save custom amount error:', error);
+      setErrorMessage('保存打款金额失败');
+      return false;
+    }
+  };
+
+  // 重置自定义打款金额
+  const resetCustomAmount = async (id: string) => {
+    try {
+      const response = await fetch(`/api/reimbursements/${id}/payment-amount`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      if (result.success) {
+        setCustomPaymentAmounts(prev => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Reset custom amount error:', error);
+      return false;
+    }
   };
 
   const processPayment = async (id: string) => {
@@ -381,14 +437,18 @@ export default function DisbursementsPage() {
     }
   };
 
-  // Stats
+  // Stats - 使用自定义打款金额（如果有）
   const readyForPayment = reimbursements.filter(r => r.status === 'approved').length;
-  const totalPayable = reimbursements.reduce((sum, r) =>
-    sum + (r.totalAmountInBaseCurrency || 0), 0
-  );
+  const totalPayable = reimbursements.reduce((sum, r) => {
+    const originalAmount = r.totalAmountInBaseCurrency || 0;
+    return sum + (customPaymentAmounts[r.id] ?? originalAmount);
+  }, 0);
   const selectedTotal = reimbursements
     .filter(r => selectedIds.includes(r.id))
-    .reduce((sum, r) => sum + (r.totalAmountInBaseCurrency || 0), 0);
+    .reduce((sum, r) => {
+      const originalAmount = r.totalAmountInBaseCurrency || 0;
+      return sum + (customPaymentAmounts[r.id] ?? originalAmount);
+    }, 0);
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('zh-CN', {
@@ -814,18 +874,20 @@ export default function DisbursementsPage() {
                                           autoFocus
                                         />
                                         <button
-                                          onClick={() => setEditingAmountId(null)}
+                                          onClick={async () => {
+                                            const amount = customPaymentAmounts[item.id] ?? usdAmount;
+                                            const saved = await saveCustomAmount(item.id, amount);
+                                            if (saved) {
+                                              setEditingAmountId(null);
+                                            }
+                                          }}
                                           className="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700"
                                         >
                                           确定
                                         </button>
                                         <button
-                                          onClick={() => {
-                                            setCustomPaymentAmounts(prev => {
-                                              const next = { ...prev };
-                                              delete next[item.id];
-                                              return next;
-                                            });
+                                          onClick={async () => {
+                                            await resetCustomAmount(item.id);
                                             setEditingAmountId(null);
                                           }}
                                           className="px-2 py-1 text-xs text-gray-600 hover:text-gray-800"
