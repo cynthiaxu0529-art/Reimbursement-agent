@@ -20,6 +20,7 @@ export type PayoutStatus =
   | 'broadcasting'           // 广播中
   | 'confirmed'              // 已确认（链上确认）
   | 'succeeded'              // 成功
+  | 'success'                // 成功（Fluxa API 可能返回此值）
   | 'failed'                 // 失败
   | 'expired';               // 已过期
 
@@ -355,14 +356,16 @@ export class FluxaPayoutClient {
    * 检查 Payout 状态是否为终态
    */
   static isTerminalStatus(status: PayoutStatus): boolean {
-    return ['succeeded', 'confirmed', 'failed', 'expired'].includes(status);
+    // 注意: Fluxa API 可能返回 'success' 或 'succeeded'
+    return ['succeeded', 'success', 'confirmed', 'failed', 'expired'].includes(status);
   }
 
   /**
    * 检查 Payout 是否成功
    */
   static isSuccessStatus(status: PayoutStatus): boolean {
-    return status === 'succeeded' || status === 'confirmed';
+    // 注意: Fluxa API 可能返回 'success' 或 'succeeded'
+    return status === 'succeeded' || status === 'success' || status === 'confirmed';
   }
 
   /**
@@ -376,6 +379,7 @@ export class FluxaPayoutClient {
       broadcasting: '交易广播中',
       confirmed: '打款成功（已确认）',
       succeeded: '打款成功',
+      success: '打款成功',
       failed: '打款失败',
       expired: '已过期',
     };
