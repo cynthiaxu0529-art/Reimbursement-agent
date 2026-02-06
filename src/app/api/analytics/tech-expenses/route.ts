@@ -131,7 +131,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period') || 'month';
     const scope = searchParams.get('scope') || 'personal';
-    const dateFilterType = searchParams.get('dateFilterType') || 'submission_date'; // 默认使用提交日期
+    const dateFilterType = searchParams.get('dateFilterType') || 'expense_date'; // 默认使用费用发生日期（权责发生制）
 
     // 计算时间范围
     const now = new Date();
@@ -188,7 +188,7 @@ export async function GET(request: NextRequest) {
     }
     // team和company scope暂时都返回公司级数据（后续可根据部门权限过滤）
 
-    // 查询技术费用明细
+    // 查询技术费用明细（包含提交日期用于时效性分析）
     const techExpenses = await db
       .select({
         category: reimbursementItems.category,
@@ -196,8 +196,9 @@ export async function GET(request: NextRequest) {
         currency: reimbursementItems.currency,
         amountInBaseCurrency: reimbursementItems.amountInBaseCurrency,
         vendor: reimbursementItems.vendor,
-        date: reimbursementItems.date,
+        date: reimbursementItems.date, // 费用发生日期
         userId: reimbursements.userId,
+        submittedAt: reimbursements.submittedAt, // 报销提交日期
       })
       .from(reimbursementItems)
       .innerJoin(reimbursements, eq(reimbursementItems.reimbursementId, reimbursements.id))
@@ -240,6 +241,11 @@ export async function GET(request: NextRequest) {
 
     // 按用户汇总
     const byUser: Record<string, { name: string; total: number; categories: Record<string, number> }> = {};
+
+    // 报销时效性分析
+    const timelinessData: number[] = []; // 存储天数间隔
+    let totalTimelinessDays = 0;
+    let timelynessCount = 0;
 
     techExpenses.forEach(expense => {
       const category = expense.category;
@@ -289,6 +295,19 @@ export async function GET(request: NextRequest) {
         byUser[expense.userId].categories[category] = 0;
       }
       byUser[expense.userId].categories[category] += amount;
+
+      // 计算报销时效性（费用发生日期到提交日期的间隔天数）
+      if (expense.date && expense.submittedAt) {
+        const expenseDate = new Date(expense.date);
+        const submitDate = new Date(expense.submittedAt);
+        const daysDiff = Math.floor((submitDate.getTime() - expenseDate.getTime()) / (1000 * 60 * 60 * 24));
+
+        if (daysDiff >= 0) { // 只统计有效的间隔（提交日期晚于或等于费用日期）
+          timelinessData.push(daysDiff);
+          totalTimelinessDays += daysDiff;
+          timelynessCount++;
+        }
+      }
     });
 
     // 计算总计
@@ -462,6 +481,21 @@ export async function GET(request: NextRequest) {
       ? recentMonths[recentMonths.length - 1].amount > recentMonths[0].amount ? 'up' : 'down'
       : 'stable';
 
+    // 计算报销时效性统计
+    const timelinessAnalysis = timelynessCount > 0 ? {
+      averageDays: Math.round((totalTimelinessDays / timelynessCount) * 10) / 10,
+      maxDays: Math.max(...timelinessData),
+      minDays: Math.min(...timelinessData),
+      medianDays: timelinessData.sort((a, b) => a - b)[Math.floor(timelinessData.length / 2)] || 0,
+      within7Days: timelinessData.filter(d => d <= 7).length,
+      within30Days: timelinessData.filter(d => d <= 30).length,
+      over30Days: timelinessData.filter(d => d > 30).length,
+      over60Days: timelinessData.filter(d => d > 60).length,
+      over90Days: timelinessData.filter(d => d > 90).length,
+      totalCount: timelynessCount,
+      complianceRate: Math.round((timelinessData.filter(d => d <= 30).length / timelynessCount) * 1000) / 10, // 30天内提交率
+    } : null;
+
     return NextResponse.json({
       success: true,
       data: {
@@ -503,6 +537,7 @@ export async function GET(request: NextRequest) {
         aiTokenAnalysis,
         cloudAnalysis,
         saasAnalysis,
+        timelinessAnalysis, // 报销时效性分析
       },
     });
   } catch (error) {

@@ -893,6 +893,140 @@ export function createAnomalyDetectorSkill(tenantId: string): Skill {
 }
 
 /**
+ * 报销时效性分析 Skill
+ * 分析费用发生日期到提交日期的时间间隔，识别报销延迟问题
+ */
+export function createTimelinessAnalysisSkill(tenantId: string): Skill {
+  return {
+    id: 'builtin_timeliness_analysis',
+    tenantId,
+    name: '报销时效性分析',
+    description: '分析费用发生到报销提交的时间间隔，识别跨期报销和延迟提交问题',
+    category: SkillCategory.ANALYTICS,
+    version: '1.0.0',
+    isActive: true,
+    isBuiltIn: true,
+    triggers: [
+      { type: SkillTrigger.ON_REIMBURSEMENT_SUBMIT },
+      { type: SkillTrigger.ON_CHAT_COMMAND },
+    ],
+    executor: {
+      type: 'javascript',
+      code: `
+        // 报销时效性分析
+        const expenses = context.params?.expenses || [];
+        const submittedAt = context.reimbursement?.submittedAt || new Date();
+
+        const timelinessData = [];
+        let totalDays = 0;
+
+        for (const expense of expenses) {
+          if (!expense.date) continue;
+
+          const expenseDate = new Date(expense.date);
+          const submitDate = new Date(submittedAt);
+          const daysDiff = Math.floor((submitDate - expenseDate) / (1000 * 60 * 60 * 24));
+
+          if (daysDiff >= 0) {
+            timelinessData.push({
+              id: expense.id,
+              category: expense.category,
+              vendor: expense.vendor,
+              amount: expense.amount,
+              expenseDate: expense.date,
+              daysDiff,
+              level: daysDiff <= 7 ? 'excellent' : daysDiff <= 30 ? 'good' : daysDiff <= 60 ? 'warning' : 'critical',
+            });
+            totalDays += daysDiff;
+          }
+        }
+
+        if (timelinessData.length === 0) {
+          return {
+            success: true,
+            data: {
+              hasIssues: false,
+              message: '无有效的时效性数据',
+            },
+          };
+        }
+
+        const avgDays = totalDays / timelinessData.length;
+        const maxDays = Math.max(...timelinessData.map(d => d.daysDiff));
+        const within7Days = timelinessData.filter(d => d.daysDiff <= 7).length;
+        const within30Days = timelinessData.filter(d => d.daysDiff <= 30).length;
+        const over30Days = timelinessData.filter(d => d.daysDiff > 30);
+        const over60Days = timelinessData.filter(d => d.daysDiff > 60);
+        const over90Days = timelinessData.filter(d => d.daysDiff > 90);
+
+        const complianceRate = (within30Days / timelinessData.length) * 100;
+
+        // 判断是否有时效性问题
+        const hasIssues = over30Days.length > 0 || avgDays > 30;
+
+        // 生成建议
+        const suggestions = [];
+        if (over60Days.length > 0) {
+          suggestions.push({
+            level: 'critical',
+            message: '发现 ' + over60Days.length + ' 笔超过60天的跨期报销',
+            items: over60Days.map(d => ({
+              vendor: d.vendor,
+              amount: d.amount,
+              days: d.daysDiff,
+              expenseDate: d.expenseDate,
+            })),
+            suggestion: '跨期报销可能影响财务核算准确性，建议尽快提交报销或说明延迟原因',
+          });
+        } else if (over30Days.length > 0) {
+          suggestions.push({
+            level: 'warning',
+            message: '发现 ' + over30Days.length + ' 笔超过30天的延迟报销',
+            items: over30Days.map(d => ({
+              vendor: d.vendor,
+              amount: d.amount,
+              days: d.daysDiff,
+              expenseDate: d.expenseDate,
+            })),
+            suggestion: '建议及时提交报销，避免报销过期或财务处理困难',
+          });
+        }
+
+        if (complianceRate < 80) {
+          suggestions.push({
+            level: 'warning',
+            message: '当前报销30天内提交率仅 ' + complianceRate.toFixed(1) + '%',
+            suggestion: '建议提醒员工在费用发生后30天内提交报销，提高财务处理效率',
+          });
+        }
+
+        return {
+          success: true,
+          data: {
+            hasIssues,
+            summary: {
+              totalCount: timelinessData.length,
+              avgDays: Math.round(avgDays * 10) / 10,
+              maxDays,
+              within7Days,
+              within30Days,
+              over30Days: over30Days.length,
+              over60Days: over60Days.length,
+              over90Days: over90Days.length,
+              complianceRate: Math.round(complianceRate * 10) / 10,
+            },
+            suggestions,
+            details: timelinessData,
+          },
+        };
+      `,
+    },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+/**
  * 获取所有内置 Skills
  */
 export function getBuiltInSkills(tenantId: string): Skill[] {
@@ -903,6 +1037,7 @@ export function getBuiltInSkills(tenantId: string): Skill[] {
     createInvoiceLearnerSkill(tenantId),
     createBudgetAlertSkill(tenantId),
     createAnomalyDetectorSkill(tenantId),
+    createTimelinessAnalysisSkill(tenantId),
   ];
 }
 
