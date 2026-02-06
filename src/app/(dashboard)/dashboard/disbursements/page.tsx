@@ -75,6 +75,7 @@ export default function DisbursementsPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [refreshingStatus, setRefreshingStatus] = useState(false);
 
   // 预览附件：将base64 data URL转为Blob URL以提高渲染性能
   const handlePreviewReceipt = (url: string | null | undefined) => {
@@ -173,6 +174,48 @@ export default function DisbursementsPage() {
       console.error('Failed to fetch:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 手动刷新所有处理中的付款状态
+  const refreshAllPayoutStatuses = async () => {
+    if (refreshingStatus || reimbursements.length === 0) return;
+    setRefreshingStatus(true);
+    console.log('[刷新状态] 开始刷新', reimbursements.length, '笔付款状态...');
+
+    let updatedCount = 0;
+    for (const item of reimbursements) {
+      const payoutInfo = item.aiSuggestions?.find(
+        (s: any) => s.type === 'fluxa_payout_initiated'
+      );
+      if (!payoutInfo?.payoutId) {
+        console.log('[刷新状态] 跳过, 无 payoutId:', item.id);
+        continue;
+      }
+
+      try {
+        console.log('[刷新状态] 查询 payoutId:', payoutInfo.payoutId);
+        const res = await fetch(`/api/payments/status/${payoutInfo.payoutId}`);
+        const data = await res.json();
+        console.log('[刷新状态] 响应:', data.success, data.status, data.statusChanged);
+
+        if (data.success) {
+          setPayoutStatuses(prev => ({ ...prev, [item.id]: data }));
+          if (data.statusChanged) updatedCount++;
+        }
+      } catch (error) {
+        console.error('[刷新状态] 错误:', error);
+      }
+    }
+
+    setRefreshingStatus(false);
+
+    if (updatedCount > 0) {
+      alert(`已更新 ${updatedCount} 笔付款状态，正在刷新列表...`);
+      fetchReimbursements();
+      fetchPaymentStats();
+    } else {
+      alert('状态已刷新，无变化。如 Fluxa 已支付但状态未更新，请检查服务器日志。');
     }
   };
 
@@ -510,7 +553,21 @@ export default function DisbursementsPage() {
           }`}
         >
           处理中
+          {paymentStats.processingCount > 0 && (
+            <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-600 rounded-full">
+              {paymentStats.processingCount}
+            </span>
+          )}
         </button>
+        {activeTab === 'processing' && (
+          <button
+            onClick={refreshAllPayoutStatuses}
+            disabled={refreshingStatus}
+            className="ml-auto px-3 py-1.5 text-sm font-medium text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {refreshingStatus ? '刷新中...' : '🔄 刷新状态'}
+          </button>
+        )}
         <button
           onClick={() => { setActiveTab('history'); setSelectedIds([]); }}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
