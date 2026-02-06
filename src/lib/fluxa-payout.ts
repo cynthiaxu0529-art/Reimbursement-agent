@@ -18,6 +18,7 @@ export type PayoutStatus =
   | 'authorized'             // 已授权
   | 'signed'                 // 已签名
   | 'broadcasting'           // 广播中
+  | 'confirmed'              // 已确认（链上确认）
   | 'succeeded'              // 成功
   | 'failed'                 // 失败
   | 'expired';               // 已过期
@@ -278,15 +279,21 @@ export class FluxaPayoutClient {
     }
 
     try {
-      const response = await fetch(`${this.walletApiUrl}/api/payouts/${payoutId}`, {
+      const requestUrl = `${this.walletApiUrl}/api/payouts/${payoutId}`;
+      console.log('[Fluxa] 查询 Payout 状态, URL:', requestUrl);
+
+      const response = await fetch(requestUrl, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${jwt}`,
         },
       });
 
+      console.log('[Fluxa] 响应状态码:', response.status);
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('[Fluxa] 查询失败:', response.status, errorData);
         return {
           success: false,
           error: {
@@ -298,13 +305,14 @@ export class FluxaPayoutClient {
       }
 
       const data: PayoutStatusResponse = await response.json();
+      console.log('[Fluxa] 查询成功, 状态:', data.payout?.status, 'payoutId:', data.payout?.payoutId);
 
       return {
         success: true,
         payout: data.payout,
       };
     } catch (error) {
-      console.error('Fluxa get payout status error:', error);
+      console.error('[Fluxa] 网络请求错误:', error);
       return {
         success: false,
         error: {
@@ -347,14 +355,14 @@ export class FluxaPayoutClient {
    * 检查 Payout 状态是否为终态
    */
   static isTerminalStatus(status: PayoutStatus): boolean {
-    return ['succeeded', 'failed', 'expired'].includes(status);
+    return ['succeeded', 'confirmed', 'failed', 'expired'].includes(status);
   }
 
   /**
    * 检查 Payout 是否成功
    */
   static isSuccessStatus(status: PayoutStatus): boolean {
-    return status === 'succeeded';
+    return status === 'succeeded' || status === 'confirmed';
   }
 
   /**
@@ -366,6 +374,7 @@ export class FluxaPayoutClient {
       authorized: '已授权，准备签名',
       signed: '已签名，准备广播',
       broadcasting: '交易广播中',
+      confirmed: '打款成功（已确认）',
       succeeded: '打款成功',
       failed: '打款失败',
       expired: '已过期',

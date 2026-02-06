@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, tenants } from '@/lib/db/schema';
 import { eq, desc, and, or, inArray } from 'drizzle-orm';
 import { getUserRoles, canApprove, canProcessPayment, isAdmin } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
@@ -177,6 +177,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 获取租户本位币
+    const tenantRecord = await db.query.tenants.findFirst({
+      where: eq(tenants.id, session.user.tenantId),
+      columns: { baseCurrency: true },
+    });
+    const tenantBaseCurrency = tenantRecord?.baseCurrency || 'USD';
+
     // 验证每项费用的必填字段
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -252,7 +259,7 @@ export async function POST(request: NextRequest) {
       description: description || null,
       totalAmount,
       totalAmountInBaseCurrency: usdTotal,
-      baseCurrency: 'USD',
+      baseCurrency: tenantBaseCurrency,
       status: submitStatus === 'pending' ? 'pending' : 'draft',
       autoCollected: false,
       sourceType: 'manual',
