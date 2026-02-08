@@ -226,7 +226,9 @@ export default function ChatPage() {
 
   // 解析用户输入中的月份信息
   const parseMonthsFromQuery = (query: string): { months: string[]; year: number } | null => {
-    const currentYear = new Date().getFullYear();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-12
     const lastYear = currentYear - 1;
 
     // 匹配月份模式：12月、1月、2月等
@@ -237,13 +239,21 @@ export default function ChatPage() {
 
     const months = matches.map(m => parseInt(m[1]));
 
-    // 判断年份（如果提到去年，或者12月和1月同时出现可能跨年）
+    // 判断年份
     let year = currentYear;
+
+    // 1. 明确提到去年
     if (query.includes('去年') || query.includes(lastYear.toString())) {
       year = lastYear;
-    } else if (months.includes(12) && months.some(m => m <= 2)) {
-      // 12月和1-2月同时出现，可能是跨年对比
-      // 12月使用去年，1-2月使用今年
+    }
+    // 2. 如果所有月份都大于当前月份，说明是去年的月份
+    // 例如：当前2月，查询"11月和12月"应该是去年的
+    else if (months.every(m => m > currentMonth)) {
+      year = lastYear;
+    }
+    // 3. 12月和1-2月同时出现，可能是跨年对比（保持原逻辑）
+    else if (months.includes(12) && months.some(m => m <= 2)) {
+      // 这种情况在调用时单独处理
     }
 
     return { months: months.map(String), year };
