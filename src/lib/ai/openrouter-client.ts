@@ -130,6 +130,19 @@ export async function createChatCompletion(
 
   try {
     const client = getOpenRouterClient();
+
+    console.log('[OpenRouter] Sending request:', {
+      model,
+      messagesCount: messages.length,
+      temperature,
+      max_tokens,
+      hasTools: !!tools,
+      toolsCount: tools?.length || 0,
+      baseURL: OPENROUTER_BASE_URL,
+      appUrl: OPENROUTER_APP_URL,
+      apiKeyPrefix: OPENROUTER_API_KEY?.substring(0, 15) + '...',
+    });
+
     const response = await client.chat.completions.create({
       model,
       messages,
@@ -139,10 +152,52 @@ export async function createChatCompletion(
       tool_choice: tool_choice as any,
     });
 
+    console.log('[OpenRouter] Response received successfully:', {
+      id: response.id,
+      model: response.model,
+      choices: response.choices?.length,
+    });
+
     return response;
   } catch (error: any) {
-    console.error('OpenRouter API error:', error);
-    throw new Error(`OpenRouter API error: ${error.message}`);
+    // 详细的错误日志
+    console.error('[OpenRouter] Detailed API error:', {
+      errorMessage: error.message,
+      errorType: error.constructor.name,
+      statusCode: error.status,
+      errorCode: error.code,
+      cause: error.cause,
+      headers: error.headers,
+      // 尝试获取更多错误信息
+      errorString: error.toString(),
+      errorStack: error.stack?.split('\n').slice(0, 3).join('\n'),
+    });
+
+    // 尝试从错误对象中提取更多信息
+    if (error.response) {
+      console.error('[OpenRouter] Error response:', {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data,
+      });
+    }
+
+    // 构造详细的错误信息
+    let detailedMessage = error.message || 'Unknown error';
+
+    if (error.status) {
+      detailedMessage = `HTTP ${error.status}: ${detailedMessage}`;
+    }
+
+    if (error.code) {
+      detailedMessage += ` (Error code: ${error.code})`;
+    }
+
+    if (error.cause) {
+      detailedMessage += ` | Cause: ${error.cause}`;
+    }
+
+    throw new Error(`OpenRouter API error: ${detailedMessage}`);
   }
 }
 
