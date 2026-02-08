@@ -22,27 +22,69 @@ AI助手现在使用真正的LLM (Claude 3.5 Sonnet)来理解用户意图，并�
 4. 创建新的API密钥
 5. 充值账户（推荐 $10-20 起步）
 
-### 2. 配置环境变量
+### 2. 在 Vercel 中配置环境变量（推荐）
 
-在项目根目录的 `.env` 文件中添加：
+#### 方式一：通过 Vercel Dashboard（推荐）
+
+1. 登录 [Vercel Dashboard](https://vercel.com/dashboard)
+2. 选择你的项目
+3. 进入 **Settings** → **Environment Variables**
+4. 添加以下变量：
+
+   | 变量名 | 值 | 环境 |
+   |--------|---|------|
+   | `OPENROUTER_API_KEY` | `sk-or-v1-xxxxx` | Production, Preview, Development |
+   | `OPENROUTER_APP_NAME` | `Fluxa智能报销` | Production, Preview, Development |
+
+   **注意**：`OPENROUTER_APP_URL` 不需要手动设置！
+   - Vercel 会自动提供 `VERCEL_URL` 环境变量
+   - 代码会自动检测并使用正确的 URL
+
+5. **重新部署**：点击 **Deployments** → 选择最新部署 → **Redeploy**
+
+#### 方式二：通过 Vercel CLI
 
 ```bash
-# OpenRouter API配置
-OPENROUTER_API_KEY="sk-or-v1-xxxxx"  # 你的API密钥
-OPENROUTER_APP_URL="http://localhost:3000"  # 开发环境
+# 安装 Vercel CLI（如果还没安装）
+npm i -g vercel
+
+# 登录
+vercel login
+
+# 设置环境变量
+vercel env add OPENROUTER_API_KEY production
+# 粘贴你的 API 密钥
+
+vercel env add OPENROUTER_APP_NAME production
+# 输入：Fluxa智能报销
+
+# 重新部署
+vercel --prod
+```
+
+### 3. 本地开发配置（可选）
+
+如果需要在本地测试 AI 功能，在项目根目录创建 `.env.local` 文件：
+
+```bash
+# .env.local（本地开发专用，不要提交到 Git）
+OPENROUTER_API_KEY="sk-or-v1-xxxxx"
+OPENROUTER_APP_URL="http://localhost:3000"
 OPENROUTER_APP_NAME="Fluxa智能报销"
 ```
 
-生产环境修改为：
-```bash
-OPENROUTER_APP_URL="https://yourdomain.com"
-```
-
-### 3. 重启开发服务器
-
+然后运行：
 ```bash
 npm run dev
 ```
+
+### 4. 验证部署
+
+部署完成后：
+1. 访问你的 Vercel 部署域名，如 `https://your-app.vercel.app`
+2. 登录后进入 `/dashboard/chat`
+3. 试试问："分析本月技术费用"
+4. 查看 Vercel 的 **Functions** 日志确认 API 调用成功
 
 ## 💰 成本估算
 
@@ -177,15 +219,23 @@ LLM分析数据
 
 ## 🐛 故障排查
 
-### 问题1：API密钥错误
+### 问题1：API密钥错误（Vercel部署）
 
 **错误信息：** "AI服务配置错误，请检查API密钥"
 
 **解决方案：**
-1. 检查 `.env` 文件中的 `OPENROUTER_API_KEY`
+1. 在 Vercel Dashboard 检查环境变量是否正确设置
 2. 确认密钥格式正确：`sk-or-v1-xxxxx`
-3. 在 OpenRouter 网站确认密钥有效
-4. 重启开发服务器
+3. 在 OpenRouter 网站确认密钥有效且有余额
+4. **重要**：设置环境变量后必须重新部署（Redeploy）
+5. 检查 Vercel Function 日志：Dashboard → Functions → 选择 `/api/ai/chat`
+
+### 问题1b：API密钥错误（本地开发）
+
+**解决方案：**
+1. 检查 `.env.local` 文件中的 `OPENROUTER_API_KEY`
+2. 确认文件名是 `.env.local`（不是 `.env`）
+3. 重启开发服务器：`npm run dev`
 
 ### 问题2：工具调用失败
 

@@ -10,7 +10,22 @@ import OpenAI from 'openai';
 // OpenRouter configuration
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-const OPENROUTER_APP_URL = process.env.OPENROUTER_APP_URL || 'https://fluxa-reimbursement.com';
+
+// 自动检测运行环境的 URL
+// Vercel 自动提供 VERCEL_URL 环境变量
+const getAppUrl = () => {
+  if (process.env.OPENROUTER_APP_URL) {
+    return process.env.OPENROUTER_APP_URL;
+  }
+  // Vercel 部署环境
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+  // 本地开发
+  return 'http://localhost:3000';
+};
+
+const OPENROUTER_APP_URL = getAppUrl();
 const OPENROUTER_APP_NAME = process.env.OPENROUTER_APP_NAME || 'Fluxa智能报销';
 
 // Default model to use
