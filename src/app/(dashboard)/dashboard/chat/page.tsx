@@ -875,11 +875,11 @@ export default function ChatPage() {
         if (monthsInfo && monthsInfo.months.length >= 2) {
           // 多月AI对比
           const monthsData: { month: string; data: TechExpenseData }[] = [];
-          const currentYear = new Date().getFullYear();
 
           for (const month of monthsInfo.months) {
             const monthNum = parseInt(month);
-            const year = (monthNum === 12 && monthsInfo.months.some(m => parseInt(m) <= 2)) ? currentYear - 1 : currentYear;
+            // 使用parseMonthsFromQuery计算出的年份
+            const year = monthsInfo.year;
 
             const startDate = new Date(year, monthNum - 1, 1);
             const endDate = new Date(year, monthNum, 0);
@@ -944,12 +944,11 @@ export default function ChatPage() {
         if (monthsInfo && monthsInfo.months.length >= 2) {
           // 多月对比
           const monthsData: { month: string; data: TechExpenseData }[] = [];
-          const currentYear = new Date().getFullYear();
 
           for (const month of monthsInfo.months) {
             const monthNum = parseInt(month);
-            // 判断年份：12月使用去年，1-2月使用今年
-            const year = (monthNum === 12 && monthsInfo.months.some(m => parseInt(m) <= 2)) ? currentYear - 1 : currentYear;
+            // 使用parseMonthsFromQuery计算出的年份
+            const year = monthsInfo.year;
 
             const startDate = new Date(year, monthNum - 1, 1);
             const endDate = new Date(year, monthNum, 0); // 月份最后一天
