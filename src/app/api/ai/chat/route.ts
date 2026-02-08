@@ -105,10 +105,15 @@ export async function POST(request: NextRequest) {
           }
 
           // Execute the tool
+          // 构建完整的 base URL（服务器端必须使用完整 URL）
+          const baseUrl = process.env.VERCEL_URL
+            ? `https://${process.env.VERCEL_URL}`
+            : process.env.NEXTAUTH_URL || 'http://localhost:3000';
+
           const result = await executeTool(toolCall.function.name, params, {
             userId: session.user.id,
             tenantId: user.tenantId,
-            baseUrl: process.env.NEXTAUTH_URL || '',
+            baseUrl,
           });
 
           console.log('[AI Chat] Tool result:', {
