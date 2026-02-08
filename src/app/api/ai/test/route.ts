@@ -26,7 +26,7 @@ export async function GET() {
       hasVercelUrl: !!process.env.VERCEL_URL,
       vercelUrl: process.env.VERCEL_URL || 'localhost',
       hasAppName: !!process.env.OPENROUTER_APP_NAME,
-      appName: process.env.OPENROUTER_APP_NAME || 'Fluxa智能报销',
+      appName: process.env.OPENROUTER_APP_NAME || 'Fluxa Reimbursement',
     };
 
     console.log('[AI Test] Environment check:', envCheck);
