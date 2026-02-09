@@ -105,10 +105,15 @@ export async function POST(request: NextRequest) {
           }
 
           // Execute the tool
+          // 构建完整的 base URL（服务器端必须使用完整 URL）
+          const baseUrl = process.env.VERCEL_URL
+            ? `https://${process.env.VERCEL_URL}`
+            : process.env.NEXTAUTH_URL || 'http://localhost:3000';
+
           const result = await executeTool(toolCall.function.name, params, {
             userId: session.user.id,
             tenantId: user.tenantId,
-            baseUrl: process.env.NEXTAUTH_URL || '',
+            baseUrl,
           });
 
           console.log('[AI Chat] Tool result:', {
@@ -158,25 +163,62 @@ export async function POST(request: NextRequest) {
       usage: response.usage,
     });
   } catch (error: any) {
-    console.error('[AI Chat] Error:', error);
+    // 详细的错误日志 - 包含所有可能的错误信息
+    console.error('[AI Chat] Detailed error information:', {
+      message: error.message,
+      name: error.name,
+      stack: error.stack?.split('\n').slice(0, 5).join('\n'),
+      cause: error.cause,
+      code: error.code,
+      status: error.status,
+      // 环境变量检查（不输出实际值，只检查是否存在）
+      envCheck: {
+        hasApiKey: !!process.env.OPENROUTER_API_KEY,
+        apiKeyLength: process.env.OPENROUTER_API_KEY?.length,
+        apiKeyPrefix: process.env.OPENROUTER_API_KEY?.substring(0, 10),
+        hasVercelUrl: !!process.env.VERCEL_URL,
+        vercelUrl: process.env.VERCEL_URL,
+      },
+    });
 
     // Handle specific OpenRouter errors
     if (error.message?.includes('API key')) {
       return NextResponse.json(
-        { error: 'AI服务配置错误，请检查API密钥' },
+        {
+          error: 'AI服务配置错误，请检查API密钥',
+          details: error.message,
+          troubleshooting: '请确认 Vercel 环境变量 OPENROUTER_API_KEY 已正确配置'
+        },
         { status: 500 }
       );
     }
 
     if (error.message?.includes('rate limit')) {
       return NextResponse.json(
-        { error: 'AI服务请求过于频繁，请稍后再试' },
+        {
+          error: 'AI服务请求过于频繁，请稍后再试',
+          details: error.message,
+        },
         { status: 429 }
       );
     }
 
+    // 返回详细的错误信息给前端
     return NextResponse.json(
-      { error: `AI服务错误: ${error.message}` },
+      {
+        error: `AI服务错误: ${error.message}`,
+        errorType: error.name || error.constructor.name,
+        details: {
+          message: error.message,
+          code: error.code,
+          status: error.status,
+        },
+        troubleshooting: [
+          '1. 检查 OpenRouter API 密钥是否正确',
+          '2. 确认 OpenRouter 账户余额充足',
+          '3. 查看 Vercel Function 日志获取详细信息',
+        ],
+      },
       { status: 500 }
     );
   }

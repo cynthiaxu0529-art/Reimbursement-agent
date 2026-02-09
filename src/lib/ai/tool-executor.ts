@@ -89,6 +89,9 @@ async function executeAnalyzeExpenses(
         startDate: startDate.toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
         dateFilterType: 'expense_date', // Use accrual basis
+        // 添加内部认证参数
+        internalUserId: context.userId,
+        internalTenantId: context.tenantId,
       });
 
       if (focusCategory) {
@@ -125,6 +128,9 @@ async function executeAnalyzeExpenses(
         startDate: startDate.toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
         dateFilterType: 'expense_date',
+        // 添加内部认证参数
+        internalUserId: context.userId,
+        internalTenantId: context.tenantId,
       });
 
       if (focusCategory) {
