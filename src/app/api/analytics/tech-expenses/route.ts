@@ -116,6 +116,16 @@ export async function GET(request: NextRequest) {
     const internalUserId = searchParams.get('internalUserId');
     const internalTenantId = searchParams.get('internalTenantId');
 
+    // 详细日志：记录所有参数
+    console.log('[Tech Expenses API] Request details:', {
+      url: request.url,
+      hasInternalUserId: !!internalUserId,
+      hasInternalTenantId: !!internalTenantId,
+      internalUserIdValue: internalUserId,
+      internalTenantIdValue: internalTenantId,
+      allParams: Object.fromEntries(searchParams.entries()),
+    });
+
     let user: any;
     let userId: string;
 
