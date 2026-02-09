@@ -108,17 +108,45 @@ interface TechExpenseItem {
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
-    }
+    const { searchParams } = new URL(request.url);
 
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
-    });
+    // 支持两种认证方式：
+    // 1. Session 认证（前端调用）
+    // 2. URL 参数认证（内部工具调用）
+    const internalUserId = searchParams.get('internalUserId');
+    const internalTenantId = searchParams.get('internalTenantId');
 
-    if (!user?.tenantId) {
-      return NextResponse.json({ error: '未关联公司' }, { status: 404 });
+    let user: any;
+    let userId: string;
+
+    if (internalUserId && internalTenantId) {
+      // 内部调用（来自 AI 工具执行器）
+      console.log('[Tech Expenses API] Internal call from tool executor');
+      user = await db.query.users.findFirst({
+        where: eq(users.id, internalUserId),
+      });
+
+      if (!user || user.tenantId !== internalTenantId) {
+        return NextResponse.json({ error: '内部认证失败' }, { status: 403 });
+      }
+
+      userId = internalUserId;
+    } else {
+      // 正常的 session 认证
+      const session = await auth();
+      if (!session?.user) {
+        return NextResponse.json({ error: '未登录' }, { status: 401 });
+      }
+
+      user = await db.query.users.findFirst({
+        where: eq(users.id, session.user.id),
+      });
+
+      if (!user?.tenantId) {
+        return NextResponse.json({ error: '未关联公司' }, { status: 404 });
+      }
+
+      userId = session.user.id;
     }
 
     // 获取租户本位币
@@ -128,7 +156,7 @@ export async function GET(request: NextRequest) {
     });
     const tenantBaseCurrency = tenant?.baseCurrency || 'USD';
 
-    const { searchParams } = new URL(request.url);
+    // searchParams 已在上面定义，直接使用
     const period = searchParams.get('period') || 'month';
     const scope = searchParams.get('scope') || 'personal';
     const dateFilterType = searchParams.get('dateFilterType') || 'expense_date'; // 默认使用费用发生日期（权责发生制）
@@ -184,7 +212,7 @@ export async function GET(request: NextRequest) {
 
     // 根据scope过滤
     if (scope === 'personal') {
-      conditions.push(eq(reimbursements.userId, session.user.id));
+      conditions.push(eq(reimbursements.userId, userId));
     }
     // team和company scope暂时都返回公司级数据（后续可根据部门权限过滤）
 
@@ -338,7 +366,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (scope === 'personal') {
-      lastMonthConditions.push(eq(reimbursements.userId, session.user.id));
+      lastMonthConditions.push(eq(reimbursements.userId, userId));
     }
 
     const lastMonthExpenses = await db
