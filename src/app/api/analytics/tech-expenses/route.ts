@@ -4,6 +4,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+
+// Force dynamic rendering for this route
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { users, reimbursements, reimbursementItems, tenants } from '@/lib/db/schema';
