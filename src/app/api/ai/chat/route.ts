@@ -22,6 +22,8 @@ import { allTools } from '@/lib/ai/tools';
 import { executeTool } from '@/lib/ai/tool-executor';
 
 export const maxDuration = 60; // Allow up to 60 seconds for LLM processing
+export const dynamic = 'force-dynamic'; // Force dynamic rendering
+export const runtime = 'nodejs';
 
 /**
  * POST /api/ai/chat

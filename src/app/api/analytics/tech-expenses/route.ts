@@ -4,6 +4,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+
+// Force dynamic rendering for this route
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { users, reimbursements, reimbursementItems, tenants } from '@/lib/db/schema';
@@ -115,6 +119,16 @@ export async function GET(request: NextRequest) {
     // 2. URL 参数认证（内部工具调用）
     const internalUserId = searchParams.get('internalUserId');
     const internalTenantId = searchParams.get('internalTenantId');
+
+    // 详细日志：记录所有参数
+    console.log('[Tech Expenses API] Request details:', {
+      url: request.url,
+      hasInternalUserId: !!internalUserId,
+      hasInternalTenantId: !!internalTenantId,
+      internalUserIdValue: internalUserId,
+      internalTenantIdValue: internalTenantId,
+      allParams: Object.fromEntries(searchParams.entries()),
+    });
 
     let user: any;
     let userId: string;

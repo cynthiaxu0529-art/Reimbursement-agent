@@ -99,7 +99,15 @@ async function executeAnalyzeExpenses(
       }
 
       const baseUrl = context.baseUrl || '';
-      const response = await fetch(`${baseUrl}/api/analytics/tech-expenses?${queryParams}`);
+      const fullUrl = `${baseUrl}/api/analytics/tech-expenses?${queryParams}`;
+
+      console.log('[Tool Executor] Fetching tech expenses:', {
+        baseUrl,
+        fullUrl,
+        params: Object.fromEntries(queryParams.entries()),
+      });
+
+      const response = await fetch(fullUrl);
 
       if (!response.ok) {
         throw new Error(`API request failed: ${response.status}`);
@@ -138,7 +146,15 @@ async function executeAnalyzeExpenses(
       }
 
       const baseUrl = context.baseUrl || '';
-      const response = await fetch(`${baseUrl}/api/analytics/tech-expenses?${queryParams}`);
+      const fullUrl = `${baseUrl}/api/analytics/tech-expenses?${queryParams}`;
+
+      console.log('[Tool Executor] Fetching tech expenses:', {
+        baseUrl,
+        fullUrl,
+        params: Object.fromEntries(queryParams.entries()),
+      });
+
+      const response = await fetch(fullUrl);
 
       if (!response.ok) {
         throw new Error(`API request failed for ${month}月: ${response.status}`);
