@@ -57,10 +57,10 @@ const categoryLabels: Record<string, string> = {
 };
 
 const samplePrompts = [
-  { text: '帮我创建一笔报销', icon: '📝' },
-  { text: '检查报销材料是否齐全', icon: '✅' },
-  { text: '查看当前预算使用情况', icon: '📊' },
   { text: '报销政策是什么', icon: '📋' },
+  { text: '分析本月技术费用', icon: '📊' },
+  { text: '预算预警检查', icon: '⚠️' },
+  { text: '异常消费检测', icon: '🔍' },
 ];
 
 const capabilities = [
@@ -162,6 +162,33 @@ export default function ChatPage() {
     }
   };
 
+  // 调用 AI Chat API
+  const callChatAPI = async (
+    userMsg: string,
+    history: Message[]
+  ): Promise<string> => {
+    const conversationHistory = history
+      .filter(m => m.id !== '1') // 排除初始欢迎消息
+      .map(m => ({ role: m.role, content: m.content }));
+
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: userMsg,
+        conversationHistory,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || 'AI 服务暂时不可用');
+    }
+
+    return result.data?.message || '抱歉，暂时无法回答。';
+  };
+
   const sendMessage = async (text?: string) => {
     const messageText = text || input;
     if ((!messageText.trim() && uploadedFiles.length === 0) || isLoading) return;
@@ -224,54 +251,24 @@ export default function ChatPage() {
             ],
           };
         }
-      } else if (messageText.includes('创建') || messageText.includes('报销')) {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: '好的，我来帮你创建报销单。\n\n你可以：\n1. **上传票据** - 我会自动识别发票信息\n2. **手动填写** - 前往报销表单页面\n\n请选择你想要的方式：',
-          timestamp: new Date(),
-          actions: [
-            { type: 'upload', label: '上传票据' },
-            { type: 'manual', label: '手动填写', href: '/dashboard/reimbursements/new' },
-          ],
-        };
-      } else if (messageText.includes('检查') || messageText.includes('齐全')) {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: '让我检查一下你的报销材料...\n\n**检查结果：**\n\n目前没有待提交的报销草稿。\n\n你可以：\n• 创建新的报销单\n• 上传票据开始报销流程',
-          timestamp: new Date(),
-          actions: [
-            { type: 'create', label: '创建报销单', href: '/dashboard/reimbursements/new' },
-          ],
-        };
-      } else if (messageText.includes('预算') || messageText.includes('花费')) {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: '**Fluxa 本月预算使用情况：**\n\n请联系管理员设置部门预算后，我可以帮你查询详细的预算使用情况。\n\n你也可以在「设置」中配置预算限额。',
-          timestamp: new Date(),
-          actions: [
-            { type: 'settings', label: '前往设置', href: '/dashboard/settings' },
-          ],
-        };
-      } else if (messageText.includes('政策')) {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: '**Fluxa 报销政策：**\n\n请管理员在「设置 → 报销政策」中配置公司的报销政策。\n\n配置后，我可以帮你自动检查费用是否符合政策。',
-          timestamp: new Date(),
-          actions: [
-            { type: 'settings', label: '配置政策', href: '/dashboard/settings' },
-          ],
-        };
       } else {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: '我理解你的需求。你可以尝试：\n\n• **上传票据** - 点击下方📎按钮上传发票\n• **创建报销** - 说"帮我创建一笔报销"\n• **查看预算** - 说"查看预算使用情况"\n\n有什么我可以帮你的？',
-          timestamp: new Date(),
-        };
+        // 文本消息 - 调用 AI Chat API
+        try {
+          const aiResponse = await callChatAPI(messageText, messages);
+          response = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: aiResponse,
+            timestamp: new Date(),
+          };
+        } catch (error) {
+          response = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: `抱歉，AI 助手暂时无法响应。\n\n**错误信息**：${error instanceof Error ? error.message : '未知错误'}\n\n请稍后重试，或联系管理员检查 AI 服务配置。`,
+            timestamp: new Date(),
+          };
+        }
       }
 
       setMessages((prev) => [...prev, response]);
@@ -312,8 +309,12 @@ export default function ChatPage() {
     }}>
       {/* Header */}
       <div style={{ marginBottom: '1rem' }}>
-        <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#111827' }}>AI 助手</h2>
-        <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>智能报销助手，支持票据识别和快速报销</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ fontSize: '1.5rem' }}>🤖</span>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#111827' }}>AI 助手</h2>
+          <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 500 }}>Powered by Claude</span>
+        </div>
+        <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>政策查询 · 费用分析 · 优化建议</p>
       </div>
 
       {/* Messages Area */}
@@ -451,7 +452,7 @@ export default function ChatPage() {
               gap: '0.5rem'
             }}>
               <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>
-                正在识别票据，请稍候...
+                AI 正在思考中...
               </span>
             </div>
           </div>
