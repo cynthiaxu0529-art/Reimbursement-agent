@@ -141,7 +141,7 @@ export default function ChatPage() {
       {/* Header */}
       <div style={{ marginBottom: '1rem' }}>
         <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#111827' }}>
-          🤖 AI 助手 <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 'normal', marginLeft: '0.5rem' }}>Powered by OpenRouter</span>
+          🤖 AI 助手 <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 'normal', marginLeft: '0.5rem' }}>Powered by Claude</span>
         </h2>
         <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>政策查询 · 费用分析 · 优化建议</p>
       </div>

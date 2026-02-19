@@ -29,7 +29,7 @@ const OPENROUTER_APP_URL = getAppUrl();
 const OPENROUTER_APP_NAME = process.env.OPENROUTER_APP_NAME || 'Fluxa Reimbursement'; // 使用英文避免 HTTP header 错误
 
 // Default model to use
-const DEFAULT_MODEL = 'anthropic/claude-3.5-sonnet';
+const DEFAULT_MODEL = 'anthropic/claude-sonnet-4';
 
 // Validate API key at runtime (not during build)
 function validateApiKey() {

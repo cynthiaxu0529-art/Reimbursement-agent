@@ -236,6 +236,6 @@ export async function GET() {
     status: 'ok',
     service: 'Fluxa AI Chat',
     version: '1.0.0',
-    model: 'anthropic/claude-3.5-sonnet',
+    model: 'anthropic/claude-sonnet-4',
   });
 }
