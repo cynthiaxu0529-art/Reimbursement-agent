@@ -234,10 +234,23 @@ export function isFinished(response: any): boolean {
 
 /**
  * Check if response wants to call tools
+ * Claude models may use different finish_reason values, so we check for tool_calls presence
  */
 export function wantsToolCall(response: any): boolean {
   const choice = response.choices?.[0];
-  return choice?.finish_reason === 'tool_calls';
+  // Check both finish_reason and actual tool_calls presence
+  // Claude models may return 'end_turn' or 'stop' as finish_reason even with tool calls
+  const hasToolCalls = choice?.message?.tool_calls && choice.message.tool_calls.length > 0;
+  const finishReasonIndicatesTools = choice?.finish_reason === 'tool_calls';
+
+  console.log('[OpenRouter] wantsToolCall check:', {
+    finishReason: choice?.finish_reason,
+    hasToolCalls,
+    finishReasonIndicatesTools,
+    result: hasToolCalls || finishReasonIndicatesTools,
+  });
+
+  return hasToolCalls || finishReasonIndicatesTools;
 }
 
 /**

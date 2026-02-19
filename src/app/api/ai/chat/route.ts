@@ -132,7 +132,15 @@ export async function POST(request: NextRequest) {
         }
 
         // 7. Second LLM call - analyze tool results and generate response
-        console.log('[AI Chat] Calling LLM with tool results...');
+        console.log('[AI Chat] Calling LLM with tool results...', {
+          toolResultsCount: toolResults.length,
+          toolResultsSummary: toolResults.map(r => ({
+            name: r.name,
+            hasContent: !!r.content,
+            contentLength: r.content?.length,
+          })),
+        });
+
         const messagesWithTools: any[] = [
           { role: 'system', content: SYSTEM_PROMPT },
           ...conversationHistory,
@@ -145,19 +153,55 @@ export async function POST(request: NextRequest) {
           ...toolResults,
         ];
 
-        response = await createChatCompletion(messagesWithTools, {
-          temperature: 0.7,
-          max_tokens: 4096,
-        });
+        try {
+          response = await createChatCompletion(messagesWithTools, {
+            temperature: 0.7,
+            max_tokens: 4096,
+          });
+        } catch (secondCallError: any) {
+          console.error('[AI Chat] Second LLM call failed:', secondCallError);
+          // Return a helpful error message with tool results summary
+          const toolSummary = toolResults.map(r => {
+            try {
+              const parsed = JSON.parse(r.content);
+              return `${r.name}: ${parsed.success ? '成功' : '失败 - ' + (parsed.error || '未知错误')}`;
+            } catch {
+              return `${r.name}: 结果解析失败`;
+            }
+          }).join('\n');
+
+          return NextResponse.json({
+            success: true,
+            message: `我尝试获取了数据，但在生成分析报告时遇到问题。\n\n工具执行情况：\n${toolSummary}\n\n请稍后再试。`,
+            note: 'tool_results_available_but_synthesis_failed',
+          });
+        }
       }
     }
 
     // 8. Extract final response text
     const responseText = extractTextContent(response);
 
-    console.log('[AI Chat] Final response length:', responseText.length);
+    console.log('[AI Chat] Final response:', {
+      textLength: responseText.length,
+      hasContent: !!responseText,
+      model: response.model,
+      finishReason: response.choices?.[0]?.finish_reason,
+    });
 
-    // 9. Return response
+    // 9. Handle empty response - provide a fallback
+    if (!responseText || responseText.trim() === '') {
+      console.warn('[AI Chat] Empty response from LLM, providing fallback');
+      return NextResponse.json({
+        success: true,
+        message: '抱歉，我暂时无法获取数据进行分析。请稍后再试，或尝试换一种方式提问。',
+        model: response.model,
+        usage: response.usage,
+        note: 'fallback_response',
+      });
+    }
+
+    // 10. Return response
     return NextResponse.json({
       success: true,
       message: responseText,
