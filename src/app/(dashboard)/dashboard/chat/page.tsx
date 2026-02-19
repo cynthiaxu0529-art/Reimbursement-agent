@@ -1,60 +1,14 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
-  attachments?: {
-    name: string;
-    type: string;
-    url?: string;
-  }[];
-  actions?: {
-    type: string;
-    label: string;
-    href?: string;
-    data?: any;
-  }[];
-  ocrResult?: OCRResult;
 }
-
-interface OCRResult {
-  type: string;
-  vendor?: string;
-  amount?: number;
-  currency?: string;
-  date?: string;
-  invoiceNumber?: string;
-  category?: string;
-  confidence: number;
-  rawText?: string;
-}
-
-const receiptTypeLabels: Record<string, string> = {
-  'vat_invoice': '增值税普通发票',
-  'vat_special': '增值税专用发票',
-  'flight_itinerary': '机票行程单',
-  'train_ticket': '火车票',
-  'hotel_receipt': '酒店发票',
-  'taxi_receipt': '出租车发票',
-  'ride_hailing': '网约车发票',
-  'restaurant': '餐饮发票',
-  'general_receipt': '通用收据',
-  'unknown': '未知类型',
-};
-
-const categoryLabels: Record<string, string> = {
-  'flight': '机票',
-  'train': '火车票',
-  'hotel': '酒店住宿',
-  'meal': '餐饮',
-  'taxi': '交通',
-  'other': '其他',
-};
 
 const samplePrompts = [
   { text: '报销政策是什么', icon: '📋' },
@@ -64,28 +18,24 @@ const samplePrompts = [
 ];
 
 const capabilities = [
-  { icon: '📷', title: '票据识别', desc: '上传发票自动识别信息' },
-  { icon: '📝', title: '快速报销', desc: '对话式创建报销单' },
-  { icon: '✅', title: '合规检查', desc: '检查费用是否符合政策' },
-  { icon: '💰', title: '预算查询', desc: '查看部门预算使用情况' },
+  { icon: '📋', title: '政策查询', desc: '了解公司报销政策' },
+  { icon: '📊', title: '费用分析', desc: '技术费用统计分析' },
+  { icon: '⚠️', title: '预算预警', desc: '检测是否接近超支' },
+  { icon: '🔍', title: '异常检测', desc: '发现异常消费' },
 ];
 
 export default function ChatPage() {
-  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: '你好！我是 Fluxa 智能报销助手。\n\n我可以帮你：\n• 上传票据并自动识别信息\n• 快速创建报销单\n• 检查费用是否符合公司政策\n• 查询预算使用情况\n\n你可以直接上传发票图片，或告诉我你想做什么。',
+      content: '你好！我是 Fluxa 智能助手。\n\n我可以帮你：\n• 查询公司报销政策\n• 分析技术费用（SaaS、AI Token、云资源）\n• 提供成本优化建议\n• 检测异常消费\n• 分析报销时效性\n\n试试点击下方的快捷按钮，或直接问我问题。',
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [lastOCRResult, setLastOCRResult] = useState<OCRResult | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -95,183 +45,77 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files) {
-      const newFiles = Array.from(files);
-      setUploadedFiles(prev => [...prev, ...newFiles]);
-    }
-  };
+  const sendMessage = async (text?: string) => {
+    const messageText = text || input;
+    if (!messageText.trim() || isLoading) return;
 
-  const removeFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
-  };
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: messageText,
+      timestamp: new Date(),
+    };
 
-  // 将文件转换为 base64
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const result = reader.result as string;
-        // 移除 data:image/xxx;base64, 前缀
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setIsLoading(true);
 
-  // 调用 OCR API
-  const callOCRAPI = async (file: File): Promise<OCRResult> => {
     try {
-      const base64 = await fileToBase64(file);
-      const mimeType = file.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+      // 构建会话历史（排除初始欢迎消息）
+      const conversationHistory = messages
+        .slice(1) // 跳过初始欢迎消息
+        .map(m => ({
+          role: m.role,
+          content: m.content,
+        }));
 
-      const response = await fetch('/api/ocr', {
+      console.log('[Chat] Sending message to AI API:', messageText);
+
+      // 调用 LLM 驱动的 AI Chat API
+      const apiResponse = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          imageBase64: base64,
-          mimeType: mimeType,
+          message: messageText,
+          conversationHistory,
         }),
       });
 
-      const result = await response.json();
-
-      if (result.success && result.data) {
-        return {
-          type: result.data.type || 'unknown',
-          vendor: result.data.vendor,
-          amount: result.data.amount,
-          currency: result.data.currency || 'CNY',
-          date: result.data.date ? new Date(result.data.date).toLocaleDateString('zh-CN') : undefined,
-          invoiceNumber: result.data.invoiceNumber,
-          category: result.data.category,
-          confidence: result.data.confidence || 0,
-          rawText: result.data.rawText,
-        };
-      } else {
-        throw new Error(result.error || 'OCR 识别失败');
-      }
-    } catch (error) {
-      console.error('OCR error:', error);
-      throw error;
-    }
-  };
-
-  // 调用 AI Chat API
-  const callChatAPI = async (
-    userMsg: string,
-    history: Message[]
-  ): Promise<string> => {
-    const conversationHistory = history
-      .filter(m => m.id !== '1') // 排除初始欢迎消息
-      .map(m => ({ role: m.role, content: m.content }));
-
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: userMsg,
-        conversationHistory,
-      }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.error || 'AI 服务暂时不可用');
-    }
-
-    return result.data?.message || '抱歉，暂时无法回答。';
-  };
-
-  const sendMessage = async (text?: string) => {
-    const messageText = text || input;
-    if ((!messageText.trim() && uploadedFiles.length === 0) || isLoading) return;
-
-    const attachments = uploadedFiles.map(file => ({
-      name: file.name,
-      type: file.type,
-    }));
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: messageText || (uploadedFiles.length > 0 ? `上传了 ${uploadedFiles.length} 个文件` : ''),
-      timestamp: new Date(),
-      attachments: attachments.length > 0 ? attachments : undefined,
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInput('');
-    const filesToProcess = [...uploadedFiles];
-    setUploadedFiles([]);
-    setIsLoading(true);
-
-    try {
-      let response: Message;
-
-      if (filesToProcess.length > 0) {
-        // 处理上传的文件 - 调用真正的 OCR API
-        const file = filesToProcess[0]; // 先处理第一个文件
-
-        try {
-          const ocrResult = await callOCRAPI(file);
-          setLastOCRResult(ocrResult);
-
-          const typeLabel = receiptTypeLabels[ocrResult.type] || ocrResult.type;
-          const categoryLabel = ocrResult.category ? (categoryLabels[ocrResult.category] || ocrResult.category) : '待分类';
-          const confidencePercent = Math.round(ocrResult.confidence * 100);
-
-          response = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: `我已识别到你上传的票据！\n\n**识别结果：**\n\n• **类型**：${typeLabel}\n• **商家**：${ocrResult.vendor || '未识别'}\n• **金额**：${ocrResult.amount ? `¥${ocrResult.amount.toLocaleString()}` : '未识别'}\n• **日期**：${ocrResult.date || '未识别'}\n• **发票号**：${ocrResult.invoiceNumber || '未识别'}\n• **费用类别**：${categoryLabel}\n• **识别置信度**：${confidencePercent}%\n\n确认信息无误后，你可以创建报销单。`,
-            timestamp: new Date(),
-            ocrResult: ocrResult,
-            actions: [
-              { type: 'create_with_data', label: '创建报销单', href: '/dashboard/reimbursements/new', data: ocrResult },
-              { type: 'upload_more', label: '继续上传' },
-              { type: 'cancel', label: '取消' },
-            ],
-          };
-        } catch (error) {
-          response = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: `抱歉，票据识别遇到问题。\n\n**错误信息**：${error instanceof Error ? error.message : '未知错误'}\n\n可能的原因：\n• 图片不够清晰\n• 票据格式不支持\n• 服务暂时不可用\n\n请尝试重新上传更清晰的图片，或手动创建报销单。`,
-            timestamp: new Date(),
-            actions: [
-              { type: 'upload_more', label: '重新上传' },
-              { type: 'manual', label: '手动填写', href: '/dashboard/reimbursements/new' },
-            ],
-          };
-        }
-      } else {
-        // 文本消息 - 调用 AI Chat API
-        try {
-          const aiResponse = await callChatAPI(messageText, messages);
-          response = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: aiResponse,
-            timestamp: new Date(),
-          };
-        } catch (error) {
-          response = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: `抱歉，AI 助手暂时无法响应。\n\n**错误信息**：${error instanceof Error ? error.message : '未知错误'}\n\n请稍后重试，或联系管理员检查 AI 服务配置。`,
-            timestamp: new Date(),
-          };
-        }
+      if (!apiResponse.ok) {
+        const errorData = await apiResponse.json();
+        throw new Error(errorData.error || 'AI服务请求失败');
       }
 
-      setMessages((prev) => [...prev, response]);
+      const result = await apiResponse.json();
+      console.log('[Chat] Received response from AI:', result);
+
+      if (!result.success || !result.message) {
+        throw new Error('AI服务返回无效响应');
+      }
+
+      // 创建助手回复消息
+      const response: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: result.message,
+        timestamp: new Date(),
+      };
+
+      setMessages(prev => [...prev, response]);
+    } catch (error: any) {
+      console.error('[Chat] Error:', error);
+
+      // 显示错误消息
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `抱歉，处理您的请求时出现错误：${error.message}\n\n请稍后重试，或联系管理员。`,
+        timestamp: new Date(),
+      };
+
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
@@ -281,19 +125,6 @@ export default function ChatPage() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
-    }
-  };
-
-  const handleActionClick = (action: { type: string; label: string; href?: string; data?: any }) => {
-    if (action.href) {
-      // 如果有 OCR 数据，将其存储到 sessionStorage 供报销页面使用
-      if (action.data || lastOCRResult) {
-        const dataToStore = action.data || lastOCRResult;
-        sessionStorage.setItem('ocrData', JSON.stringify(dataToStore));
-      }
-      router.push(action.href);
-    } else if (action.type === 'upload' || action.type === 'upload_more') {
-      fileInputRef.current?.click();
     }
   };
 
@@ -309,11 +140,9 @@ export default function ChatPage() {
     }}>
       {/* Header */}
       <div style={{ marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ fontSize: '1.5rem' }}>🤖</span>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#111827' }}>AI 助手</h2>
-          <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 500 }}>Powered by Claude</span>
-        </div>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#111827' }}>
+          🤖 AI 助手 <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 'normal', marginLeft: '0.5rem' }}>Powered by Claude</span>
+        </h2>
         <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>政策查询 · 费用分析 · 优化建议</p>
       </div>
 
@@ -350,62 +179,22 @@ export default function ChatPage() {
             )}
             <div
               style={{
-                maxWidth: '75%',
-                borderRadius: '1rem',
-                padding: '1rem',
-                backgroundColor: message.role === 'user' ? '#2563eb' : 'white',
+                maxWidth: message.role === 'user' ? '75%' : '85%',
+                background: message.role === 'user' ? 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)' : 'white',
                 color: message.role === 'user' ? 'white' : '#111827',
-                border: message.role === 'assistant' ? '1px solid #e5e7eb' : 'none',
-                boxShadow: message.role === 'assistant' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
+                padding: '0.875rem 1rem',
+                borderRadius: message.role === 'user' ? '1rem 1rem 0.25rem 1rem' : '1rem 1rem 1rem 0.25rem',
+                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+                border: message.role === 'assistant' ? '1px solid #e5e7eb' : 'none'
               }}
             >
-              {/* Attachments */}
-              {message.attachments && message.attachments.length > 0 && (
-                <div style={{ marginBottom: '0.5rem' }}>
-                  {message.attachments.map((att, idx) => (
-                    <div key={idx} style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.25rem',
-                      padding: '0.25rem 0.5rem',
-                      backgroundColor: message.role === 'user' ? 'rgba(255,255,255,0.2)' : '#f3f4f6',
-                      borderRadius: '0.25rem',
-                      fontSize: '0.75rem',
-                      marginRight: '0.25rem'
-                    }}>
-                      📎 {att.name}
-                    </div>
-                  ))}
+              {message.role === 'assistant' ? (
+                <div className="markdown-content" style={{ fontSize: '0.875rem', lineHeight: '1.5' }}>
+                  <ReactMarkdown>{message.content}</ReactMarkdown>
                 </div>
-              )}
-              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{message.content}</div>
-              {message.actions && (
-                <div style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: '0.5rem',
-                  marginTop: '0.75rem',
-                  paddingTop: '0.75rem',
-                  borderTop: '1px solid #e5e7eb'
-                }}>
-                  {message.actions.map((action, index) => (
-                    <button
-                      key={index}
-                      onClick={() => handleActionClick(action)}
-                      style={{
-                        padding: '0.375rem 0.75rem',
-                        backgroundColor: action.type === 'create' || action.type === 'manual' || action.type === 'create_with_data' ? '#2563eb' : '#eff6ff',
-                        color: action.type === 'create' || action.type === 'manual' || action.type === 'create_with_data' ? 'white' : '#2563eb',
-                        border: action.type === 'create' || action.type === 'manual' || action.type === 'create_with_data' ? 'none' : '1px solid #bfdbfe',
-                        borderRadius: '0.5rem',
-                        fontSize: '0.875rem',
-                        cursor: 'pointer',
-                        fontWeight: 500
-                      }}
-                    >
-                      {action.label}
-                    </button>
-                  ))}
+              ) : (
+                <div style={{ fontSize: '0.875rem', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
+                  {message.content}
                 </div>
               )}
             </div>
@@ -413,7 +202,7 @@ export default function ChatPage() {
               <div style={{
                 width: '32px',
                 height: '32px',
-                backgroundColor: '#2563eb',
+                background: '#f3f4f6',
                 borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center',
@@ -421,13 +210,12 @@ export default function ChatPage() {
                 marginLeft: '0.75rem',
                 flexShrink: 0
               }}>
-                <span style={{ color: 'white', fontSize: '0.75rem', fontWeight: 500 }}>F</span>
+                <span style={{ fontSize: '0.875rem' }}>👤</span>
               </div>
             )}
           </div>
         ))}
 
-        {/* Loading indicator */}
         {isLoading && (
           <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: '1rem' }}>
             <div style={{
@@ -438,22 +226,26 @@ export default function ChatPage() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              marginRight: '0.75rem'
+              marginRight: '0.75rem',
+              flexShrink: 0
             }}>
               <span style={{ color: 'white', fontSize: '0.875rem' }}>🤖</span>
             </div>
             <div style={{
-              backgroundColor: 'white',
-              border: '1px solid #e5e7eb',
-              borderRadius: '1rem',
-              padding: '1rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
+              background: 'white',
+              padding: '0.875rem 1rem',
+              borderRadius: '1rem 1rem 1rem 0.25rem',
+              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+              border: '1px solid #e5e7eb'
             }}>
-              <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>
-                AI 正在思考中...
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div className="animate-pulse" style={{ fontSize: '0.875rem', color: '#6b7280' }}>正在思考</div>
+                <div style={{ display: 'flex', gap: '0.25rem' }}>
+                  <div className="animate-bounce" style={{ width: '4px', height: '4px', background: '#6b7280', borderRadius: '50%', animationDelay: '0ms' }}></div>
+                  <div className="animate-bounce" style={{ width: '4px', height: '4px', background: '#6b7280', borderRadius: '50%', animationDelay: '150ms' }}></div>
+                  <div className="animate-bounce" style={{ width: '4px', height: '4px', background: '#6b7280', borderRadius: '50%', animationDelay: '300ms' }}></div>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -461,185 +253,121 @@ export default function ChatPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Capabilities Grid - Show only on first message */}
+      {/* Capabilities (show only on first message) */}
       {isFirstMessage && (
-        <div style={{ marginBottom: '1rem' }}>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
-            gap: '0.75rem'
-          }}>
-            {capabilities.map((cap, index) => (
-              <div
-                key={index}
-                style={{
-                  backgroundColor: 'white',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '0.75rem',
-                  padding: '1rem',
-                  textAlign: 'center'
-                }}
-              >
-                <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>{cap.icon}</div>
-                <p style={{ fontWeight: 500, color: '#111827', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
-                  {cap.title}
-                </p>
-                <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>{cap.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Sample Prompts - Show only on first message */}
-      {isFirstMessage && (
-        <div style={{ marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-            {samplePrompts.map((prompt, index) => (
-              <button
-                key={index}
-                onClick={() => sendMessage(prompt.text)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.375rem',
-                  padding: '0.5rem 1rem',
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: 'none',
-                  borderRadius: '9999px',
-                  fontSize: '0.875rem',
-                  cursor: 'pointer'
-                }}
-              >
-                <span>{prompt.icon}</span> {prompt.text}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Uploaded Files Preview */}
-      {uploadedFiles.length > 0 && (
         <div style={{
-          marginBottom: '0.5rem',
-          padding: '0.75rem',
-          backgroundColor: '#f9fafb',
-          borderRadius: '0.5rem',
-          border: '1px solid #e5e7eb'
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: '0.75rem',
+          marginBottom: '1rem',
+          padding: '1rem',
+          background: '#f9fafb',
+          borderRadius: '0.5rem'
         }}>
-          <p style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.5rem' }}>
-            待上传文件：
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-            {uploadedFiles.map((file, index) => (
-              <div key={index} style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.375rem 0.75rem',
-                backgroundColor: 'white',
-                border: '1px solid #e5e7eb',
-                borderRadius: '0.375rem',
-                fontSize: '0.875rem'
-              }}>
-                <span>📄</span>
-                <span style={{ maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {file.name}
-                </span>
-                <button
-                  onClick={() => removeFile(index)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#dc2626',
-                    cursor: 'pointer',
-                    padding: '0',
-                    fontSize: '1rem'
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
+          {capabilities.map((cap, idx) => (
+            <div
+              key={idx}
+              style={{
+                padding: '0.75rem',
+                background: 'white',
+                borderRadius: '0.5rem',
+                border: '1px solid #e5e7eb'
+              }}
+            >
+              <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>{cap.icon}</div>
+              <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827', marginBottom: '0.125rem' }}>{cap.title}</div>
+              <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{cap.desc}</div>
+            </div>
+          ))}
         </div>
       )}
+
+      {/* Sample Prompts */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        {samplePrompts.map((prompt, idx) => (
+          <button
+            key={idx}
+            onClick={() => sendMessage(prompt.text)}
+            disabled={isLoading}
+            style={{
+              padding: '0.5rem 1rem',
+              background: 'white',
+              border: '1px solid #e5e7eb',
+              borderRadius: '1rem',
+              fontSize: '0.875rem',
+              color: '#374151',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              opacity: isLoading ? 0.5 : 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              if (!isLoading) {
+                e.currentTarget.style.background = '#f9fafb';
+                e.currentTarget.style.borderColor = '#2563eb';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'white';
+              e.currentTarget.style.borderColor = '#e5e7eb';
+            }}
+          >
+            <span>{prompt.icon}</span>
+            <span>{prompt.text}</span>
+          </button>
+        ))}
+      </div>
 
       {/* Input Area */}
       <div style={{
-        backgroundColor: 'white',
-        borderRadius: '1rem',
+        display: 'flex',
+        gap: '0.75rem',
+        padding: '1rem',
+        background: 'white',
         border: '1px solid #e5e7eb',
-        padding: '0.75rem',
-        boxShadow: '0 -4px 6px -1px rgba(0, 0, 0, 0.05)'
+        borderRadius: '0.75rem',
+        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
       }}>
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileUpload}
-          accept="image/*,.pdf"
-          multiple
-          style={{ display: 'none' }}
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyPress}
+          placeholder="输入你的问题... (Shift+Enter换行，Enter发送)"
+          disabled={isLoading}
+          style={{
+            flex: 1,
+            padding: '0.75rem',
+            border: '1px solid #e5e7eb',
+            borderRadius: '0.5rem',
+            fontSize: '0.875rem',
+            resize: 'none',
+            minHeight: '80px',
+            maxHeight: '200px',
+            fontFamily: 'inherit',
+            outline: 'none',
+            background: isLoading ? '#f9fafb' : 'white'
+          }}
         />
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              padding: '0.5rem',
-              backgroundColor: '#eff6ff',
-              border: '1px solid #bfdbfe',
-              borderRadius: '0.5rem',
-              cursor: 'pointer',
-              color: '#2563eb',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.25rem',
-              fontSize: '0.875rem'
-            }}
-            title="上传票据"
-          >
-            <span style={{ fontSize: '1.25rem' }}>📎</span>
-            <span>上传票据</span>
-          </button>
-          <input
-            type="text"
-            placeholder="输入你的问题或指令..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            disabled={isLoading}
-            style={{
-              flex: 1,
-              padding: '0.75rem',
-              border: 'none',
-              outline: 'none',
-              fontSize: '1rem',
-              backgroundColor: 'transparent'
-            }}
-          />
-          <button
-            onClick={() => sendMessage()}
-            disabled={(!input.trim() && uploadedFiles.length === 0) || isLoading}
-            style={{
-              padding: '0.625rem 1.25rem',
-              background: (!input.trim() && uploadedFiles.length === 0) || isLoading
-                ? '#9ca3af'
-                : 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '0.5rem',
-              fontWeight: 500,
-              cursor: (!input.trim() && uploadedFiles.length === 0) || isLoading ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.375rem'
-            }}
-          >
-            发送
-            <span>→</span>
-          </button>
-        </div>
+        <button
+          onClick={() => sendMessage()}
+          disabled={!input.trim() || isLoading}
+          style={{
+            padding: '0 1.5rem',
+            background: (!input.trim() || isLoading) ? '#e5e7eb' : 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '0.5rem',
+            fontSize: '0.875rem',
+            fontWeight: 600,
+            cursor: (!input.trim() || isLoading) ? 'not-allowed' : 'pointer',
+            transition: 'all 0.2s',
+            alignSelf: 'flex-end'
+          }}
+        >
+          {isLoading ? '发送中...' : '发送'}
+        </button>
       </div>
     </div>
   );

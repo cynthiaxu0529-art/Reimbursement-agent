@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '没有权限发起付款，需要财务或管理员角色' }, { status: 403 });
     }
 
-    const { reimbursementId } = await request.json();
+    const { reimbursementId, customAmount } = await request.json();
 
     if (!reimbursementId) {
       return NextResponse.json({ error: '缺少报销单ID' }, { status: 400 });
@@ -122,9 +122,35 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // 计算付款金额（使用美元/USDC）
-    const amountUSD = reimbursement.totalAmountInBaseCurrency ||
-      Number(reimbursement.totalAmount) * 0.14;
+    // 计算付款金额（使用本位币/USDC）
+    const originalAmountUSD = reimbursement.totalAmountInBaseCurrency ||
+      Number(reimbursement.totalAmount);
+
+    // 如果财务提供了自定义金额，使用自定义金额（但不能超过原金额）
+    let amountUSD = originalAmountUSD;
+    let isCustomAmount = false;
+
+    if (customAmount !== undefined && customAmount !== null) {
+      const parsedCustomAmount = parseFloat(customAmount);
+      if (isNaN(parsedCustomAmount) || parsedCustomAmount <= 0) {
+        return NextResponse.json({
+          success: false,
+          error: '自定义金额无效',
+          message: '打款金额必须大于 0',
+        }, { status: 400 });
+      }
+
+      if (parsedCustomAmount > originalAmountUSD) {
+        return NextResponse.json({
+          success: false,
+          error: '自定义金额超过报销金额',
+          message: `打款金额 ${parsedCustomAmount} 不能超过报销金额 ${originalAmountUSD.toFixed(2)} USDC`,
+        }, { status: 400 });
+      }
+
+      amountUSD = parsedCustomAmount;
+      isCustomAmount = true;
+    }
 
     // 初始化 Fluxa Payout 服务
     const payoutService = createFluxaPayoutService();
@@ -184,6 +210,9 @@ export async function POST(request: NextRequest) {
               initiatedAt: new Date().toISOString(),
               initiatedBy: session.user.id,
               amountUSDC: amountUSD,
+              originalAmountUSDC: originalAmountUSD,
+              isCustomAmount,
+              adjustmentReason: isCustomAmount ? '财务根据政策限额调整打款金额' : undefined,
             },
           ],
         })
@@ -197,8 +226,12 @@ export async function POST(request: NextRequest) {
         approvalUrl: result.approvalUrl,
         expiresAt: result.expiresAt,
         amountUSDC: amountUSD,
+        originalAmountUSDC: originalAmountUSD,
+        isCustomAmount,
         toAddress: walletInfo.walletAddress,
-        message: '打款请求已创建，请点击审批链接在钱包中完成审批',
+        message: isCustomAmount
+          ? `打款请求已创建（金额已调整为 $${amountUSD.toFixed(2)}），请点击审批链接在钱包中完成审批`
+          : '打款请求已创建，请点击审批链接在钱包中完成审批',
       });
     } else {
       return NextResponse.json({

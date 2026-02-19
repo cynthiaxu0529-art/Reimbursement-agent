@@ -119,15 +119,41 @@ export default function ApprovalHistoryPage() {
     setPreviewImage(null);
   };
   const [roleChecked, setRoleChecked] = useState(false);
+  const [userRoles, setUserRoles] = useState<string[]>([]);
 
-  // 检查用户角色
+  // 检查用户角色 - 从API获取而不是localStorage
   useEffect(() => {
-    const savedRole = localStorage.getItem('userRole');
-    if (savedRole !== 'approver' && savedRole !== 'admin') {
-      router.push('/dashboard');
-    } else {
-      setRoleChecked(true);
-    }
+    const checkRoles = async () => {
+      try {
+        const response = await fetch('/api/settings/role');
+        const result = await response.json();
+        if (result.success && result.roles) {
+          // 转换数据库角色到前端角色
+          const dbToFrontend: Record<string, string> = {
+            employee: 'employee',
+            manager: 'approver',
+            finance: 'finance',
+            admin: 'admin',
+            super_admin: 'super_admin',
+          };
+          const frontendRoles = result.roles.map((r: string) => dbToFrontend[r] || r);
+          setUserRoles(frontendRoles);
+
+          // 检查是否有审批权限（approver 或 super_admin）
+          const hasApprovalAccess = frontendRoles.includes('approver') || frontendRoles.includes('super_admin');
+          if (!hasApprovalAccess) {
+            router.push('/dashboard');
+          } else {
+            setRoleChecked(true);
+          }
+        } else {
+          router.push('/dashboard');
+        }
+      } catch {
+        router.push('/dashboard');
+      }
+    };
+    checkRoles();
   }, [router]);
 
   // 获取审批历史数据 - 只显示当前用户批准的记录
@@ -187,7 +213,7 @@ export default function ApprovalHistoryPage() {
     totalRejected: historyList.filter(r => r.status === 'rejected').length,
     totalPaidAmount: historyList
       .filter(r => r.status === 'paid' || r.status === 'approved' || r.status === 'processing')
-      .reduce((sum, r) => sum + (r.totalAmountInBaseCurrency || r.totalAmount * 0.14), 0),
+      .reduce((sum, r) => sum + (r.totalAmountInBaseCurrency || 0), 0),
   };
 
   // 搜索过滤
@@ -227,7 +253,7 @@ export default function ApprovalHistoryPage() {
   const checkExceedsLimit = (item: ReimbursementItem): boolean => {
     const limit = categoryLimits[item.category];
     if (!limit) return false;
-    const amountUSD = item.amountInBaseCurrency || item.amount * 0.14;
+    const amountUSD = item.amountInBaseCurrency || 0;
     return amountUSD > limit;
   };
 
@@ -400,7 +426,7 @@ export default function ApprovalHistoryPage() {
                 <div>
                   <p className="text-xs text-gray-500 uppercase tracking-wider">TOTAL CLAIMED</p>
                   <p className="text-xl font-bold text-gray-900 mt-1">
-                    ${(selectedData.totalAmountInBaseCurrency || selectedData.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    ${(selectedData.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </p>
                 </div>
                 <div>
@@ -410,7 +436,7 @@ export default function ApprovalHistoryPage() {
                   }`}>
                     {selectedData.status === 'rejected'
                       ? '$0.00'
-                      : `$${(selectedData.totalAmountInBaseCurrency || selectedData.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+                      : `$${(selectedData.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
                     }
                   </p>
                 </div>
@@ -439,8 +465,8 @@ export default function ApprovalHistoryPage() {
                     const catInfo = categoryLabels[item.category] || categoryLabels.other;
                     const itemCurrency = item.currency || 'CNY';
                     const itemSymbol = currencySymbols[itemCurrency] || itemCurrency;
-                    const exchangeRate = itemCurrency === 'USD' ? 1.000 : (item.amountInBaseCurrency && item.amount > 0 ? item.amountInBaseCurrency / item.amount : 0.14);
-                    const convertedAmount = item.amountInBaseCurrency || item.amount * 0.14;
+                    const exchangeRate = itemCurrency === 'USD' ? 1.000 : (item.amountInBaseCurrency && item.amount > 0 ? item.amountInBaseCurrency / item.amount : null);
+                    const convertedAmount = item.amountInBaseCurrency || 0;
                     const exceedsLimit = checkExceedsLimit(item);
 
                     return (
@@ -491,7 +517,7 @@ export default function ApprovalHistoryPage() {
                         {/* Exchange Rate */}
                         <div className="text-center">
                           <p className="text-sm text-gray-600 font-mono">
-                            {exchangeRate.toFixed(3)}
+                            {exchangeRate !== null ? exchangeRate.toFixed(3) : 'N/A'}
                           </p>
                         </div>
 

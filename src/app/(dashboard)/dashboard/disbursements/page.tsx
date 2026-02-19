@@ -75,6 +75,10 @@ export default function DisbursementsPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [refreshingStatus, setRefreshingStatus] = useState(false);
+  // 自定义打款金额（财务可修改）
+  const [customPaymentAmounts, setCustomPaymentAmounts] = useState<Record<string, number>>({});
+  const [editingAmountId, setEditingAmountId] = useState<string | null>(null);
 
   // 预览附件：将base64 data URL转为Blob URL以提高渲染性能
   const handlePreviewReceipt = (url: string | null | undefined) => {
@@ -111,20 +115,60 @@ export default function DisbursementsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [roleChecked, setRoleChecked] = useState(false);
   const [payoutStatuses, setPayoutStatuses] = useState<Record<string, any>>({});
+  const [paymentStats, setPaymentStats] = useState<{
+    pendingCount: number;
+    pendingTotal: number;
+    processingCount: number;
+    totalPaidCount: number;
+    todayPaidCount: number;
+  }>({
+    pendingCount: 0,
+    pendingTotal: 0,
+    processingCount: 0,
+    totalPaidCount: 0,
+    todayPaidCount: 0,
+  });
 
-  // 检查用户角色，非财务角色重定向
+  // 检查用户角色，非财务角色重定向 - 从API获取而不是localStorage
   useEffect(() => {
-    const savedRole = localStorage.getItem('userRole');
-    if (savedRole !== 'finance') {
-      router.push('/dashboard');
-    } else {
-      setRoleChecked(true);
-    }
+    const checkRoles = async () => {
+      try {
+        const response = await fetch('/api/settings/role');
+        const result = await response.json();
+        if (result.success && result.roles) {
+          // 检查是否有财务权限（finance 或 super_admin）
+          const hasFinanceAccess = result.roles.includes('finance') || result.roles.includes('super_admin');
+          if (!hasFinanceAccess) {
+            router.push('/dashboard');
+          } else {
+            setRoleChecked(true);
+          }
+        } else {
+          router.push('/dashboard');
+        }
+      } catch {
+        router.push('/dashboard');
+      }
+    };
+    checkRoles();
   }, [router]);
 
   useEffect(() => {
     fetchReimbursements();
+    fetchPaymentStats();
   }, [activeTab]);
+
+  const fetchPaymentStats = async () => {
+    try {
+      const response = await fetch('/api/payments/stats');
+      const result = await response.json();
+      if (result.success && result.stats) {
+        setPaymentStats(result.stats);
+      }
+    } catch (error) {
+      console.error('Failed to fetch payment stats:', error);
+    }
+  };
 
   const fetchReimbursements = async () => {
     setLoading(true);
@@ -136,12 +180,85 @@ export default function DisbursementsPage() {
       const response = await fetch(`/api/reimbursements?status=${status}&role=finance`);
       const result = await response.json();
       if (result.success) {
-        setReimbursements(result.data || []);
+        const data = result.data || [];
+        setReimbursements(data);
+
+        // 从报销单的 aiSuggestions 中读取已保存的自定义打款金额
+        const savedAmounts: Record<string, number> = {};
+        for (const item of data) {
+          const customAmountInfo = item.aiSuggestions?.find(
+            (s: any) => s.type === 'custom_payment_amount'
+          );
+          if (customAmountInfo?.amount) {
+            savedAmounts[item.id] = customAmountInfo.amount;
+          }
+        }
+        setCustomPaymentAmounts(savedAmounts);
       }
     } catch (error) {
       console.error('Failed to fetch:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 手动刷新所有处理中的付款状态 - 直接调用 Fluxa API
+  const refreshAllPayoutStatuses = async () => {
+    if (refreshingStatus || reimbursements.length === 0) return;
+    setRefreshingStatus(true);
+    console.log('[刷新状态] 开始刷新', reimbursements.length, '笔付款状态...');
+
+    let updatedCount = 0;
+    let errorCount = 0;
+
+    for (const item of reimbursements) {
+      // 使用 findLast 获取最新的 payout 记录（避免查询旧的过期记录）
+      const allPayouts = (item.aiSuggestions || []).filter(
+        (s: any) => s.type === 'fluxa_payout_initiated'
+      );
+      const payoutInfo = allPayouts.length > 0 ? allPayouts[allPayouts.length - 1] : null;
+      if (!payoutInfo?.payoutId) {
+        console.log('[刷新状态] 跳过, 无 payoutId:', item.id);
+        continue;
+      }
+
+      try {
+        console.log('[刷新状态] 同步 payoutId:', payoutInfo.payoutId);
+        // 使用新的 sync-status API 直接调用 Fluxa
+        const res = await fetch('/api/payments/sync-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            payoutId: payoutInfo.payoutId,
+            reimbursementId: item.id,
+          }),
+        });
+        const data = await res.json();
+        console.log('[刷新状态] 响应:', data.success, data.status, data.dbUpdated);
+
+        if (data.success) {
+          setPayoutStatuses(prev => ({ ...prev, [item.id]: data }));
+          if (data.dbUpdated) updatedCount++;
+        } else {
+          console.error('[刷新状态] 失败:', data.error);
+          errorCount++;
+        }
+      } catch (error) {
+        console.error('[刷新状态] 错误:', error);
+        errorCount++;
+      }
+    }
+
+    setRefreshingStatus(false);
+
+    if (updatedCount > 0) {
+      alert(`已更新 ${updatedCount} 笔付款状态，正在刷新列表...`);
+      fetchReimbursements();
+      fetchPaymentStats();
+    } else if (errorCount > 0) {
+      alert(`刷新失败 ${errorCount} 笔，请检查 Vercel 日志查看详情`);
+    } else {
+      alert('所有状态已是最新，无需更新');
     }
   };
 
@@ -183,14 +300,77 @@ export default function DisbursementsPage() {
     }
   }, [activeTab, reimbursements.length, loading]);
 
+  // 获取报销单的打款金额（自定义金额或原金额）
+  const getPaymentAmount = (item: Reimbursement) => {
+    const originalAmount = item.totalAmountInBaseCurrency || 0;
+    return customPaymentAmounts[item.id] ?? originalAmount;
+  };
+
+  // 设置自定义打款金额（仅更新本地状态，不保存到后端）
+  const setCustomAmount = (id: string, amount: number, maxAmount: number) => {
+    // 确保金额在有效范围内
+    const validAmount = Math.max(0.01, Math.min(amount, maxAmount));
+    setCustomPaymentAmounts(prev => ({ ...prev, [id]: validAmount }));
+  };
+
+  // 保存自定义打款金额到后端
+  const saveCustomAmount = async (id: string, amount: number) => {
+    try {
+      const response = await fetch(`/api/reimbursements/${id}/payment-amount`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customPaymentAmount: amount }),
+      });
+      const result = await response.json();
+      if (!result.success) {
+        setErrorMessage(result.error || '保存打款金额失败');
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error('Save custom amount error:', error);
+      setErrorMessage('保存打款金额失败');
+      return false;
+    }
+  };
+
+  // 重置自定义打款金额
+  const resetCustomAmount = async (id: string) => {
+    try {
+      const response = await fetch(`/api/reimbursements/${id}/payment-amount`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      if (result.success) {
+        setCustomPaymentAmounts(prev => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Reset custom amount error:', error);
+      return false;
+    }
+  };
+
   const processPayment = async (id: string) => {
     setProcessing(id);
     setErrorMessage(null);
     try {
+      // 获取自定义金额（如果有）
+      const customAmount = customPaymentAmounts[id];
+      const requestBody: any = { reimbursementId: id };
+      if (customAmount !== undefined) {
+        requestBody.customAmount = customAmount;
+      }
+
       const response = await fetch(`/api/payments/process`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reimbursementId: id }),
+        body: JSON.stringify(requestBody),
       });
       const result = await response.json();
 
@@ -327,14 +507,13 @@ export default function DisbursementsPage() {
     }
   };
 
-  // Stats
-  const readyForPayment = reimbursements.filter(r => r.status === 'approved').length;
-  const totalPayable = reimbursements.reduce((sum, r) =>
-    sum + (r.totalAmountInBaseCurrency || r.totalAmount * 0.14), 0
-  );
+  // Stats - 计算选中项的总金额
   const selectedTotal = reimbursements
     .filter(r => selectedIds.includes(r.id))
-    .reduce((sum, r) => sum + (r.totalAmountInBaseCurrency || r.totalAmount * 0.14), 0);
+    .reduce((sum, r) => {
+      const originalAmount = r.totalAmountInBaseCurrency || 0;
+      return sum + (customPaymentAmounts[r.id] ?? originalAmount);
+    }, 0);
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('zh-CN', {
@@ -414,10 +593,10 @@ export default function DisbursementsPage() {
             <div>
               <p className="text-xs text-gray-500 mb-1">待付款总额</p>
               <p className="text-2xl font-bold text-gray-900">
-                ${totalPayable.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                ${paymentStats.pendingTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
               </p>
               <p className="text-xs text-amber-600 mt-1">
-                {readyForPayment} 笔待处理
+                {paymentStats.pendingCount} 笔待处理
               </p>
             </div>
             <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center text-xl">
@@ -430,7 +609,7 @@ export default function DisbursementsPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-gray-500 mb-1">处理中</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
+              <p className="text-2xl font-bold text-gray-900">{paymentStats.processingCount}</p>
               <p className="text-xs text-gray-500 mt-1">正在打款</p>
             </div>
             <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center text-xl">
@@ -442,9 +621,11 @@ export default function DisbursementsPage() {
         <Card className="p-4 border-l-4 border-l-green-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-gray-500 mb-1">今日已付</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
-              <p className="text-xs text-gray-500 mt-1">笔</p>
+              <p className="text-xs text-gray-500 mb-1">已付款</p>
+              <p className="text-2xl font-bold text-gray-900">{paymentStats.totalPaidCount}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                今日 {paymentStats.todayPaidCount} 笔
+              </p>
             </div>
             <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center text-xl">
               ✅
@@ -454,42 +635,63 @@ export default function DisbursementsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 mb-4 border-b">
-        <button
-          onClick={() => { setActiveTab('ready'); setSelectedIds([]); }}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
-            activeTab === 'ready'
-              ? 'text-blue-600 border-blue-600'
-              : 'text-gray-500 border-transparent hover:text-gray-700'
-          }`}
-        >
-          待付款
-          {readyForPayment > 0 && (
-            <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">
-              {readyForPayment}
-            </span>
-          )}
-        </button>
-        <button
-          onClick={() => { setActiveTab('processing'); setSelectedIds([]); }}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
-            activeTab === 'processing'
-              ? 'text-purple-600 border-purple-600'
-              : 'text-gray-500 border-transparent hover:text-gray-700'
-          }`}
-        >
-          处理中
-        </button>
-        <button
-          onClick={() => { setActiveTab('history'); setSelectedIds([]); }}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
-            activeTab === 'history'
-              ? 'text-green-600 border-green-600'
-              : 'text-gray-500 border-transparent hover:text-gray-700'
-          }`}
-        >
-          付款历史
-        </button>
+      <div className="flex items-center justify-between mb-4 border-b">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => { setActiveTab('ready'); setSelectedIds([]); }}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
+              activeTab === 'ready'
+                ? 'text-blue-600 border-blue-600'
+                : 'text-gray-500 border-transparent hover:text-gray-700'
+            }`}
+          >
+            待付款
+            {paymentStats.pendingCount > 0 && (
+              <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">
+                {paymentStats.pendingCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => { setActiveTab('processing'); setSelectedIds([]); }}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
+              activeTab === 'processing'
+                ? 'text-purple-600 border-purple-600'
+                : 'text-gray-500 border-transparent hover:text-gray-700'
+            }`}
+          >
+            处理中
+            {paymentStats.processingCount > 0 && (
+              <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-600 rounded-full">
+                {paymentStats.processingCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => { setActiveTab('history'); setSelectedIds([]); }}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
+              activeTab === 'history'
+                ? 'text-green-600 border-green-600'
+                : 'text-gray-500 border-transparent hover:text-gray-700'
+            }`}
+          >
+            付款历史
+            {paymentStats.totalPaidCount > 0 && (
+              <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-600 rounded-full">
+                {paymentStats.totalPaidCount}
+              </span>
+            )}
+          </button>
+        </div>
+        {activeTab === 'processing' && (
+          <button
+            onClick={refreshAllPayoutStatuses}
+            disabled={refreshingStatus}
+            className="px-3 py-1.5 text-sm font-medium text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {refreshingStatus ? '刷新中...' : '🔄 刷新状态'}
+          </button>
+        )}
       </div>
 
       {/* Search & Filter */}
@@ -576,7 +778,7 @@ export default function DisbursementsPage() {
               const isExpanded = expandedId === item.id;
               const isSelected = selectedIds.includes(item.id);
               const formId = generateFormId(item.createdAt, item.id);
-              const usdAmount = item.totalAmountInBaseCurrency || item.totalAmount * 0.14;
+              const usdAmount = item.totalAmountInBaseCurrency || 0;
 
               return (
                 <div key={item.id}>
@@ -694,7 +896,7 @@ export default function DisbursementsPage() {
                             </div>
                             {item.items?.map((lineItem, idx) => {
                               const catInfo = categoryLabels[lineItem.category] || categoryLabels.other;
-                              const itemUsd = lineItem.amountInBaseCurrency || lineItem.amount * 0.14;
+                              const itemUsd = lineItem.amountInBaseCurrency || 0;
                               return (
                                 <div key={idx} className={`grid grid-cols-[100px_1fr_120px_100px] gap-2 px-4 py-3 items-center ${
                                   idx < (item.items?.length || 0) - 1 ? 'border-b border-gray-100' : ''
@@ -731,6 +933,84 @@ export default function DisbursementsPage() {
                                 ${usdAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                               </div>
                             </div>
+
+                            {/* 财务打款金额编辑 - 仅在待付款tab显示 */}
+                            {activeTab === 'ready' && (
+                              <div className="px-4 py-3 bg-emerald-50 border-t border-emerald-200">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-semibold text-emerald-700">💳 打款金额</span>
+                                    <span className="text-xs text-emerald-600">
+                                      (可根据政策限额调整，不超过报销金额)
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {editingAmountId === item.id ? (
+                                      <>
+                                        <span className="text-sm text-gray-600">$</span>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          min="0.01"
+                                          max={usdAmount}
+                                          value={customPaymentAmounts[item.id] ?? usdAmount}
+                                          onChange={(e) => {
+                                            const value = parseFloat(e.target.value) || 0;
+                                            setCustomAmount(item.id, value, usdAmount);
+                                          }}
+                                          className="w-28 px-2 py-1 text-right text-sm font-bold border border-emerald-300 rounded focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                          autoFocus
+                                        />
+                                        <button
+                                          onClick={async () => {
+                                            const amount = customPaymentAmounts[item.id] ?? usdAmount;
+                                            const saved = await saveCustomAmount(item.id, amount);
+                                            if (saved) {
+                                              setEditingAmountId(null);
+                                            }
+                                          }}
+                                          className="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                                        >
+                                          确定
+                                        </button>
+                                        <button
+                                          onClick={async () => {
+                                            await resetCustomAmount(item.id);
+                                            setEditingAmountId(null);
+                                          }}
+                                          className="px-2 py-1 text-xs text-gray-600 hover:text-gray-800"
+                                        >
+                                          重置
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="text-lg font-bold text-emerald-700">
+                                          ${getPaymentAmount(item).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                        </span>
+                                        {customPaymentAmounts[item.id] !== undefined && (
+                                          <span className="text-xs text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">
+                                            已调整
+                                          </span>
+                                        )}
+                                        <button
+                                          onClick={() => setEditingAmountId(item.id)}
+                                          className="px-2 py-1 text-xs text-emerald-600 border border-emerald-300 rounded hover:bg-emerald-100"
+                                        >
+                                          ✏️ 修改
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                                {customPaymentAmounts[item.id] !== undefined && customPaymentAmounts[item.id] < usdAmount && (
+                                  <p className="text-xs text-amber-600 mt-2">
+                                    ⚠️ 打款金额已调整为 ${customPaymentAmounts[item.id].toFixed(2)}，
+                                    比原金额少 ${(usdAmount - customPaymentAmounts[item.id]).toFixed(2)} USDC
+                                  </p>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -812,14 +1092,17 @@ export default function DisbursementsPage() {
 
                           {/* Processing tab - show payout status & approval link */}
                           {activeTab === 'processing' && (() => {
-                            const payoutInfo = item.aiSuggestions?.find(
+                            // 使用 filter + 取最后一个，获取最新的 payout 记录
+                            const allPayouts = (item.aiSuggestions || []).filter(
                               (s: any) => s.type === 'fluxa_payout_initiated'
                             );
+                            const payoutInfo = allPayouts.length > 0 ? allPayouts[allPayouts.length - 1] : null;
                             const liveStatus = payoutStatuses[item.id];
                             const statusDesc = liveStatus?.statusDescription || '等待 Fluxa 钱包审批';
                             const approvalUrl = liveStatus?.approvalUrl || payoutInfo?.approvalUrl;
                             const isFailed = liveStatus?.status === 'failed' || liveStatus?.status === 'expired';
-                            const usdAmt = item.totalAmountInBaseCurrency || item.totalAmount * 0.14;
+                            // 优先使用实际打款金额，而非原始报销金额
+                            const usdAmt = payoutInfo?.amountUSDC || item.totalAmountInBaseCurrency || 0;
 
                             return (
                               <div className="pt-2 border-t space-y-2">
@@ -906,7 +1189,7 @@ export default function DisbursementsPage() {
                                     已完成付款
                                   </p>
                                   <div className="text-xs text-green-700 space-y-1">
-                                    <p>金额: ${(item.totalAmountInBaseCurrency || item.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</p>
+                                    <p>金额: ${(payoutInfo?.amountUSDC || item.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</p>
                                     {payoutInfo?.initiatedAt && (
                                       <p>发起时间: {formatDate(payoutInfo.initiatedAt)}</p>
                                     )}

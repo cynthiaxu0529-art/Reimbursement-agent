@@ -1141,7 +1141,7 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: '#6b7280' }}>打款金额:</span>
                 <span style={{ fontWeight: 600, color: '#5b21b6' }}>
-                  ≈ ${(reimbursement.totalAmountInBaseCurrency || reimbursement.totalAmount * 0.14).toFixed(2)} USDC
+                  ≈ ${(reimbursement.totalAmountInBaseCurrency || reimbursement.totalAmount).toFixed(2)} USDC
                 </span>
               </div>
             </div>

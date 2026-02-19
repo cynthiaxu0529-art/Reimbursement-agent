@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { checkItemsLimit } from '@/lib/policy/limit-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -141,12 +142,20 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { receiptUrl, vendor, description, amount, currency, category } = body;
+    const { receiptUrl, vendor, description, amount, currency, category, date } = body;
+
+    // 获取用户的租户ID
+    const currentUser = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+    });
 
     // Build update object
     const updateData: Record<string, any> = {
       updatedAt: new Date(),
     };
+
+    // 用于记录限额调整信息
+    let limitAdjustment: { wasAdjusted: boolean; message?: string } = { wasAdjusted: false };
 
     if (receiptUrl !== undefined) {
       updateData.receiptUrl = receiptUrl;
@@ -158,14 +167,52 @@ export async function PATCH(
       updateData.description = description;
     }
     if (amount !== undefined) {
-      updateData.amount = parseFloat(amount) || 0;
-      updateData.amountInBaseCurrency = body.amountInBaseCurrency || updateData.amount;
+      let finalAmount = parseFloat(amount) || 0;
+      let finalAmountInBaseCurrency = body.amountInBaseCurrency || finalAmount;
+
+      // 应用政策限额约束（支持 per_day 和 per_month）
+      const categoryToCheck = category || item.category;
+      const dateToCheck = date || item.date;
+
+      if (currentUser?.tenantId) {
+        const limitResult = await checkItemsLimit(
+          session.user.id,
+          currentUser.tenantId,
+          [{
+            category: categoryToCheck,
+            amount: finalAmount,
+            amountInBaseCurrency: finalAmountInBaseCurrency,
+            date: typeof dateToCheck === 'string' ? dateToCheck : dateToCheck?.toISOString(),
+            location: body.location || item.location,
+          }]
+        );
+
+        if (limitResult.items[0]?.wasAdjusted) {
+          const adjustedUsd = limitResult.items[0].adjustedAmount;
+          // 按比例调整原币金额
+          if (finalAmountInBaseCurrency > 0) {
+            const ratio = adjustedUsd / finalAmountInBaseCurrency;
+            finalAmount = finalAmount * ratio;
+          }
+          finalAmountInBaseCurrency = adjustedUsd;
+          limitAdjustment = {
+            wasAdjusted: true,
+            message: limitResult.messages[0] || '金额已根据政策限额调整',
+          };
+        }
+      }
+
+      updateData.amount = finalAmount;
+      updateData.amountInBaseCurrency = finalAmountInBaseCurrency;
     }
     if (currency !== undefined) {
       updateData.currency = currency;
     }
     if (category !== undefined) {
       updateData.category = category;
+    }
+    if (date !== undefined) {
+      updateData.date = new Date(date);
     }
 
     // Update the item
@@ -199,10 +246,17 @@ export async function PATCH(
         .where(eq(reimbursements.id, id));
     }
 
-    return NextResponse.json({
+    const responseData: any = {
       success: true,
       data: updated,
-    });
+    };
+
+    // 如果金额被调整，返回提示信息
+    if (limitAdjustment.wasAdjusted) {
+      responseData.limitAdjustment = limitAdjustment;
+    }
+
+    return NextResponse.json(responseData);
   } catch (error) {
     console.error('Update item error:', error);
     return NextResponse.json(

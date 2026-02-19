@@ -339,12 +339,11 @@ export default function ReimbursementsPage() {
   const stats = {
     total: reimbursements.length,
     pending: reimbursements.filter(r => r.status === 'pending' || r.status === 'under_review').length,
-    approved: reimbursements.filter(r => r.status === 'approved' || r.status === 'paid').length,
+    // 已批准：包含 approved、processing、paid（都是审批通过的）
+    approved: reimbursements.filter(r => r.status === 'approved' || r.status === 'processing' || r.status === 'paid').length,
     totalAmount: reimbursements.reduce((sum, r) => sum + r.totalAmount, 0),
     totalAmountUSD: reimbursements.reduce((sum, r) => {
-      // 优先使用已转换的美元金额，否则用默认汇率
-      const usdAmount = r.totalAmountInBaseCurrency || r.totalAmount * 0.14;
-      return sum + usdAmount;
+      return sum + (r.totalAmountInBaseCurrency || 0);
     }, 0),
   };
 
@@ -356,7 +355,7 @@ export default function ReimbursementsPage() {
     if (item.totalAmountInBaseCurrency && item.totalAmount > 0) {
       return item.totalAmountInBaseCurrency / item.totalAmount;
     }
-    return 0.14; // 默认汇率
+    return null; // 无汇率数据
   };
 
   return (
@@ -566,7 +565,7 @@ export default function ReimbursementsPage() {
           {!loading && filteredReimbursements.map((item) => {
             const statusInfo = statusConfig[item.status] || statusConfig.draft;
             const exchangeRate = getExchangeRate(item);
-            const usdAmount = item.totalAmountInBaseCurrency || item.totalAmount * exchangeRate;
+            const usdAmount = item.totalAmountInBaseCurrency || 0;
             const isExpanded = expandedId === item.id;
             const isLoading = actionLoading === item.id;
 
@@ -619,12 +618,13 @@ export default function ReimbursementsPage() {
 
                   {/* 原币金额 */}
                   <div style={{ textAlign: 'right', fontSize: '13px', fontWeight: 600, color: '#111827' }}>
-                    ¥{item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+                    {currencySymbols[item.items?.[0]?.currency] || '¥'}
+                    {item.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
                   </div>
 
                   {/* 汇率 */}
                   <div style={{ textAlign: 'right', fontSize: '12px', color: '#6b7280' }}>
-                    {exchangeRate.toFixed(4)}
+                    {exchangeRate !== null ? exchangeRate.toFixed(4) : 'N/A'}
                   </div>
 
                   {/* 美元金额 */}
@@ -804,8 +804,8 @@ export default function ReimbursementsPage() {
                           const itemRate = lineItem.currency === 'USD' ? 1 :
                             (lineItem.amountInBaseCurrency && lineItem.amount > 0
                               ? lineItem.amountInBaseCurrency / lineItem.amount
-                              : 0.14);
-                          const itemUsd = lineItem.amountInBaseCurrency || lineItem.amount * itemRate;
+                              : null);
+                          const itemUsd = lineItem.amountInBaseCurrency || null;
                           const isItemLoading = itemActionLoading === lineItem.id || uploadingItemId === lineItem.id;
                           const canEdit = item.status === 'draft' || item.status === 'rejected';
 
@@ -864,17 +864,17 @@ export default function ReimbursementsPage() {
                                 </span>
                               </div>
                               <div style={{ textAlign: 'right', fontWeight: 500, color: '#111827' }}>
-                                {lineItem.currency === 'USD' ? '$' : '¥'}
+                                {currencySymbols[lineItem.currency] || lineItem.currency}
                                 {lineItem.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
                                 <span style={{ fontSize: '10px', color: '#6b7280', marginLeft: '2px' }}>
                                   {lineItem.currency}
                                 </span>
                               </div>
                               <div style={{ textAlign: 'right', color: '#6b7280', fontSize: '12px' }}>
-                                {itemRate.toFixed(4)}
+                                {itemRate !== null ? itemRate.toFixed(4) : 'N/A'}
                               </div>
                               <div style={{ textAlign: 'right', fontWeight: 600, color: '#0369a1' }}>
-                                ${itemUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                {itemUsd !== null ? `$${itemUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : 'N/A'}
                               </div>
                               {canEdit && (
                                 <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>

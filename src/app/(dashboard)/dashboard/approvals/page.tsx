@@ -125,8 +125,6 @@ interface Policy {
   rules: PolicyRule[];
 }
 
-const USD_TO_CNY = 7.2;
-
 const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): RiskAlert[] => {
   const alerts: RiskAlert[] = [];
   const activePolicies = policies.filter(p => p.isActive);
@@ -151,8 +149,7 @@ const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): Risk
           if (matchingItems.length === 0) continue;
 
           const dailyTotalUSD = matchingItems.reduce((sum, exp) => {
-            const amountUSD = exp.currency === 'USD' ? exp.amount : (exp.amountInBaseCurrency || exp.amount) / USD_TO_CNY;
-            return sum + amountUSD;
+            return sum + (exp.amountInBaseCurrency || 0);
           }, 0);
 
           if (dailyTotalUSD > limitAmountUSD) {
@@ -176,8 +173,7 @@ const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): Risk
         if (matchingItems.length === 0) continue;
 
         const monthlyTotalUSD = matchingItems.reduce((sum, exp) => {
-          const amountUSD = exp.currency === 'USD' ? exp.amount : (exp.amountInBaseCurrency || exp.amount) / USD_TO_CNY;
-          return sum + amountUSD;
+          return sum + (exp.amountInBaseCurrency || 0);
         }, 0);
 
         if (monthlyTotalUSD > limitAmountUSD) {
@@ -287,7 +283,7 @@ export default function ApprovalsPage() {
           console.error('Failed to fetch policies:', e);
         }
 
-        const pendingResponse = await fetch('/api/reimbursements?status=pending&role=approver');
+        const pendingResponse = await fetch('/api/reimbursements?status=pending,under_review&role=approver');
         const pendingResult = await pendingResponse.json();
         if (pendingResult.success) {
           const dataWithRisks = (pendingResult.data || []).map((item: Reimbursement) => ({
@@ -459,7 +455,7 @@ export default function ApprovalsPage() {
 
   const stats = {
     pending: pendingApprovals.length,
-    totalRequested: pendingApprovals.reduce((sum, a) => sum + (a.totalAmountInBaseCurrency || a.totalAmount * 0.14), 0),
+    totalRequested: pendingApprovals.reduce((sum, a) => sum + (a.totalAmountInBaseCurrency || 0), 0),
     processed: approvalHistory.length,
     withRisks: pendingApprovals.filter(a => (a.riskAlerts?.length || 0) > 0).length,
   };
@@ -620,7 +616,7 @@ export default function ApprovalsPage() {
               const isExpanded = expandedId === item.id;
               const riskCount = getRiskCount(item);
               const isSelected = selectedIds.includes(item.id);
-              const usdAmount = item.totalAmountInBaseCurrency || item.totalAmount * 0.14;
+              const usdAmount = item.totalAmountInBaseCurrency || 0;
               const reimbursementNo = generateReimbursementNumber(item.createdAt, item.id);
 
               return (
@@ -800,7 +796,7 @@ export default function ApprovalsPage() {
                               </div>
                               {expandedData.items?.map((lineItem, idx) => {
                                 const catInfo = categoryLabels[lineItem.category] || categoryLabels.other;
-                                const itemUsd = lineItem.amountInBaseCurrency || lineItem.amount * 0.14;
+                                const itemUsd = lineItem.amountInBaseCurrency || 0;
                                 const itemCurrency = lineItem.currency || 'CNY';
                                 const itemSymbol = currencySymbols[itemCurrency] || itemCurrency;
 
@@ -835,7 +831,7 @@ export default function ApprovalsPage() {
                                   ¥{expandedData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
                                 </div>
                                 <div className="text-right text-sm font-bold text-green-600">
-                                  ${(expandedData.totalAmountInBaseCurrency || expandedData.totalAmount * 0.14).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                  ${(expandedData.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                 </div>
                               </div>
                             </div>
