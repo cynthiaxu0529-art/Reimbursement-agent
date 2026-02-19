@@ -17,21 +17,30 @@ export const analyzeExpensesTool: Tool = {
   type: 'function',
   function: {
     name: 'analyze_expenses',
-    description: `分析技术费用数据，支持单月分析或多月对比。
+    description: `分析报销费用数据，支持所有费用类别，支持单月或多月对比。
 
 可以分析的内容：
-- 总费用、供应商分布、类别分布
+- 总费用、供应商分布、费用类别分布
 - 月度环比增长率
-- 多个月份的对比分析
-- 特定类别的深入分析
+- 按状态分布（待审批、已批准、已支付）
+- 用户/员工费用排行
+- 最近报销单详情
 
 支持的费用类别：
-- ai_token: AI Token费用（OpenAI, Anthropic等）
-- cloud_resource: 云资源费用（AWS, Azure, GCP等）
-- software: 软件订阅（GitHub, Notion等）
+- flight: 机票
+- train: 火车票
+- hotel: 酒店住宿
+- meal: 餐饮
+- taxi: 交通
+- office_supplies: 办公用品
+- ai_token: AI服务费用
+- cloud_resource: 云资源费用
+- software: 软件订阅
 - api_service: API服务费用
 - hosting: 托管服务费用
-- domain: 域名费用`,
+- domain: 域名费用
+- client_entertainment: 客户招待
+- other: 其他`,
     parameters: {
       type: 'object',
       properties: {
@@ -56,7 +65,7 @@ export const analyzeExpensesTool: Tool = {
         },
         focusCategory: {
           type: 'string',
-          enum: ['ai_token', 'cloud_resource', 'software', 'api_service', 'hosting', 'domain'],
+          enum: ['flight', 'train', 'hotel', 'meal', 'taxi', 'office_supplies', 'ai_token', 'cloud_resource', 'software', 'api_service', 'hosting', 'domain', 'client_entertainment', 'other'],
           description: '重点关注的类别（可选）。如果用户特别询问某个类别，填写此参数',
         },
         compareWithLastMonth: {

@@ -69,6 +69,7 @@ interface SearchPoliciesParams {
 
 /**
  * Execute analyze_expenses tool
+ * Uses the general expenses API that works with ALL categories
  */
 async function executeAnalyzeExpenses(
   params: AnalyzeExpensesParams,
@@ -77,108 +78,70 @@ async function executeAnalyzeExpenses(
   try {
     const { months, year, scope = 'company', focusCategory } = params;
 
-    // If single month, fetch with comparison
-    if (months.length === 1) {
-      const month = months[0];
-      const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0);
+    // 计算日期范围
+    const endMonth = Math.max(...months);
+    const startMonth = Math.min(...months);
+    const startDate = new Date(year, startMonth - 1, 1);
+    const endDate = new Date(year, endMonth, 0); // 月末
 
-      const queryParams = new URLSearchParams({
-        scope,
-        period: 'custom',
-        startDate: startDate.toISOString().split('T')[0],
-        endDate: endDate.toISOString().split('T')[0],
-        dateFilterType: 'expense_date', // Use accrual basis
-        // 添加内部认证参数
-        internalUserId: context.userId,
-        internalTenantId: context.tenantId,
-      });
+    const queryParams = new URLSearchParams({
+      scope,
+      period: 'custom',
+      startDate: startDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0],
+      status: 'all', // 查询所有非草稿状态
+      internalUserId: context.userId,
+      internalTenantId: context.tenantId,
+    });
 
-      if (focusCategory) {
-        queryParams.set('category', focusCategory);
-      }
+    const baseUrl = context.baseUrl || '';
+    // 使用新的通用费用分析 API
+    const fullUrl = `${baseUrl}/api/analytics/expenses?${queryParams}`;
 
-      const baseUrl = context.baseUrl || '';
-      const fullUrl = `${baseUrl}/api/analytics/tech-expenses?${queryParams}`;
+    console.log('[Tool Executor] Fetching expenses:', {
+      baseUrl,
+      fullUrl,
+      months,
+      year,
+      scope,
+    });
 
-      console.log('[Tool Executor] Fetching tech expenses:', {
-        baseUrl,
-        fullUrl,
-        params: Object.fromEntries(queryParams.entries()),
-      });
+    const response = await fetch(fullUrl);
 
-      const response = await fetch(fullUrl);
-
-      if (!response.ok) {
-        throw new Error(`API request failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      return {
-        success: true,
-        data: {
-          period: `${year}年${month}月`,
-          ...data.data,
-        },
-      };
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Tool Executor] API request failed:', response.status, errorText);
+      throw new Error(`API request failed: ${response.status}`);
     }
 
-    // Multi-month comparison
-    const results = [];
-    for (const month of months) {
-      const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0);
+    const data = await response.json();
 
-      const queryParams = new URLSearchParams({
-        scope,
-        period: 'custom',
-        startDate: startDate.toISOString().split('T')[0],
-        endDate: endDate.toISOString().split('T')[0],
-        dateFilterType: 'expense_date',
-        // 添加内部认证参数
-        internalUserId: context.userId,
-        internalTenantId: context.tenantId,
-      });
+    if (!data.success) {
+      throw new Error(data.error || '获取数据失败');
+    }
 
-      if (focusCategory) {
-        queryParams.set('category', focusCategory);
-      }
-
-      const baseUrl = context.baseUrl || '';
-      const fullUrl = `${baseUrl}/api/analytics/tech-expenses?${queryParams}`;
-
-      console.log('[Tool Executor] Fetching tech expenses:', {
-        baseUrl,
-        fullUrl,
-        params: Object.fromEntries(queryParams.entries()),
-      });
-
-      const response = await fetch(fullUrl);
-
-      if (!response.ok) {
-        throw new Error(`API request failed for ${month}月: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      results.push({
-        month: `${year}年${month}月`,
-        monthNumber: month,
-        year,
-        ...data.data,
-      });
+    // 如果指定了特定类别，过滤结果
+    let categoryData = data.data.byCategory;
+    if (focusCategory) {
+      categoryData = categoryData.filter((c: any) => c.category === focusCategory);
     }
 
     return {
       success: true,
       data: {
-        type: 'multi-month-comparison',
-        months: results,
+        period: `${year}年${startMonth}月${startMonth !== endMonth ? ` - ${endMonth}月` : ''}`,
+        summary: data.data.summary,
+        comparison: data.data.comparison,
+        byCategory: categoryData,
+        byStatus: data.data.byStatus,
+        monthlyTrend: data.data.monthlyTrend,
+        userRanking: data.data.userRanking,
+        vendorRanking: data.data.vendorRanking,
+        recentReimbursements: data.data.recentReimbursements,
       },
     };
   } catch (error: any) {
-    console.error('Error executing analyze_expenses:', error);
+    console.error('[Tool Executor] Error executing analyze_expenses:', error);
     return {
       success: false,
       error: error.message,
