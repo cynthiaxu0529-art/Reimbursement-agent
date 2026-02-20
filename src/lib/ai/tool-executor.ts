@@ -2,7 +2,10 @@
  * Tool Executor
  *
  * Executes tools called by the LLM and returns results.
+ * Supports both static tools and dynamic skill-based tools.
  */
+
+import { isSkillTool, getSkillIdFromToolName, executeSkill } from './skill-tools';
 
 /**
  * Tool execution context
@@ -367,7 +370,46 @@ async function executeSearchPolicies(
 }
 
 /**
+ * Execute a dynamic skill tool
+ */
+async function executeSkillTool(
+  toolName: string,
+  params: any,
+  context: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  try {
+    const skillId = getSkillIdFromToolName(toolName);
+    if (!skillId) {
+      return {
+        success: false,
+        error: `Invalid skill tool name: ${toolName}`,
+      };
+    }
+
+    console.log(`[Tool Executor] Executing skill: ${skillId}`, params);
+
+    const result = await executeSkill(skillId, params, context);
+
+    return {
+      success: result.success ?? true,
+      data: result.data,
+      error: result.error,
+    };
+  } catch (error: any) {
+    console.error(`[Tool Executor] Error executing skill ${toolName}:`, error);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+}
+
+/**
  * Main tool executor function
+ *
+ * Supports:
+ * - Static tools (analyze_expenses, check_budget_alert, etc.)
+ * - Dynamic skill tools (skill_budget_alert, skill_anomaly_detector, etc.)
  */
 export async function executeTool(
   toolName: string,
@@ -376,6 +418,12 @@ export async function executeTool(
 ): Promise<ToolExecutionResult> {
   console.log(`[Tool Executor] Executing tool: ${toolName}`, params);
 
+  // Check if this is a skill-based tool
+  if (isSkillTool(toolName)) {
+    return executeSkillTool(toolName, params, context);
+  }
+
+  // Handle static tools
   switch (toolName) {
     case 'analyze_expenses':
       return executeAnalyzeExpenses(params, context);
@@ -393,10 +441,8 @@ export async function executeTool(
       return executeSearchPolicies(params, context);
 
     default:
-      return {
-        success: false,
-        error: `Unknown tool: ${toolName}`,
-      };
+      // Try to execute as a skill if tool name not found
+      return executeSkillTool(`skill_${toolName}`, params, context);
   }
 }
 
