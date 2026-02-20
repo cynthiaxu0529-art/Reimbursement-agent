@@ -113,17 +113,38 @@ export function skillToTool(skill: SkillDefinition): Tool {
 
 /**
  * Convert multiple Skills to LLM Tools
+ * Accepts both SkillDefinition (string triggers) and Skill objects (object triggers)
  */
-export function skillsToTools(skills: SkillDefinition[]): Tool[] {
+export function skillsToTools(skills: any[]): Tool[] {
   // Filter to skills that support chat command trigger
   const chatSkills = skills.filter(skill => {
     if (!skill.triggers || skill.triggers.length === 0) return true;
-    return skill.triggers.some(
-      t => t === 'on_chat_command' || t.includes('chat')
-    );
+    return skill.triggers.some((t: any) => {
+      // Handle both formats: string trigger or { type: string } trigger
+      const triggerType = typeof t === 'string' ? t : t.type;
+      return triggerType === 'on_chat_command' || (typeof triggerType === 'string' && triggerType.includes('chat'));
+    });
   });
 
   return chatSkills.map(skillToTool);
+}
+
+/**
+ * Fetch with timeout to prevent hanging
+ */
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = 15000): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /**
@@ -136,7 +157,7 @@ export async function executeSkill(
 ): Promise<any> {
   const baseUrl = context.baseUrl || '';
 
-  const response = await fetch(`${baseUrl}/api/skills/execute`, {
+  const response = await fetchWithTimeout(`${baseUrl}/api/skills/execute`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -152,7 +173,9 @@ export async function executeSkill(
   });
 
   if (!response.ok) {
-    throw new Error(`Skill execution failed: ${response.status}`);
+    const errorText = await response.text();
+    console.error(`[Skill Executor] Failed: ${response.status}`, errorText);
+    throw new Error(`Skill execution failed: ${response.status} - ${errorText}`);
   }
 
   return response.json();

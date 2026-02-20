@@ -25,7 +25,8 @@ import {
 } from '@/lib/ai/openrouter-client';
 import { allTools } from '@/lib/ai/tools';
 import { executeTool } from '@/lib/ai/tool-executor';
-import { generateDynamicTools } from '@/lib/ai/skill-tools';
+import { getBuiltInSkills } from '@/lib/skills/skill-manager';
+import { skillsToTools } from '@/lib/ai/skill-tools';
 
 export const maxDuration = 60; // Allow up to 60 seconds for LLM processing
 export const dynamic = 'force-dynamic'; // Force dynamic rendering
@@ -75,28 +76,38 @@ export async function POST(request: NextRequest) {
       { role: 'user', content: message },
     ];
 
-    // 5. Generate merged tools (static + dynamic skill-based)
+    // 5. Build base URL for tool execution
     const baseUrl = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : process.env.NEXTAUTH_URL || 'http://localhost:3000';
 
+    // 6. Generate merged tools (static + dynamic skill-based)
+    // Use direct import instead of HTTP call to avoid self-referencing deadlock
     let availableTools: Tool[] = [...allTools];
 
-    // Try to get dynamic skill-based tools (non-blocking)
     try {
-      const skillTools = await generateDynamicTools(baseUrl);
+      const builtInSkills = getBuiltInSkills(user.tenantId);
+      // Filter skills that support chat command trigger
+      const chatSkills = builtInSkills.filter(skill =>
+        skill.isActive && skill.triggers.some(t => t.type === 'on_chat_command')
+      );
+      const skillTools = skillsToTools(chatSkills);
       if (skillTools.length > 0) {
-        console.log(`[AI Chat] Loaded ${skillTools.length} dynamic skill tools`);
-        availableTools = [...allTools, ...skillTools];
+        // Deduplicate: skip skill tools whose functionality is already covered by static tools
+        const staticToolNames = new Set(allTools.map(t => t.function.name));
+        const uniqueSkillTools = skillTools.filter(t => !staticToolNames.has(t.function.name));
+        if (uniqueSkillTools.length > 0) {
+          availableTools = [...allTools, ...uniqueSkillTools];
+          console.log(`[AI Chat] Added ${uniqueSkillTools.length} dynamic skill tools`);
+        }
       }
     } catch (skillError) {
       console.warn('[AI Chat] Failed to load dynamic skills:', skillError);
-      // Continue with static tools only
     }
 
     console.log('[AI Chat] Available tools:', availableTools.map(t => t.function.name));
 
-    // 6. First LLM call - understand intent and decide tool usage
+    // 7. First LLM call - understand intent and decide tool usage
     console.log('[AI Chat] Calling LLM...');
     let response = await createChatCompletion(messages, {
       tools: availableTools,
@@ -105,10 +116,12 @@ export async function POST(request: NextRequest) {
       max_tokens: 4096,
     });
 
-    // 7. Handle tool calls if LLM wants to use tools
+    // 8. Handle tool calls if LLM wants to use tools
     if (wantsToolCall(response)) {
       console.log('[AI Chat] LLM wants to call tools');
       const toolCalls = extractToolCalls(response);
+      // Preserve any text content from the first LLM response
+      const firstResponseText = extractTextContent(response) || null;
 
       if (toolCalls && toolCalls.length > 0) {
         // Execute all tool calls
@@ -153,13 +166,16 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        // 8. Second LLM call - analyze tool results and generate response
+        // 9. Second LLM call - analyze tool results and generate response
         console.log('[AI Chat] Calling LLM with tool results...', {
           toolResultsCount: toolResults.length,
+          firstResponseText: firstResponseText?.substring(0, 50),
           toolResultsSummary: toolResults.map(r => ({
             name: r.name,
             hasContent: !!r.content,
             contentLength: r.content?.length,
+            // Log first 200 chars of tool result for debugging
+            preview: r.content?.substring(0, 200),
           })),
         });
 
@@ -169,7 +185,7 @@ export async function POST(request: NextRequest) {
           { role: 'user', content: message },
           {
             role: 'assistant',
-            content: null,
+            content: firstResponseText, // Preserve text from first response
             tool_calls: toolCalls,
           },
           ...toolResults,

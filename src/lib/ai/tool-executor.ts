@@ -8,6 +8,24 @@
 import { isSkillTool, getSkillIdFromToolName, executeSkill } from './skill-tools';
 
 /**
+ * Fetch with timeout to prevent hanging
+ */
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = 15000): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
  * Tool execution context
  */
 export interface ToolExecutionContext {
@@ -109,7 +127,7 @@ async function executeAnalyzeExpenses(
       scope,
     });
 
-    const response = await fetch(fullUrl);
+    const response = await fetchWithTimeout(fullUrl);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -163,7 +181,7 @@ async function executeCheckBudgetAlert(
     // For now, call the built-in skill
     // In the future, this could call a dedicated budget API
     const baseUrl = context.baseUrl || '';
-    const response = await fetch(`${baseUrl}/api/skills/execute`, {
+    const response = await fetchWithTimeout(`${baseUrl}/api/skills/execute`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -206,7 +224,7 @@ async function executeDetectAnomalies(
 ): Promise<ToolExecutionResult> {
   try {
     const baseUrl = context.baseUrl || '';
-    const response = await fetch(`${baseUrl}/api/skills/execute`, {
+    const response = await fetchWithTimeout(`${baseUrl}/api/skills/execute`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -249,7 +267,7 @@ async function executeAnalyzeTimeliness(
 ): Promise<ToolExecutionResult> {
   try {
     const baseUrl = context.baseUrl || '';
-    const response = await fetch(`${baseUrl}/api/skills/execute`, {
+    const response = await fetchWithTimeout(`${baseUrl}/api/skills/execute`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
