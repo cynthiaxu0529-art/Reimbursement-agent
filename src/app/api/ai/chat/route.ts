@@ -3,6 +3,10 @@
  *
  * Handles chat requests with the LLM-powered AI assistant.
  * Supports function calling for data retrieval and analysis.
+ *
+ * Features:
+ * - Static tools for common analysis tasks
+ * - Dynamic skill-based tools discovered at runtime
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,9 +21,11 @@ import {
   wantsToolCall,
   ChatMessage,
   SYSTEM_PROMPT,
+  Tool,
 } from '@/lib/ai/openrouter-client';
 import { allTools } from '@/lib/ai/tools';
 import { executeTool } from '@/lib/ai/tool-executor';
+import { generateDynamicTools } from '@/lib/ai/skill-tools';
 
 export const maxDuration = 60; // Allow up to 60 seconds for LLM processing
 export const dynamic = 'force-dynamic'; // Force dynamic rendering
@@ -69,16 +75,37 @@ export async function POST(request: NextRequest) {
       { role: 'user', content: message },
     ];
 
-    // 5. First LLM call - understand intent and decide tool usage
+    // 5. Generate merged tools (static + dynamic skill-based)
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : process.env.NEXTAUTH_URL || 'http://localhost:3000';
+
+    let availableTools: Tool[] = [...allTools];
+
+    // Try to get dynamic skill-based tools (non-blocking)
+    try {
+      const skillTools = await generateDynamicTools(baseUrl);
+      if (skillTools.length > 0) {
+        console.log(`[AI Chat] Loaded ${skillTools.length} dynamic skill tools`);
+        availableTools = [...allTools, ...skillTools];
+      }
+    } catch (skillError) {
+      console.warn('[AI Chat] Failed to load dynamic skills:', skillError);
+      // Continue with static tools only
+    }
+
+    console.log('[AI Chat] Available tools:', availableTools.map(t => t.function.name));
+
+    // 6. First LLM call - understand intent and decide tool usage
     console.log('[AI Chat] Calling LLM...');
     let response = await createChatCompletion(messages, {
-      tools: allTools,
+      tools: availableTools,
       tool_choice: 'auto',
       temperature: 0.7,
       max_tokens: 4096,
     });
 
-    // 6. Handle tool calls if LLM wants to use tools
+    // 7. Handle tool calls if LLM wants to use tools
     if (wantsToolCall(response)) {
       console.log('[AI Chat] LLM wants to call tools');
       const toolCalls = extractToolCalls(response);
@@ -106,12 +133,7 @@ export async function POST(request: NextRequest) {
             continue;
           }
 
-          // Execute the tool
-          // 构建完整的 base URL（服务器端必须使用完整 URL）
-          const baseUrl = process.env.VERCEL_URL
-            ? `https://${process.env.VERCEL_URL}`
-            : process.env.NEXTAUTH_URL || 'http://localhost:3000';
-
+          // Execute the tool (baseUrl already defined above)
           const result = await executeTool(toolCall.function.name, params, {
             userId: session.user.id,
             tenantId: user.tenantId,
@@ -131,7 +153,7 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        // 7. Second LLM call - analyze tool results and generate response
+        // 8. Second LLM call - analyze tool results and generate response
         console.log('[AI Chat] Calling LLM with tool results...', {
           toolResultsCount: toolResults.length,
           toolResultsSummary: toolResults.map(r => ({
@@ -179,7 +201,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 8. Extract final response text
+    // 9. Extract final response text
     const responseText = extractTextContent(response);
 
     console.log('[AI Chat] Final response:', {
@@ -189,7 +211,7 @@ export async function POST(request: NextRequest) {
       finishReason: response.choices?.[0]?.finish_reason,
     });
 
-    // 9. Handle empty response - provide a fallback
+    // 10. Handle empty response - provide a fallback
     if (!responseText || responseText.trim() === '') {
       console.warn('[AI Chat] Empty response from LLM, providing fallback');
       return NextResponse.json({
@@ -201,7 +223,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 10. Return response
+    // 11. Return response
     return NextResponse.json({
       success: true,
       message: responseText,
