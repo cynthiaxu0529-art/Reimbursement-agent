@@ -104,6 +104,21 @@ async function executeAnalyzeExpenses(
   try {
     const { months, year, scope = 'company', focusCategory } = params;
 
+    // 参数验证
+    if (!months || !Array.isArray(months) || months.length === 0) {
+      return {
+        success: false,
+        error: '请指定要分析的月份',
+      };
+    }
+
+    if (!year || year < 2000 || year > 2100) {
+      return {
+        success: false,
+        error: '请指定有效的年份',
+      };
+    }
+
     console.log('[Tool Executor] Analyzing expenses:', { months, year, scope, focusCategory, userId: context.userId });
 
     // 获取用户信息
