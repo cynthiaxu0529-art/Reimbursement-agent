@@ -13,24 +13,6 @@ import { getUserRoles, isAdmin, canApprove, canProcessPayment } from '@/lib/auth
 import { getVisibleUserIds } from '@/lib/department/department-service';
 
 /**
- * Fetch with timeout to prevent hanging (used for external calls)
- */
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = 15000): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-    return response;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-/**
  * Tool execution context
  */
 export interface ToolExecutionContext {
@@ -379,44 +361,159 @@ async function executeAnalyzeExpenses(
   }
 }
 
+// 技术费用类别（用于预算预警和异常检测）
+const TECH_CATEGORIES = ['ai_token', 'cloud_resource', 'api_service', 'software', 'hosting', 'domain'];
+
+/**
+ * 获取权限过滤条件：返回可见用户ID列表
+ */
+async function getPermissionFilteredUserIds(
+  userId: string,
+  tenantId: string,
+  scope: string
+): Promise<string[] | null> {
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+  });
+
+  if (!user || user.tenantId !== tenantId) {
+    throw new Error('用户认证失败');
+  }
+
+  const userRoles = getUserRoles(user);
+
+  if (scope === 'personal') {
+    return [userId];
+  }
+
+  if (scope === 'team' || scope === 'company') {
+    if (!isAdmin(userRoles) && !canApprove(userRoles) && !canProcessPayment(userRoles)) {
+      return [userId];
+    }
+    const visibleUserIds = await getVisibleUserIds(userId, tenantId, userRoles);
+    if (visibleUserIds !== null && visibleUserIds.length === 0) {
+      return [userId];
+    }
+    return visibleUserIds;
+  }
+
+  return null;
+}
+
+/**
+ * 查询技术费用明细（共用逻辑）
+ */
+async function queryTechExpenses(
+  tenantId: string,
+  visibleUserIds: string[] | null,
+  startDate: Date,
+  endDate: Date
+) {
+  const baseConditions: any[] = [
+    eq(reimbursements.tenantId, tenantId),
+    inArray(reimbursements.status, ['approved', 'paid', 'pending', 'under_review']),
+  ];
+
+  if (visibleUserIds !== null && visibleUserIds.length > 0) {
+    baseConditions.push(inArray(reimbursements.userId, visibleUserIds));
+  }
+
+  return db
+    .select({
+      id: reimbursementItems.id,
+      category: reimbursementItems.category,
+      amount: reimbursementItems.amountInBaseCurrency,
+      vendor: reimbursementItems.vendor,
+      date: reimbursementItems.date,
+    })
+    .from(reimbursementItems)
+    .innerJoin(reimbursements, eq(reimbursementItems.reimbursementId, reimbursements.id))
+    .where(and(
+      ...baseConditions,
+      gte(reimbursementItems.date, startDate),
+      lte(reimbursementItems.date, endDate),
+      inArray(reimbursementItems.category, TECH_CATEGORIES),
+    ));
+}
+
 /**
  * Execute check_budget_alert tool
+ * Direct database query + skill execution (no HTTP self-calls)
  */
 async function executeCheckBudgetAlert(
   params: CheckBudgetAlertParams,
   context: ToolExecutionContext
 ): Promise<ToolExecutionResult> {
   try {
-    // For now, call the built-in skill
-    // In the future, this could call a dedicated budget API
-    const baseUrl = context.baseUrl || '';
-    const response = await fetchWithTimeout(`${baseUrl}/api/skills/execute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        skillId: 'builtin_budget_alert',
-        context: {
-          userId: context.userId,
-          tenantId: context.tenantId,
-          params: params,
-        },
-      }),
-    });
+    const { scope = 'company' } = params;
 
-    if (!response.ok) {
-      throw new Error(`Skill execution failed: ${response.status}`);
+    console.log('[Tool Executor] Checking budget alert:', { scope, userId: context.userId });
+
+    const visibleUserIds = await getPermissionFilteredUserIds(context.userId, context.tenantId, scope);
+
+    // 当月日期范围
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    // 查询当月技术费用
+    const techExpenses = await queryTechExpenses(context.tenantId, visibleUserIds, startOfMonth, endOfMonth);
+
+    // 按类别汇总
+    const monthlyExpenses: Record<string, number> = {};
+    for (const expense of techExpenses) {
+      monthlyExpenses[expense.category] = (monthlyExpenses[expense.category] || 0) + expense.amount;
     }
 
-    const result = await response.json();
+    // 获取政策中的预算限额
+    const policyList = await db.query.policies.findMany({
+      where: eq(policies.tenantId, context.tenantId),
+    });
+
+    const budgetLimits: Record<string, number> = {
+      ai_token: 5000,
+      cloud_resource: 10000,
+      software: 3000,
+      total_tech: 20000,
+    };
+
+    for (const policy of policyList) {
+      if (policy.rules && Array.isArray(policy.rules)) {
+        for (const rule of policy.rules as any[]) {
+          if (rule.limit?.type === 'per_month' && rule.categories) {
+            for (const cat of rule.categories) {
+              if (TECH_CATEGORIES.includes(cat)) {
+                budgetLimits[cat] = rule.limit.amount;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 执行预算预警 Skill
+    const { createBudgetAlertSkill, createSkillManager } = await import('@/lib/skills/skill-manager');
+    const { SkillTrigger } = await import('@/types');
+
+    const skill = createBudgetAlertSkill(context.tenantId);
+    const manager = createSkillManager(context.tenantId, [skill]);
+    const skillContext = {
+      trigger: SkillTrigger.ON_CHAT_COMMAND,
+      user: { id: context.userId, name: '', email: '', role: '' },
+      tenant: { id: context.tenantId, name: '', settings: {} },
+      params: { ...params, monthlyExpenses, budgetLimits },
+    };
+
+    const results = await manager.executeTrigger(SkillTrigger.ON_CHAT_COMMAND, skillContext as any);
+    const result = results.get('builtin_budget_alert');
 
     return {
-      success: true,
-      data: result.data,
+      success: result?.success ?? false,
+      data: result?.data,
+      error: result?.error ? String(result.error) : undefined,
     };
   } catch (error: any) {
-    console.error('Error executing check_budget_alert:', error);
+    console.error('[Tool Executor] Error executing check_budget_alert:', error);
     return {
       success: false,
       error: error.message,
@@ -426,40 +523,93 @@ async function executeCheckBudgetAlert(
 
 /**
  * Execute detect_anomalies tool
+ * Direct database query + skill execution (no HTTP self-calls)
  */
 async function executeDetectAnomalies(
   params: DetectAnomaliesParams,
   context: ToolExecutionContext
 ): Promise<ToolExecutionResult> {
   try {
-    const baseUrl = context.baseUrl || '';
-    const response = await fetchWithTimeout(`${baseUrl}/api/skills/execute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        skillId: 'builtin_anomaly_detector',
-        context: {
-          userId: context.userId,
-          tenantId: context.tenantId,
-          params: params,
-        },
-      }),
-    });
+    const { scope = 'company' } = params;
 
-    if (!response.ok) {
-      throw new Error(`Skill execution failed: ${response.status}`);
+    console.log('[Tool Executor] Detecting anomalies:', { scope, userId: context.userId });
+
+    const visibleUserIds = await getPermissionFilteredUserIds(context.userId, context.tenantId, scope);
+
+    // 当月日期范围
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    // 上月日期范围
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+
+    // 查询当月技术费用
+    const currentMonthTechExpenses = await queryTechExpenses(context.tenantId, visibleUserIds, startOfMonth, endOfMonth);
+
+    // 查询上月技术费用总额
+    const baseConditions: any[] = [
+      eq(reimbursements.tenantId, context.tenantId),
+      inArray(reimbursements.status, ['approved', 'paid']),
+    ];
+    if (visibleUserIds !== null && visibleUserIds.length > 0) {
+      baseConditions.push(inArray(reimbursements.userId, visibleUserIds));
     }
 
-    const result = await response.json();
+    const lastMonthResult = await db
+      .select({
+        total: sql<number>`COALESCE(SUM(${reimbursementItems.amountInBaseCurrency}), 0)`,
+      })
+      .from(reimbursementItems)
+      .innerJoin(reimbursements, eq(reimbursementItems.reimbursementId, reimbursements.id))
+      .where(and(
+        ...baseConditions,
+        gte(reimbursementItems.date, startOfLastMonth),
+        lte(reimbursementItems.date, endOfLastMonth),
+        inArray(reimbursementItems.category, TECH_CATEGORIES),
+      ));
+
+    const lastMonthTotal = Number(lastMonthResult[0]?.total) || 0;
+
+    // 计算历史平均值
+    const historicalAvg: Record<string, { avgAmount: number; stdDev: number }> = {};
+    for (const cat of TECH_CATEGORIES) {
+      const monthlyAvg = lastMonthTotal / TECH_CATEGORIES.length;
+      historicalAvg[cat] = {
+        avgAmount: monthlyAvg / 10,
+        stdDev: monthlyAvg / 20,
+      };
+    }
+
+    // 执行异常检测 Skill
+    const { createAnomalyDetectorSkill, createSkillManager } = await import('@/lib/skills/skill-manager');
+    const { SkillTrigger } = await import('@/types');
+
+    const skill = createAnomalyDetectorSkill(context.tenantId);
+    const manager = createSkillManager(context.tenantId, [skill]);
+    const skillContext = {
+      trigger: SkillTrigger.ON_CHAT_COMMAND,
+      user: { id: context.userId, name: '', email: '', role: '' },
+      tenant: { id: context.tenantId, name: '', settings: {} },
+      params: {
+        ...params,
+        currentExpenses: currentMonthTechExpenses,
+        historicalAvg,
+        lastMonthTotal,
+      },
+    };
+
+    const results = await manager.executeTrigger(SkillTrigger.ON_CHAT_COMMAND, skillContext as any);
+    const result = results.get('builtin_anomaly_detector');
 
     return {
-      success: true,
-      data: result.data,
+      success: result?.success ?? false,
+      data: result?.data,
+      error: result?.error ? String(result.error) : undefined,
     };
   } catch (error: any) {
-    console.error('Error executing detect_anomalies:', error);
+    console.error('[Tool Executor] Error executing detect_anomalies:', error);
     return {
       success: false,
       error: error.message,
@@ -469,40 +619,98 @@ async function executeDetectAnomalies(
 
 /**
  * Execute analyze_timeliness tool
+ * Direct database query + skill execution (no HTTP self-calls)
  */
 async function executeAnalyzeTimeliness(
   params: AnalyzeTimelinessParams,
   context: ToolExecutionContext
 ): Promise<ToolExecutionResult> {
   try {
-    const baseUrl = context.baseUrl || '';
-    const response = await fetchWithTimeout(`${baseUrl}/api/skills/execute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        skillId: 'builtin_timeliness_analysis',
-        context: {
-          userId: context.userId,
-          tenantId: context.tenantId,
-          params: params,
-        },
-      }),
-    });
+    const { scope = 'company' } = params;
 
-    if (!response.ok) {
-      throw new Error(`Skill execution failed: ${response.status}`);
+    console.log('[Tool Executor] Analyzing timeliness:', { scope, userId: context.userId });
+
+    const visibleUserIds = await getPermissionFilteredUserIds(context.userId, context.tenantId, scope);
+
+    // 当月日期范围
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    // 构建查询条件
+    const baseConditions: any[] = [
+      eq(reimbursements.tenantId, context.tenantId),
+      inArray(reimbursements.status, ['approved', 'paid', 'pending', 'under_review']),
+    ];
+    if (visibleUserIds !== null && visibleUserIds.length > 0) {
+      baseConditions.push(inArray(reimbursements.userId, visibleUserIds));
     }
 
-    const result = await response.json();
+    // 查询当月所有费用
+    const allExpenses = await db
+      .select({
+        id: reimbursementItems.id,
+        category: reimbursementItems.category,
+        amount: reimbursementItems.amountInBaseCurrency,
+        vendor: reimbursementItems.vendor,
+        date: reimbursementItems.date,
+        reimbursementId: reimbursementItems.reimbursementId,
+      })
+      .from(reimbursementItems)
+      .innerJoin(reimbursements, eq(reimbursementItems.reimbursementId, reimbursements.id))
+      .where(and(
+        ...baseConditions,
+        gte(reimbursementItems.date, startOfMonth),
+        lte(reimbursementItems.date, endOfMonth),
+      ));
+
+    // 获取报销单的提交日期
+    const reimbursementIds = [...new Set(allExpenses.map(e => e.reimbursementId))];
+    const reimbursementSubmitDates = new Map<string, Date>();
+    if (reimbursementIds.length > 0) {
+      const reimbursementData = await db
+        .select({
+          id: reimbursements.id,
+          submittedAt: reimbursements.submittedAt,
+          createdAt: reimbursements.createdAt,
+        })
+        .from(reimbursements)
+        .where(inArray(reimbursements.id, reimbursementIds));
+      for (const r of reimbursementData) {
+        reimbursementSubmitDates.set(r.id, r.submittedAt || r.createdAt);
+      }
+    }
+
+    // 准备时效性分析数据
+    const timelinessExpenses = allExpenses.map(e => ({
+      ...e,
+      submittedAt: reimbursementSubmitDates.get(e.reimbursementId) || now,
+    }));
+
+    // 执行时效性分析 Skill
+    const { createTimelinessAnalysisSkill, createSkillManager } = await import('@/lib/skills/skill-manager');
+    const { SkillTrigger } = await import('@/types');
+
+    const skill = createTimelinessAnalysisSkill(context.tenantId);
+    const manager = createSkillManager(context.tenantId, [skill]);
+    const skillContext = {
+      trigger: SkillTrigger.ON_CHAT_COMMAND,
+      user: { id: context.userId, name: '', email: '', role: '' },
+      tenant: { id: context.tenantId, name: '', settings: {} },
+      params: { ...params, expenses: timelinessExpenses },
+      reimbursement: { submittedAt: now },
+    };
+
+    const results = await manager.executeTrigger(SkillTrigger.ON_CHAT_COMMAND, skillContext as any);
+    const result = results.get('builtin_timeliness_analysis');
 
     return {
-      success: true,
-      data: result.data,
+      success: result?.success ?? false,
+      data: result?.data,
+      error: result?.error ? String(result.error) : undefined,
     };
   } catch (error: any) {
-    console.error('Error executing analyze_timeliness:', error);
+    console.error('[Tool Executor] Error executing analyze_timeliness:', error);
     return {
       success: false,
       error: error.message,
