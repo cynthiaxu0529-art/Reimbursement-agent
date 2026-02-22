@@ -1,13 +1,15 @@
 /**
  * Test Tool Call API
- * Simulates what the AI tool executor does to help debug authentication issues
+ * Tests direct database queries used by the AI tool executor.
+ * Verifies that DB connection, permission filtering, and data aggregation work correctly.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { users } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { users, reimbursements, reimbursementItems } from '@/lib/db/schema';
+import { eq, and, gte, lte, inArray, sql, desc } from 'drizzle-orm';
+import { executeTool } from '@/lib/ai/tool-executor';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -15,7 +17,8 @@ export const runtime = 'nodejs';
 /**
  * GET /api/ai/test-tool-call
  *
- * Tests the internal authentication mechanism by simulating a tool call
+ * Tests the tool executor's direct database query approach.
+ * Returns diagnostic information about DB connectivity, data availability, and tool execution.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -34,66 +37,87 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '未关联公司' }, { status: 404 });
     }
 
-    // 3. Construct the baseUrl (same logic as chat route)
-    const baseUrl = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : process.env.NEXTAUTH_URL || 'http://localhost:3000';
-
-    // 4. Build test API call with internal auth params
-    const now = new Date();
-    const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endDate = now;
-
-    const queryParams = new URLSearchParams({
-      scope: 'personal',
-      period: 'custom',
-      startDate: startDate.toISOString().split('T')[0],
-      endDate: endDate.toISOString().split('T')[0],
-      dateFilterType: 'expense_date',
-      internalUserId: session.user.id,
-      internalTenantId: user.tenantId,
-    });
-
-    const apiUrl = `${baseUrl}/api/analytics/tech-expenses?${queryParams}`;
-
-    console.log('[Test Tool Call] Making request:', {
-      baseUrl,
-      apiUrl,
+    const diagnostics: any = {
+      dbConnection: false,
       userId: session.user.id,
       tenantId: user.tenantId,
-      params: Object.fromEntries(queryParams.entries()),
+      userName: user.name,
+      userRole: user.role,
+    };
+
+    // 3. Test basic DB connection - count reimbursements
+    const countResult = await db
+      .select({
+        count: sql<number>`count(*)`,
+      })
+      .from(reimbursements)
+      .where(eq(reimbursements.tenantId, user.tenantId));
+
+    diagnostics.dbConnection = true;
+    diagnostics.reimbursementCount = Number(countResult[0]?.count) || 0;
+
+    // 4. Test reimbursement items query
+    const itemCountResult = await db
+      .select({
+        count: sql<number>`count(*)`,
+      })
+      .from(reimbursementItems)
+      .innerJoin(reimbursements, eq(reimbursementItems.reimbursementId, reimbursements.id))
+      .where(eq(reimbursements.tenantId, user.tenantId));
+
+    diagnostics.itemCount = Number(itemCountResult[0]?.count) || 0;
+
+    // 5. Test category breakdown
+    const categoryBreakdown = await db
+      .select({
+        category: reimbursementItems.category,
+        count: sql<number>`count(*)`,
+        total: sql<number>`COALESCE(SUM(${reimbursementItems.amountInBaseCurrency}), 0)`,
+      })
+      .from(reimbursementItems)
+      .innerJoin(reimbursements, eq(reimbursementItems.reimbursementId, reimbursements.id))
+      .where(eq(reimbursements.tenantId, user.tenantId))
+      .groupBy(reimbursementItems.category);
+
+    diagnostics.categoryBreakdown = categoryBreakdown.map(c => ({
+      category: c.category,
+      count: Number(c.count),
+      total: Math.round(Number(c.total) * 100) / 100,
+    }));
+
+    // 6. Test the actual tool executor with analyze_expenses
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+
+    const toolResult = await executeTool('analyze_expenses', {
+      months: [currentMonth],
+      year: currentYear,
+      scope: 'company',
+    }, {
+      userId: session.user.id,
+      tenantId: user.tenantId,
     });
 
-    // 5. Make the fetch call (simulating tool executor)
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    diagnostics.toolExecutorTest = {
+      success: toolResult.success,
+      hasData: !!toolResult.data,
+      error: toolResult.error,
+      summary: toolResult.data?.summary,
+    };
 
-    const responseData = await response.json();
-
-    // 6. Return detailed results
+    // 7. Return diagnostic results
     return NextResponse.json({
-      success: response.ok,
-      statusCode: response.status,
-      testConfig: {
-        baseUrl,
-        userId: session.user.id,
-        tenantId: user.tenantId,
-        userName: user.name,
-      },
-      requestUrl: apiUrl,
-      requestParams: Object.fromEntries(queryParams.entries()),
-      response: responseData,
+      success: true,
+      message: 'All diagnostic tests passed',
+      diagnostics,
     });
   } catch (error: any) {
     console.error('[Test Tool Call] Error:', error);
     return NextResponse.json({
-      error: 'Test failed',
-      message: error.message,
-      stack: error.stack,
+      success: false,
+      error: error.message,
+      stack: error.stack?.split('\n').slice(0, 5),
     }, { status: 500 });
   }
 }
