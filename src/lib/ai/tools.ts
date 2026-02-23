@@ -17,7 +17,7 @@ export const analyzeExpensesTool: Tool = {
   type: 'function',
   function: {
     name: 'analyze_expenses',
-    description: `分析报销费用数据，支持所有费用类别，支持单月或多月对比。
+    description: `分析报销费用数据，支持所有费用类别，支持单月、多月对比或全部数据分析。
 
 可以分析的内容：
 - 总费用、供应商分布、费用类别分布
@@ -25,6 +25,8 @@ export const analyzeExpensesTool: Tool = {
 - 按状态分布（待审批、已批准、已支付）
 - 用户/员工费用排行
 - 最近报销单详情
+- 特定类别的明细（如"其他"类别的具体内容）
+- 按供应商分组的费用统计
 
 支持的费用类别：
 - flight: 机票
@@ -40,10 +42,20 @@ export const analyzeExpensesTool: Tool = {
 - hosting: 托管服务费用
 - domain: 域名费用
 - client_entertainment: 客户招待
-- other: 其他`,
+- other: 其他
+
+注意：
+- 如果用户问"所有费用"、"全部数据"、"历史数据"，设置 allTime=true
+- 如果用户问特定类别的明细，设置 focusCategory 并 includeDetails=true
+- 如果用户要按供应商分析，设置 groupByVendor=true`,
     parameters: {
       type: 'object',
       properties: {
+        allTime: {
+          type: 'boolean',
+          description: '是否查询全部时间的数据。设为true时忽略months和year参数。用户说"所有"、"全部"、"历史"时应设为true',
+          default: false,
+        },
         months: {
           type: 'array',
           items: {
@@ -51,11 +63,11 @@ export const analyzeExpensesTool: Tool = {
             minimum: 1,
             maximum: 12,
           },
-          description: '要分析的月份列表，如 [11, 12] 表示11月和12月',
+          description: '要分析的月份列表，如 [11, 12] 表示11月和12月。allTime=true时可省略',
         },
         year: {
           type: 'integer',
-          description: '年份，如 2025 或 2026。如果用户说"去年"或查询的月份都大于当前月份，应使用去年',
+          description: '年份，如 2025 或 2026。allTime=true时可省略',
         },
         scope: {
           type: 'string',
@@ -66,7 +78,17 @@ export const analyzeExpensesTool: Tool = {
         focusCategory: {
           type: 'string',
           enum: ['flight', 'train', 'hotel', 'meal', 'taxi', 'office_supplies', 'ai_token', 'cloud_resource', 'software', 'api_service', 'hosting', 'domain', 'client_entertainment', 'other'],
-          description: '重点关注的类别（可选）。如果用户特别询问某个类别，填写此参数',
+          description: '重点关注的类别（可选）。如果用户询问某个特定类别的明细，填写此参数',
+        },
+        includeDetails: {
+          type: 'boolean',
+          description: '是否返回费用明细列表。用户要求看"明细"、"详情"、"具体内容"时设为true',
+          default: false,
+        },
+        groupByVendor: {
+          type: 'boolean',
+          description: '是否按供应商分组统计。用户要求按"供应商"、"服务商"分析时设为true',
+          default: false,
         },
         compareWithLastMonth: {
           type: 'boolean',
@@ -74,7 +96,7 @@ export const analyzeExpensesTool: Tool = {
           default: true,
         },
       },
-      required: ['months', 'year'],
+      required: [],
     },
   },
 };

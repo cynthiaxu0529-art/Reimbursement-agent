@@ -34,10 +34,13 @@ export interface ToolExecutionResult {
  * Analyze Expenses Tool Parameters
  */
 interface AnalyzeExpensesParams {
-  months: number[];
-  year: number;
+  allTime?: boolean;
+  months?: number[];
+  year?: number;
   scope?: 'personal' | 'team' | 'company';
   focusCategory?: string;
+  includeDetails?: boolean;
+  groupByVendor?: boolean;
   compareWithLastMonth?: boolean;
 }
 
@@ -78,30 +81,41 @@ interface SearchPoliciesParams {
 /**
  * Execute analyze_expenses tool
  * Direct database query for reliability (no HTTP self-calls)
+ * Supports: allTime, focusCategory, includeDetails, groupByVendor
  */
 async function executeAnalyzeExpenses(
   params: AnalyzeExpensesParams,
   context: ToolExecutionContext
 ): Promise<ToolExecutionResult> {
   try {
-    const { months, year, scope = 'company', focusCategory } = params;
+    const {
+      allTime = false,
+      months,
+      year,
+      scope = 'company',
+      focusCategory,
+      includeDetails = false,
+      groupByVendor = false,
+    } = params;
 
-    // 参数验证
-    if (!months || !Array.isArray(months) || months.length === 0) {
-      return {
-        success: false,
-        error: '请指定要分析的月份',
-      };
+    // 如果不是全时间查询，需要有月份和年份，否则默认当前月
+    let queryMonths = months;
+    let queryYear = year;
+    const now = new Date();
+
+    if (!allTime) {
+      if (!queryMonths || !Array.isArray(queryMonths) || queryMonths.length === 0) {
+        queryMonths = [now.getMonth() + 1]; // 默认当前月
+      }
+      if (!queryYear || queryYear < 2000 || queryYear > 2100) {
+        queryYear = now.getFullYear(); // 默认当前年
+      }
     }
 
-    if (!year || year < 2000 || year > 2100) {
-      return {
-        success: false,
-        error: '请指定有效的年份',
-      };
-    }
-
-    console.log('[Tool Executor] Analyzing expenses:', { months, year, scope, focusCategory, userId: context.userId });
+    console.log('[Tool Executor] Analyzing expenses:', {
+      allTime, months: queryMonths, year: queryYear, scope, focusCategory,
+      includeDetails, groupByVendor, userId: context.userId
+    });
 
     // 获取用户信息
     const user = await db.query.users.findFirst({
@@ -111,14 +125,6 @@ async function executeAnalyzeExpenses(
     if (!user || user.tenantId !== context.tenantId) {
       throw new Error('用户认证失败');
     }
-
-    // 计算日期范围
-    const endMonth = Math.max(...months);
-    const startMonth = Math.min(...months);
-    const startDate = new Date(year, startMonth - 1, 1);
-    const endDate = new Date(year, endMonth, 0, 23, 59, 59); // 月末
-
-    console.log('[Tool Executor] Date range:', { startDate, endDate });
 
     // 获取租户本位币
     const tenant = await db.query.tenants.findFirst({
@@ -131,9 +137,22 @@ async function executeAnalyzeExpenses(
     const conditions: any[] = [
       eq(reimbursements.tenantId, context.tenantId),
       inArray(reimbursements.status, ['pending', 'under_review', 'approved', 'processing', 'paid']),
-      gte(reimbursements.createdAt, startDate),
-      lte(reimbursements.createdAt, endDate),
     ];
+
+    // 日期范围条件（仅非全时间查询时添加）
+    let periodLabel = '全部时间';
+    if (!allTime && queryMonths && queryYear) {
+      const endMonth = Math.max(...queryMonths);
+      const startMonth = Math.min(...queryMonths);
+      const startDate = new Date(queryYear, startMonth - 1, 1);
+      const endDate = new Date(queryYear, endMonth, 0, 23, 59, 59);
+
+      conditions.push(gte(reimbursements.createdAt, startDate));
+      conditions.push(lte(reimbursements.createdAt, endDate));
+
+      periodLabel = `${queryYear}年${startMonth}月${startMonth !== endMonth ? ` - ${endMonth}月` : ''}`;
+      console.log('[Tool Executor] Date range:', { startDate, endDate });
+    }
 
     // 权限过滤
     const userRoles = getUserRoles(user);
@@ -182,6 +201,7 @@ async function executeAnalyzeExpenses(
           category: reimbursementItems.category,
           description: reimbursementItems.description,
           amount: reimbursementItems.amount,
+          currency: reimbursementItems.currency,
           amountInBaseCurrency: reimbursementItems.amountInBaseCurrency,
           vendor: reimbursementItems.vendor,
           date: reimbursementItems.date,
@@ -204,12 +224,22 @@ async function executeAnalyzeExpenses(
       usersData.forEach(u => userMap.set(u.id, u.name));
     }
 
+    // 类别中文名称
+    const categoryLabels: Record<string, string> = {
+      flight: '机票', train: '火车票', hotel: '酒店住宿', meal: '餐饮',
+      taxi: '交通', office_supplies: '办公用品', ai_token: 'AI 服务',
+      cloud_resource: '云资源', api_service: 'API 服务', software: '软件订阅',
+      hosting: '托管服务', domain: '域名', client_entertainment: '客户招待', other: '其他',
+    };
+
     // 聚合统计
-    const byCategory: Record<string, { total: number; count: number }> = {};
+    const byCategory: Record<string, { total: number; count: number; items: any[] }> = {};
     const byMonth: Record<string, { total: number; count: number }> = {};
     const byStatus: Record<string, { total: number; count: number }> = {};
     const byUser: Record<string, { name: string; total: number; count: number }> = {};
-    const byVendor: Record<string, { total: number; count: number }> = {};
+    const byVendor: Record<string, { total: number; count: number; categories: Set<string> }> = {};
+    // 按类别-供应商统计（用于 groupByVendor + focusCategory）
+    const categoryVendorStats: Record<string, Record<string, { total: number; count: number }>> = {};
 
     let totalAmount = 0;
     const totalCount = reimbursementList.length;
@@ -238,27 +268,41 @@ async function executeAnalyzeExpenses(
       byMonth[monthKey].count += 1;
     }
 
-    // 类别中文名称
-    const categoryLabels: Record<string, string> = {
-      flight: '机票', train: '火车票', hotel: '酒店住宿', meal: '餐饮',
-      taxi: '交通', office_supplies: '办公用品', ai_token: 'AI 服务',
-      cloud_resource: '云资源', api_service: 'API 服务', software: '软件订阅',
-      hosting: '托管服务', domain: '域名', client_entertainment: '客户招待', other: '其他',
-    };
-
     // 按明细统计
     for (const item of items) {
       const amount = item.amountInBaseCurrency || 0;
       const category = item.category || 'other';
+      const vendor = item.vendor || '未知供应商';
 
-      if (!byCategory[category]) byCategory[category] = { total: 0, count: 0 };
+      // 按类别
+      if (!byCategory[category]) byCategory[category] = { total: 0, count: 0, items: [] };
       byCategory[category].total += amount;
       byCategory[category].count += 1;
+      // 如果需要明细，收集该类别的所有项目
+      if (includeDetails && (!focusCategory || category === focusCategory)) {
+        byCategory[category].items.push({
+          description: item.description,
+          vendor: item.vendor,
+          amount: item.amount,
+          currency: item.currency,
+          amountInBaseCurrency: Math.round(amount * 100) / 100,
+          date: item.date?.toISOString().split('T')[0],
+        });
+      }
 
-      const vendor = item.vendor || '未知供应商';
-      if (!byVendor[vendor]) byVendor[vendor] = { total: 0, count: 0 };
+      // 按供应商
+      if (!byVendor[vendor]) byVendor[vendor] = { total: 0, count: 0, categories: new Set() };
       byVendor[vendor].total += amount;
       byVendor[vendor].count += 1;
+      byVendor[vendor].categories.add(category);
+
+      // 按类别-供应商（用于 groupByVendor）
+      if (groupByVendor) {
+        if (!categoryVendorStats[category]) categoryVendorStats[category] = {};
+        if (!categoryVendorStats[category][vendor]) categoryVendorStats[category][vendor] = { total: 0, count: 0 };
+        categoryVendorStats[category][vendor].total += amount;
+        categoryVendorStats[category][vendor].count += 1;
+      }
     }
 
     // 格式化类别数据
@@ -269,6 +313,8 @@ async function executeAnalyzeExpenses(
         total: Math.round(value.total * 100) / 100,
         count: value.count,
         percentage: totalAmount > 0 ? Math.round((value.total / totalAmount) * 1000) / 10 : 0,
+        // 如果需要明细，添加 items
+        ...(includeDetails && value.items.length > 0 ? { items: value.items } : {}),
       }))
       .sort((a, b) => b.total - a.total);
 
@@ -303,8 +349,8 @@ async function executeAnalyzeExpenses(
 
     // 用户排行
     const userRanking = Object.entries(byUser)
-      .map(([userId, data]) => ({
-        userId, name: data.name,
+      .map(([uId, data]) => ({
+        userId: uId, name: data.name,
         total: Math.round(data.total * 100) / 100,
         count: data.count,
       }))
@@ -312,14 +358,47 @@ async function executeAnalyzeExpenses(
       .slice(0, 10);
 
     // 供应商排行
-    const vendorRanking = Object.entries(byVendor)
+    let vendorRanking = Object.entries(byVendor)
       .map(([vendor, value]) => ({
         vendor,
         total: Math.round(value.total * 100) / 100,
         count: value.count,
+        categories: Array.from(value.categories).map(c => categoryLabels[c] || c),
       }))
       .sort((a, b) => b.total - a.total)
-      .slice(0, 10);
+      .slice(0, 15);
+
+    // 如果有 focusCategory + groupByVendor，返回该类别按供应商的统计
+    let categoryVendorBreakdown: any = undefined;
+    if (groupByVendor && focusCategory && categoryVendorStats[focusCategory]) {
+      categoryVendorBreakdown = Object.entries(categoryVendorStats[focusCategory])
+        .map(([vendor, stats]) => ({
+          vendor,
+          total: Math.round(stats.total * 100) / 100,
+          count: stats.count,
+        }))
+        .sort((a, b) => b.total - a.total);
+    } else if (groupByVendor && !focusCategory) {
+      // 技术费用类别的供应商统计
+      const techCategories = ['ai_token', 'cloud_resource', 'api_service', 'software', 'hosting', 'domain'];
+      const techVendorStats: Record<string, { total: number; count: number }> = {};
+      for (const cat of techCategories) {
+        if (categoryVendorStats[cat]) {
+          for (const [vendor, stats] of Object.entries(categoryVendorStats[cat])) {
+            if (!techVendorStats[vendor]) techVendorStats[vendor] = { total: 0, count: 0 };
+            techVendorStats[vendor].total += stats.total;
+            techVendorStats[vendor].count += stats.count;
+          }
+        }
+      }
+      categoryVendorBreakdown = Object.entries(techVendorStats)
+        .map(([vendor, stats]) => ({
+          vendor,
+          total: Math.round(stats.total * 100) / 100,
+          count: stats.count,
+        }))
+        .sort((a, b) => b.total - a.total);
+    }
 
     // 最近报销单
     const recentReimbursements = reimbursementList.slice(0, 10).map(r => ({
@@ -335,13 +414,14 @@ async function executeAnalyzeExpenses(
     return {
       success: true,
       data: {
-        period: `${year}年${startMonth}月${startMonth !== endMonth ? ` - ${endMonth}月` : ''}`,
+        period: periodLabel,
         summary: {
           totalAmount: Math.round(totalAmount * 100) / 100,
           totalCount,
+          itemCount: items.length,
           currency: baseCurrency,
           averageAmount: totalCount > 0 ? Math.round((totalAmount / totalCount) * 100) / 100 : 0,
-          categoryCount: categoryData.length,
+          categoryCount: Object.keys(byCategory).length,
           vendorCount: Object.keys(byVendor).length,
         },
         byCategory: categoryData,
@@ -349,6 +429,8 @@ async function executeAnalyzeExpenses(
         monthlyTrend,
         userRanking: scope !== 'personal' ? userRanking : undefined,
         vendorRanking,
+        // 按供应商分组的类别统计（仅在 groupByVendor 时）
+        ...(categoryVendorBreakdown ? { categoryVendorBreakdown } : {}),
         recentReimbursements,
       },
     };
