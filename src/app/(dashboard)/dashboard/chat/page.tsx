@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
   id: string;
@@ -190,7 +191,7 @@ export default function ChatPage() {
             >
               {message.role === 'assistant' ? (
                 <div className="markdown-content" style={{ fontSize: '0.875rem', lineHeight: '1.5' }}>
-                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                 </div>
               ) : (
                 <div style={{ fontSize: '0.875rem', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
