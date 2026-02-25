@@ -15,13 +15,13 @@ interface LanguageContextType {
 const translations: Record<Language, Translations> = { zh, en };
 
 const LanguageContext = createContext<LanguageContextType>({
-  language: 'zh',
+  language: 'en',
   setLanguage: () => {},
-  t: zh,
+  t: en,
 });
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguageState] = useState<Language>('zh');
+  const [language, setLanguageState] = useState<Language>('en');
 
   useEffect(() => {
     const saved = localStorage.getItem('language') as Language | null;
