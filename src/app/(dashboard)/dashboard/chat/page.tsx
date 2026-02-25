@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 interface Message {
   id: string;
@@ -11,26 +12,28 @@ interface Message {
   timestamp: Date;
 }
 
-const samplePrompts = [
-  { text: '报销政策是什么', icon: '📋' },
-  { text: '分析本月技术费用', icon: '📊' },
-  { text: '预算预警检查', icon: '⚠️' },
-  { text: '异常消费检测', icon: '🔍' },
-];
-
-const capabilities = [
-  { icon: '📋', title: '政策查询', desc: '了解公司报销政策' },
-  { icon: '📊', title: '费用分析', desc: '技术费用统计分析' },
-  { icon: '⚠️', title: '预算预警', desc: '检测是否接近超支' },
-  { icon: '🔍', title: '异常检测', desc: '发现异常消费' },
-];
-
 export default function ChatPage() {
+  const { t } = useLanguage();
+
+  const samplePrompts = [
+    { text: t.chat.prompt1, icon: '📋' },
+    { text: t.chat.prompt2, icon: '📊' },
+    { text: t.chat.prompt3, icon: '⚠️' },
+    { text: t.chat.prompt4, icon: '🔍' },
+  ];
+
+  const capabilities = [
+    { icon: '📋', title: t.chat.cap1Title, desc: t.chat.cap1Desc },
+    { icon: '📊', title: t.chat.cap2Title, desc: t.chat.cap2Desc },
+    { icon: '⚠️', title: t.chat.cap3Title, desc: t.chat.cap3Desc },
+    { icon: '🔍', title: t.chat.cap4Title, desc: t.chat.cap4Desc },
+  ];
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: '你好！我是 Fluxa 智能助手。\n\n我可以帮你：\n• 查询公司报销政策\n• 分析技术费用（SaaS、AI Token、云资源）\n• 提供成本优化建议\n• 检测异常消费\n• 分析报销时效性\n\n试试点击下方的快捷按钮，或直接问我问题。',
+      content: t.chat.greeting,
       timestamp: new Date(),
     },
   ]);
@@ -62,9 +65,8 @@ export default function ChatPage() {
     setIsLoading(true);
 
     try {
-      // 构建会话历史（排除初始欢迎消息）
       const conversationHistory = messages
-        .slice(1) // 跳过初始欢迎消息
+        .slice(1)
         .map(m => ({
           role: m.role,
           content: m.content,
@@ -72,7 +74,6 @@ export default function ChatPage() {
 
       console.log('[Chat] Sending message to AI API:', messageText);
 
-      // 调用 LLM 驱动的 AI Chat API
       const apiResponse = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: {
@@ -86,17 +87,16 @@ export default function ChatPage() {
 
       if (!apiResponse.ok) {
         const errorData = await apiResponse.json();
-        throw new Error(errorData.error || 'AI服务请求失败');
+        throw new Error(errorData.error || t.chat.aiServiceFailed);
       }
 
       const result = await apiResponse.json();
       console.log('[Chat] Received response from AI:', result);
 
       if (!result.success || !result.message) {
-        throw new Error('AI服务返回无效响应');
+        throw new Error(t.chat.aiInvalidResponse);
       }
 
-      // 创建助手回复消息
       const response: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -108,11 +108,10 @@ export default function ChatPage() {
     } catch (error: any) {
       console.error('[Chat] Error:', error);
 
-      // 显示错误消息
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `抱歉，处理您的请求时出现错误：${error.message}\n\n请稍后重试，或联系管理员。`,
+        content: `${t.chat.errorPrefix}${error.message}${t.chat.errorSuffix}`,
         timestamp: new Date(),
       };
 
@@ -142,9 +141,9 @@ export default function ChatPage() {
       {/* Header */}
       <div style={{ marginBottom: '1rem' }}>
         <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#111827' }}>
-          🤖 AI 助手 <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 'normal', marginLeft: '0.5rem' }}>Powered by Claude</span>
+          {t.chat.title} <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 'normal', marginLeft: '0.5rem' }}>{t.chat.poweredBy}</span>
         </h2>
-        <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>政策查询 · 费用分析 · 优化建议</p>
+        <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>{t.chat.subtitle}</p>
       </div>
 
       {/* Messages Area */}
@@ -240,7 +239,7 @@ export default function ChatPage() {
               border: '1px solid #e5e7eb'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <div className="animate-pulse" style={{ fontSize: '0.875rem', color: '#6b7280' }}>正在思考</div>
+                <div className="animate-pulse" style={{ fontSize: '0.875rem', color: '#6b7280' }}>{t.chat.thinking}</div>
                 <div style={{ display: 'flex', gap: '0.25rem' }}>
                   <div className="animate-bounce" style={{ width: '4px', height: '4px', background: '#6b7280', borderRadius: '50%', animationDelay: '0ms' }}></div>
                   <div className="animate-bounce" style={{ width: '4px', height: '4px', background: '#6b7280', borderRadius: '50%', animationDelay: '150ms' }}></div>
@@ -335,7 +334,7 @@ export default function ChatPage() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyPress}
-          placeholder="输入你的问题... (Shift+Enter换行，Enter发送)"
+          placeholder={t.chat.inputPlaceholder}
           disabled={isLoading}
           style={{
             flex: 1,
@@ -367,7 +366,7 @@ export default function ChatPage() {
             alignSelf: 'flex-end'
           }}
         >
-          {isLoading ? '发送中...' : '发送'}
+          {isLoading ? t.chat.sending : t.chat.send}
         </button>
       </div>
     </div>
