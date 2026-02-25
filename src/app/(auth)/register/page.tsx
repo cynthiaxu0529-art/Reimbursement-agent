@@ -3,10 +3,13 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { useLanguage } from '@/contexts/LanguageContext';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
 
 function RegisterForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { t } = useLanguage();
 
   // 检查是否是邀请链接
   const inviteToken = searchParams.get('invite');
@@ -40,20 +43,20 @@ function RegisterForm() {
     setError('');
 
     if (formData.password !== formData.confirmPassword) {
-      setError('两次输入的密码不一致');
+      setError(t.register.passwordMismatch);
       setIsLoading(false);
       return;
     }
 
     if (formData.password.length < 8) {
-      setError('密码至少需要8个字符');
+      setError(t.register.passwordTooShort);
       setIsLoading(false);
       return;
     }
 
     // 非邀请用户必须填写公司名称
     if (!isInvited && !formData.companyName.trim()) {
-      setError('请填写公司名称，或使用邀请链接加入已有公司');
+      setError(t.register.companyRequired);
       setIsLoading(false);
       return;
     }
@@ -74,13 +77,13 @@ function RegisterForm() {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || '注册失败');
+        setError(data.error || t.register.registerFailed);
         return;
       }
 
       router.push('/login?registered=true');
     } catch (err) {
-      setError('注册失败，请稍后重试');
+      setError(t.register.registerFailedRetry);
     } finally {
       setIsLoading(false);
     }
@@ -106,6 +109,11 @@ function RegisterForm() {
 
   return (
     <div style={{ width: '100%', maxWidth: '400px' }}>
+      {/* Language Switcher */}
+      <div style={{ textAlign: 'right', marginBottom: '1rem' }}>
+        <LanguageSwitcher />
+      </div>
+
       {/* Logo */}
       <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
         <Link href="/" style={{ textDecoration: 'none' }}>
@@ -123,10 +131,10 @@ function RegisterForm() {
           </div>
         </Link>
         <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', marginBottom: '0.5rem' }}>
-          {isInvited ? '接受邀请' : '创建账号'}
+          {isInvited ? t.register.acceptInvite : t.register.createAccount}
         </h1>
         <p style={{ color: '#6b7280' }}>
-          {isInvited ? '完成注册加入团队' : '注册使用智能报销平台'}
+          {isInvited ? t.register.joinTeam : t.register.registerPlatform}
         </p>
       </div>
 
@@ -141,7 +149,7 @@ function RegisterForm() {
           textAlign: 'center'
         }}>
           <p style={{ color: '#065f46', fontSize: '0.875rem', margin: 0 }}>
-            您已被邀请加入团队，完成注册即可开始使用
+            {t.register.invitedNotice}
           </p>
         </div>
       )}
@@ -169,19 +177,19 @@ function RegisterForm() {
           )}
 
           <div style={{ marginBottom: '1rem' }}>
-            <label style={labelStyle}>姓名 *</label>
+            <label style={labelStyle}>{t.register.name} *</label>
             <input
               name="name"
               value={formData.name}
               onChange={handleChange}
               required
-              placeholder="张三"
+              placeholder={t.register.namePlaceholder}
               style={inputStyle}
             />
           </div>
 
           <div style={{ marginBottom: '1rem' }}>
-            <label style={labelStyle}>邮箱 *</label>
+            <label style={labelStyle}>{t.register.email} *</label>
             <input
               name="email"
               type="email"
@@ -198,13 +206,13 @@ function RegisterForm() {
             />
             {isInvited && (
               <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                邀请邮箱不可修改
+                {t.register.inviteEmailReadonly}
               </p>
             )}
           </div>
 
           <div style={{ marginBottom: '1rem' }}>
-            <label style={labelStyle}>密码 *</label>
+            <label style={labelStyle}>{t.register.password} *</label>
             <input
               name="password"
               type="password"
@@ -212,20 +220,20 @@ function RegisterForm() {
               onChange={handleChange}
               required
               minLength={8}
-              placeholder="至少8个字符"
+              placeholder={t.register.passwordPlaceholder}
               style={inputStyle}
             />
           </div>
 
           <div style={{ marginBottom: isInvited ? '1.5rem' : '1rem' }}>
-            <label style={labelStyle}>确认密码 *</label>
+            <label style={labelStyle}>{t.register.confirmPassword} *</label>
             <input
               name="confirmPassword"
               type="password"
               value={formData.confirmPassword}
               onChange={handleChange}
               required
-              placeholder="再次输入密码"
+              placeholder={t.register.confirmPasswordPlaceholder}
               style={inputStyle}
             />
           </div>
@@ -234,18 +242,18 @@ function RegisterForm() {
           {!isInvited && (
             <div style={{ marginBottom: '1.5rem' }}>
               <label style={labelStyle}>
-                公司名称 *
+                {t.register.companyName} *
               </label>
               <input
                 name="companyName"
                 value={formData.companyName}
                 onChange={handleChange}
                 required
-                placeholder="输入公司名称"
+                placeholder={t.register.companyNamePlaceholder}
                 style={inputStyle}
               />
               <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                创建新公司后，您将成为管理员，可邀请其他成员加入
+                {t.register.companyNameHint}
               </p>
             </div>
           )}
@@ -265,16 +273,16 @@ function RegisterForm() {
               cursor: isLoading ? 'not-allowed' : 'pointer'
             }}
           >
-            {isLoading ? '注册中...' : (isInvited ? '完成注册' : '注册')}
+            {isLoading ? t.register.registering : (isInvited ? t.register.completeRegister : t.register.registerButton)}
           </button>
         </form>
       </div>
 
       {/* Login Link */}
       <p style={{ textAlign: 'center', marginTop: '1.5rem', color: '#6b7280' }}>
-        已有账号？{' '}
+        {t.register.hasAccount}{' '}
         <Link href="/login" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>
-          立即登录
+          {t.register.loginNow}
         </Link>
       </p>
     </div>
@@ -292,7 +300,7 @@ export default function RegisterPage() {
       padding: '2rem 1rem'
     }}>
       <Suspense fallback={
-        <div style={{ textAlign: 'center', color: '#6b7280' }}>加载中...</div>
+        <div style={{ textAlign: 'center', color: '#6b7280' }}>Loading...</div>
       }>
         <RegisterForm />
       </Suspense>

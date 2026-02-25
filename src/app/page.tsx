@@ -1,6 +1,12 @@
+'use client';
+
 import Link from 'next/link';
+import { useLanguage } from '@/contexts/LanguageContext';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
 
 export default function HomePage() {
+  const { t } = useLanguage();
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
       {/* Header */}
@@ -32,10 +38,11 @@ export default function HomePage() {
               <span style={{ color: 'white', fontWeight: 'bold', fontSize: '1.25rem' }}>R</span>
             </div>
             <span style={{ fontWeight: 600, fontSize: '1.25rem', color: '#111827' }}>
-              报销助手
+              {t.common.appName}
             </span>
           </div>
           <nav style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <LanguageSwitcher />
             <Link
               href="/login"
               style={{
@@ -45,7 +52,7 @@ export default function HomePage() {
                 fontWeight: 500
               }}
             >
-              登录
+              {t.home.login}
             </Link>
             <Link
               href="/register"
@@ -58,7 +65,7 @@ export default function HomePage() {
                 fontWeight: 500
               }}
             >
-              免费注册
+              {t.home.register}
             </Link>
           </nav>
         </div>
@@ -80,7 +87,7 @@ export default function HomePage() {
             fontWeight: 500,
             marginBottom: '1.5rem'
           }}>
-            🚀 AI 驱动的智能报销平台
+            {t.home.heroBadge}
           </div>
           <h1 style={{
             fontSize: '3rem',
@@ -89,8 +96,8 @@ export default function HomePage() {
             lineHeight: 1.2,
             marginBottom: '1.5rem'
           }}>
-            让报销变得
-            <span style={{ color: '#2563eb' }}>简单高效</span>
+            {t.home.heroTitle1}
+            <span style={{ color: '#2563eb' }}>{t.home.heroTitle2}</span>
           </h1>
           <p style={{
             fontSize: '1.25rem',
@@ -98,8 +105,8 @@ export default function HomePage() {
             marginBottom: '2.5rem',
             lineHeight: 1.6
           }}>
-            自动收集票据、智能识别信息、一键提交审批<br />
-            告别繁琐的报销流程，让 AI 帮你搞定一切
+            {t.home.heroDesc1}<br />
+            {t.home.heroDesc2}
           </p>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
             <Link
@@ -115,7 +122,7 @@ export default function HomePage() {
                 boxShadow: '0 4px 14px rgba(37, 99, 235, 0.3)'
               }}
             >
-              开始使用 →
+              {t.home.getStarted}
             </Link>
             <Link
               href="/login"
@@ -130,7 +137,7 @@ export default function HomePage() {
                 border: '1px solid #d1d5db'
               }}
             >
-              已有账号
+              {t.home.hasAccount}
             </Link>
           </div>
         </div>
@@ -141,10 +148,10 @@ export default function HomePage() {
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
             <h2 style={{ fontSize: '2rem', fontWeight: 700, color: '#111827', marginBottom: '1rem' }}>
-              核心功能
+              {t.home.coreFeatures}
             </h2>
             <p style={{ color: '#6b7280', fontSize: '1.125rem' }}>
-              强大的 AI 能力，让报销管理变得轻松
+              {t.home.coreFeaturesDesc}
             </p>
           </div>
 
@@ -153,167 +160,40 @@ export default function HomePage() {
             gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
             gap: '1.5rem'
           }}>
-            {/* Feature 1 */}
-            <div style={{
-              backgroundColor: '#f8fafc',
-              borderRadius: '1rem',
-              padding: '2rem',
-              border: '1px solid #e2e8f0'
-            }}>
-              <div style={{
-                width: '48px',
-                height: '48px',
-                backgroundColor: '#dbeafe',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '1.25rem'
+            {[
+              { icon: '📷', bg: '#dbeafe', title: t.home.feature1Title, desc: t.home.feature1Desc },
+              { icon: '✅', bg: '#dcfce7', title: t.home.feature2Title, desc: t.home.feature2Desc },
+              { icon: '💬', bg: '#fef3c7', title: t.home.feature3Title, desc: t.home.feature3Desc },
+              { icon: '⚡', bg: '#e0e7ff', title: t.home.feature4Title, desc: t.home.feature4Desc },
+              { icon: '💰', bg: '#fce7f3', title: t.home.feature5Title, desc: t.home.feature5Desc },
+              { icon: '📊', bg: '#ccfbf1', title: t.home.feature6Title, desc: t.home.feature6Desc },
+            ].map((feature, idx) => (
+              <div key={idx} style={{
+                backgroundColor: '#f8fafc',
+                borderRadius: '1rem',
+                padding: '2rem',
+                border: '1px solid #e2e8f0'
               }}>
-                <span style={{ fontSize: '1.5rem' }}>📷</span>
+                <div style={{
+                  width: '48px',
+                  height: '48px',
+                  backgroundColor: feature.bg,
+                  borderRadius: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '1.25rem'
+                }}>
+                  <span style={{ fontSize: '1.5rem' }}>{feature.icon}</span>
+                </div>
+                <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
+                  {feature.title}
+                </h3>
+                <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
+                  {feature.desc}
+                </p>
               </div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
-                智能票据识别
-              </h3>
-              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
-                拍照上传发票，AI 自动识别金额、日期、商家等关键信息
-              </p>
-            </div>
-
-            {/* Feature 2 */}
-            <div style={{
-              backgroundColor: '#f8fafc',
-              borderRadius: '1rem',
-              padding: '2rem',
-              border: '1px solid #e2e8f0'
-            }}>
-              <div style={{
-                width: '48px',
-                height: '48px',
-                backgroundColor: '#dcfce7',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '1.25rem'
-              }}>
-                <span style={{ fontSize: '1.5rem' }}>✅</span>
-              </div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
-                自动合规检查
-              </h3>
-              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
-                实时检查是否符合公司报销政策，避免退回重提
-              </p>
-            </div>
-
-            {/* Feature 3 */}
-            <div style={{
-              backgroundColor: '#f8fafc',
-              borderRadius: '1rem',
-              padding: '2rem',
-              border: '1px solid #e2e8f0'
-            }}>
-              <div style={{
-                width: '48px',
-                height: '48px',
-                backgroundColor: '#fef3c7',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '1.25rem'
-              }}>
-                <span style={{ fontSize: '1.5rem' }}>💬</span>
-              </div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
-                AI 对话助手
-              </h3>
-              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
-                用自然语言描述出差情况，AI 帮你自动整理报销单
-              </p>
-            </div>
-
-            {/* Feature 4 */}
-            <div style={{
-              backgroundColor: '#f8fafc',
-              borderRadius: '1rem',
-              padding: '2rem',
-              border: '1px solid #e2e8f0'
-            }}>
-              <div style={{
-                width: '48px',
-                height: '48px',
-                backgroundColor: '#e0e7ff',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '1.25rem'
-              }}>
-                <span style={{ fontSize: '1.5rem' }}>⚡</span>
-              </div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
-                快速审批
-              </h3>
-              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
-                智能审批流程，一键批量审批，提高效率
-              </p>
-            </div>
-
-            {/* Feature 5 */}
-            <div style={{
-              backgroundColor: '#f8fafc',
-              borderRadius: '1rem',
-              padding: '2rem',
-              border: '1px solid #e2e8f0'
-            }}>
-              <div style={{
-                width: '48px',
-                height: '48px',
-                backgroundColor: '#fce7f3',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '1.25rem'
-              }}>
-                <span style={{ fontSize: '1.5rem' }}>💰</span>
-              </div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
-                一键打款
-              </h3>
-              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
-                审批通过后自动发起打款，资金快速到账
-              </p>
-            </div>
-
-            {/* Feature 6 */}
-            <div style={{
-              backgroundColor: '#f8fafc',
-              borderRadius: '1rem',
-              padding: '2rem',
-              border: '1px solid #e2e8f0'
-            }}>
-              <div style={{
-                width: '48px',
-                height: '48px',
-                backgroundColor: '#ccfbf1',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '1.25rem'
-              }}>
-                <span style={{ fontSize: '1.5rem' }}>📊</span>
-              </div>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
-                数据报表
-              </h3>
-              <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
-                可视化报表分析，了解费用支出趋势
-              </p>
-            </div>
+            ))}
           </div>
         </div>
       </section>
@@ -326,10 +206,10 @@ export default function HomePage() {
       }}>
         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
           <h2 style={{ fontSize: '2rem', fontWeight: 700, color: 'white', marginBottom: '1rem' }}>
-            准备好简化你的报销流程了吗？
+            {t.home.ctaTitle}
           </h2>
           <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: '1.125rem', marginBottom: '2rem' }}>
-            免费注册，立即体验 AI 驱动的智能报销
+            {t.home.ctaDesc}
           </p>
           <Link
             href="/register"
@@ -344,7 +224,7 @@ export default function HomePage() {
               fontSize: '1rem'
             }}
           >
-            免费开始使用
+            {t.home.ctaButton}
           </Link>
         </div>
       </section>
@@ -356,7 +236,7 @@ export default function HomePage() {
         padding: '2rem 1.5rem',
         textAlign: 'center'
       }}>
-        <p>© 2024 报销助手. All rights reserved.</p>
+        <p>{t.home.footer}</p>
       </footer>
     </div>
   );

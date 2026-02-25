@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 // 数据库角色到前端角色的映射
 const DB_TO_FRONTEND_ROLE: Record<string, string> = {
@@ -82,12 +83,7 @@ interface SkillItem {
   updatedAt: string;
 }
 
-const allTabs = [
-  { id: 'profile', label: '个人信息', icon: '👤', adminOnly: false },
-  { id: 'company', label: '公司设置', icon: '🏢', adminOnly: true },
-  { id: 'policies', label: '报销政策', icon: '📋', adminOnly: true },
-  { id: 'skills', label: 'Skill 管理', icon: '🔧', adminOnly: true },
-];
+// Tab labels are now set dynamically inside the component using translations
 
 const categoryLabels: Record<string, string> = {
   flight: '机票',
@@ -128,6 +124,15 @@ const executorTypeLabels: Record<string, string> = {
 };
 
 export default function SettingsPage() {
+  const { t } = useLanguage();
+
+  const allTabs = [
+    { id: 'profile', label: t.settings.profile, icon: '👤', adminOnly: false },
+    { id: 'company', label: t.settings.company, icon: '🏢', adminOnly: true },
+    { id: 'policies', label: t.settings.policies, icon: '📋', adminOnly: true },
+    { id: 'skills', label: t.settings.skills, icon: '🔧', adminOnly: true },
+  ];
+
   const [activeTab, setActiveTab] = useState('profile');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);

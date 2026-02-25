@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 interface ReimbursementItem {
   id: string;
@@ -36,29 +37,7 @@ interface Reimbursement {
   items: ReimbursementItem[];
 }
 
-const statusConfig: Record<string, { label: string; bgColor: string; color: string }> = {
-  draft: { label: '草稿', bgColor: '#f3f4f6', color: '#4b5563' },
-  pending: { label: '待审批', bgColor: '#fef3c7', color: '#d97706' },
-  under_review: { label: '审核中', bgColor: '#dbeafe', color: '#2563eb' },
-  approved: { label: '已批准', bgColor: '#dcfce7', color: '#16a34a' },
-  rejected: { label: '已拒绝', bgColor: '#fee2e2', color: '#dc2626' },
-  processing: { label: '处理中', bgColor: '#dbeafe', color: '#2563eb' },
-  paid: { label: '已付款', bgColor: '#dcfce7', color: '#16a34a' },
-  cancelled: { label: '已取消', bgColor: '#f3f4f6', color: '#6b7280' },
-};
-
-const categoryLabels: Record<string, { label: string; icon: string }> = {
-  flight: { label: '机票', icon: '✈️' },
-  train: { label: '火车票', icon: '🚄' },
-  hotel: { label: '酒店住宿', icon: '🏨' },
-  meal: { label: '餐饮', icon: '🍽️' },
-  taxi: { label: '交通', icon: '🚕' },
-  office_supplies: { label: '办公用品', icon: '📎' },
-  ai_token: { label: 'AI 服务', icon: '🤖' },
-  cloud_resource: { label: '云资源', icon: '☁️' },
-  client_entertainment: { label: '客户招待', icon: '🤝' },
-  other: { label: '其他', icon: '📦' },
-};
+// statusConfig and categoryLabels are defined inside the component to use translations
 
 const currencySymbols: Record<string, string> = {
   CNY: '¥', USD: '$', EUR: '€', GBP: '£', JPY: '¥',
@@ -75,6 +54,32 @@ const generateReimbursementNumber = (createdAt: string, id: string): string => {
 };
 
 export default function ReimbursementsPage() {
+  const { t, language } = useLanguage();
+
+  const statusConfig: Record<string, { label: string; bgColor: string; color: string }> = {
+    draft: { label: t.status.draft, bgColor: '#f3f4f6', color: '#4b5563' },
+    pending: { label: t.status.pending, bgColor: '#fef3c7', color: '#d97706' },
+    under_review: { label: t.status.under_review, bgColor: '#dbeafe', color: '#2563eb' },
+    approved: { label: t.status.approved, bgColor: '#dcfce7', color: '#16a34a' },
+    rejected: { label: t.status.rejected, bgColor: '#fee2e2', color: '#dc2626' },
+    processing: { label: t.status.processing, bgColor: '#dbeafe', color: '#2563eb' },
+    paid: { label: t.status.paid, bgColor: '#dcfce7', color: '#16a34a' },
+    cancelled: { label: t.status.cancelled, bgColor: '#f3f4f6', color: '#6b7280' },
+  };
+
+  const localCategoryLabels: Record<string, { label: string; icon: string }> = {
+    flight: { label: t.categories.flight, icon: '✈️' },
+    train: { label: t.categories.train, icon: '🚄' },
+    hotel: { label: t.categories.hotel, icon: '🏨' },
+    meal: { label: t.categories.meal, icon: '🍽️' },
+    taxi: { label: t.categories.taxi, icon: '🚕' },
+    office_supplies: { label: t.categories.office_supplies, icon: '📎' },
+    ai_token: { label: t.categories.ai_token, icon: '🤖' },
+    cloud_resource: { label: t.categories.cloud_resource, icon: '☁️' },
+    client_entertainment: { label: t.categories.client_entertainment, icon: '🤝' },
+    other: { label: t.categories.other, icon: '📦' },
+  };
+
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
@@ -168,7 +173,7 @@ export default function ReimbursementsPage() {
 
   // 删除草稿
   const handleDelete = async (id: string) => {
-    if (!confirm('确定要删除这个报销单吗？')) return;
+    if (!confirm(t.reimbursements.confirmDelete)) return;
     setActionLoading(id);
     try {
       const response = await fetch(`/api/reimbursements/${id}`, { method: 'DELETE' });
@@ -180,10 +185,10 @@ export default function ReimbursementsPage() {
           setExpandedData(null);
         }
       } else {
-        alert(result.error || '删除失败');
+        alert(result.error || t.reimbursements.deleteFailed);
       }
     } catch (error) {
-      alert('删除失败');
+      alert(t.reimbursements.deleteFailed);
     } finally {
       setActionLoading(null);
     }
@@ -205,10 +210,10 @@ export default function ReimbursementsPage() {
           setExpandedData(prev => prev ? { ...prev, status: 'pending' } : null);
         }
       } else {
-        alert(result.error || '提交失败');
+        alert(result.error || t.reimbursements.submitFailed);
       }
     } catch (error) {
-      alert('提交失败');
+      alert(t.reimbursements.submitFailed);
     } finally {
       setActionLoading(null);
     }
@@ -216,7 +221,7 @@ export default function ReimbursementsPage() {
 
   // 撤回申请
   const handleWithdraw = async (id: string) => {
-    if (!confirm('确定要撤回这个报销申请吗？')) return;
+    if (!confirm(t.reimbursements.confirmWithdraw)) return;
     setActionLoading(id);
     try {
       const response = await fetch(`/api/reimbursements/${id}`, {
@@ -231,10 +236,10 @@ export default function ReimbursementsPage() {
           setExpandedData(prev => prev ? { ...prev, status: 'draft' } : null);
         }
       } else {
-        alert(result.error || '撤回失败');
+        alert(result.error || t.reimbursements.withdrawFailed);
       }
     } catch (error) {
-      alert('撤回失败');
+      alert(t.reimbursements.withdrawFailed);
     } finally {
       setActionLoading(null);
     }
@@ -242,7 +247,7 @@ export default function ReimbursementsPage() {
 
   // Delete individual expense item
   const handleDeleteItem = async (reimbursementId: string, itemId: string) => {
-    if (!confirm('确定要删除这项费用吗？')) return;
+    if (!confirm(t.reimbursements.confirmDeleteItem)) return;
     setItemActionLoading(itemId);
     try {
       const response = await fetch(`/api/reimbursements/${reimbursementId}/items/${itemId}`, {
@@ -267,10 +272,10 @@ export default function ReimbursementsPage() {
         }
         await refreshList();
       } else {
-        alert(result.error || '删除失败');
+        alert(result.error || t.reimbursements.deleteFailed);
       }
     } catch (error) {
-      alert('删除失败');
+      alert(t.reimbursements.deleteFailed);
     } finally {
       setItemActionLoading(null);
     }
@@ -304,13 +309,13 @@ export default function ReimbursementsPage() {
             });
           }
         } else {
-          alert(result.error || '上传失败');
+          alert(result.error || t.reimbursements.uploadFailed);
         }
         setUploadingItemId(null);
       };
       reader.readAsDataURL(file);
     } catch (error) {
-      alert('上传失败');
+      alert(t.reimbursements.uploadFailed);
       setUploadingItemId(null);
     }
   };
@@ -348,7 +353,7 @@ export default function ReimbursementsPage() {
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    return new Date(dateStr).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
   };
 
   const getExchangeRate = (item: Reimbursement) => {
@@ -369,9 +374,9 @@ export default function ReimbursementsPage() {
       }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', marginBottom: '4px' }}>
-            报销申请
+            {t.reimbursements.title}
           </h1>
-          <p style={{ color: '#6b7280', fontSize: '14px' }}>管理和跟踪你的报销申请</p>
+          <p style={{ color: '#6b7280', fontSize: '14px' }}>{t.reimbursements.subtitle}</p>
         </div>
         <Link
           href="/dashboard/reimbursements/new"
@@ -388,7 +393,7 @@ export default function ReimbursementsPage() {
             fontSize: '14px'
           }}
         >
-          <span>+</span> 新建报销
+          {t.reimbursements.newReimbursement}
         </Link>
       </div>
 
@@ -410,7 +415,7 @@ export default function ReimbursementsPage() {
             textAlign: 'left',
           }}
         >
-          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>全部报销</p>
+          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>{t.reimbursements.allReimbursements}</p>
           <p style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>{stats.total}</p>
         </button>
         <button
@@ -424,7 +429,7 @@ export default function ReimbursementsPage() {
             textAlign: 'left',
           }}
         >
-          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>待审批</p>
+          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>{t.reimbursements.pending}</p>
           <p style={{ fontSize: '24px', fontWeight: 700, color: '#d97706' }}>{stats.pending}</p>
         </button>
         <button
@@ -438,7 +443,7 @@ export default function ReimbursementsPage() {
             textAlign: 'left',
           }}
         >
-          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>已批准</p>
+          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>{t.reimbursements.approved}</p>
           <p style={{ fontSize: '24px', fontWeight: 700, color: '#16a34a' }}>{stats.approved}</p>
         </button>
         <div style={{
@@ -447,7 +452,7 @@ export default function ReimbursementsPage() {
           padding: '16px',
           border: '1px solid #e5e7eb',
         }}>
-          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>报销总额</p>
+          <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>{t.reimbursements.totalAmount}</p>
           <p style={{ fontSize: '24px', fontWeight: 700, color: '#2563eb', marginBottom: '4px' }}>
             ¥{stats.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
           </p>
@@ -467,7 +472,7 @@ export default function ReimbursementsPage() {
       }}>
         <input
           type="text"
-          placeholder="搜索报销..."
+          placeholder={t.reimbursements.searchPlaceholder}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{
@@ -501,21 +506,21 @@ export default function ReimbursementsPage() {
           fontWeight: 600,
           color: '#6b7280',
         }}>
-          <div>报销单号</div>
-          <div>提交日期</div>
-          <div>报销说明</div>
-          <div style={{ textAlign: 'right' }}>原币金额</div>
-          <div style={{ textAlign: 'right' }}>汇率</div>
-          <div style={{ textAlign: 'right' }}>美元金额</div>
-          <div style={{ textAlign: 'center' }}>状态</div>
-          <div style={{ textAlign: 'center' }}>操作</div>
+          <div>{t.reimbursements.reimbursementNo}</div>
+          <div>{t.reimbursements.submitDate}</div>
+          <div>{t.reimbursements.description}</div>
+          <div style={{ textAlign: 'right' }}>{t.reimbursements.originalAmount}</div>
+          <div style={{ textAlign: 'right' }}>{t.reimbursements.exchangeRate}</div>
+          <div style={{ textAlign: 'right' }}>{t.reimbursements.usdAmount}</div>
+          <div style={{ textAlign: 'center' }}>{t.reimbursements.statusHeader}</div>
+          <div style={{ textAlign: 'center' }}>{t.reimbursements.actions}</div>
         </div>
 
         {/* Table Body */}
         <div>
           {loading && (
             <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
-              加载中...
+              {t.common.loading}
             </div>
           )}
 
@@ -535,10 +540,10 @@ export default function ReimbursementsPage() {
                 📄
               </div>
               <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
-                {search ? '未找到匹配的报销记录' : '还没有报销记录'}
+                {search ? t.reimbursements.noMatchingRecords : t.reimbursements.noRecordsYet}
               </h3>
               <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: '20px' }}>
-                {search ? '请尝试其他搜索关键词' : '创建你的第一笔报销'}
+                {search ? t.reimbursements.tryOtherKeywords : t.reimbursements.createYourFirst}
               </p>
               {!search && (
                 <Link
@@ -556,7 +561,7 @@ export default function ReimbursementsPage() {
                     fontWeight: 500
                   }}
                 >
-                  + 新建报销
+                  {t.reimbursements.newReimbursement}
                 </Link>
               )}
             </div>
@@ -612,7 +617,7 @@ export default function ReimbursementsPage() {
                       {item.title}
                     </p>
                     <p style={{ fontSize: '12px', color: '#6b7280' }}>
-                      {item.items?.length || 0} 项费用
+                      {item.items?.length || 0}{t.reimbursements.expenseItems}
                     </p>
                   </div>
 
@@ -662,7 +667,7 @@ export default function ReimbursementsPage() {
                             textDecoration: 'none',
                           }}
                         >
-                          编辑
+                          {t.reimbursements.editAction}
                         </Link>
                         <button
                           onClick={() => handleSubmit(item.id)}
@@ -677,7 +682,7 @@ export default function ReimbursementsPage() {
                             cursor: isLoading ? 'not-allowed' : 'pointer',
                           }}
                         >
-                          提交
+                          {t.reimbursements.submitAction}
                         </button>
                         <button
                           onClick={() => handleDelete(item.id)}
@@ -692,7 +697,7 @@ export default function ReimbursementsPage() {
                             cursor: isLoading ? 'not-allowed' : 'pointer',
                           }}
                         >
-                          删除
+                          {t.reimbursements.deleteAction}
                         </button>
                       </>
                     )}
@@ -710,7 +715,7 @@ export default function ReimbursementsPage() {
                           cursor: isLoading ? 'not-allowed' : 'pointer',
                         }}
                       >
-                        撤回
+                        {t.reimbursements.withdrawAction}
                       </button>
                     )}
                     {(item.status === 'approved' || item.status === 'paid') && (
@@ -730,7 +735,7 @@ export default function ReimbursementsPage() {
                             textDecoration: 'none',
                           }}
                         >
-                          修改
+                          {t.reimbursements.modifyAction}
                         </Link>
                         <button
                           onClick={() => handleDelete(item.id)}
@@ -745,7 +750,7 @@ export default function ReimbursementsPage() {
                             cursor: isLoading ? 'not-allowed' : 'pointer',
                           }}
                         >
-                          删除
+                          {t.reimbursements.deleteAction}
                         </button>
                       </>
                     )}
@@ -763,7 +768,7 @@ export default function ReimbursementsPage() {
                     padding: '16px 24px 16px 40px',
                   }}>
                     {expandLoading && !expandedData && (
-                      <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>加载中...</div>
+                      <div style={{ textAlign: 'center', color: '#6b7280', padding: '20px' }}>{t.common.loading}</div>
                     )}
 
                     {expandedData && expandedData.id === item.id && expandedData.items && expandedData.items.length > 0 && (
@@ -787,20 +792,20 @@ export default function ReimbursementsPage() {
                           fontWeight: 600,
                           color: '#6b7280',
                         }}>
-                          <div>供应商</div>
-                          <div>费用描述</div>
-                          <div>类别</div>
-                          <div style={{ textAlign: 'right' }}>原币金额</div>
-                          <div style={{ textAlign: 'right' }}>汇率</div>
-                          <div style={{ textAlign: 'right' }}>美元金额</div>
+                          <div>{t.reimbursements.vendor}</div>
+                          <div>{t.reimbursements.expenseDescription}</div>
+                          <div>{t.reimbursements.category}</div>
+                          <div style={{ textAlign: 'right' }}>{t.reimbursements.originalAmount}</div>
+                          <div style={{ textAlign: 'right' }}>{t.reimbursements.exchangeRate}</div>
+                          <div style={{ textAlign: 'right' }}>{t.reimbursements.usdAmount}</div>
                           {(item.status === 'draft' || item.status === 'rejected') && (
-                            <div style={{ textAlign: 'center' }}>操作</div>
+                            <div style={{ textAlign: 'center' }}>{t.reimbursements.actions}</div>
                           )}
                         </div>
 
                         {/* Detail Rows */}
                         {expandedData.items.map((lineItem, idx) => {
-                          const catInfo = categoryLabels[lineItem.category] || categoryLabels.other;
+                          const catInfo = localCategoryLabels[lineItem.category] || localCategoryLabels.other;
                           const itemRate = lineItem.currency === 'USD' ? 1 :
                             (lineItem.amountInBaseCurrency && lineItem.amount > 0
                               ? lineItem.amountInBaseCurrency / lineItem.amount
@@ -848,7 +853,7 @@ export default function ReimbursementsPage() {
                                       handlePreviewReceipt(lineItem.receiptUrl);
                                     }}
                                   >
-                                    📎 查看凭证
+                                    {t.reimbursements.viewReceipt}
                                   </button>
                                 )}
                               </div>
@@ -895,7 +900,7 @@ export default function ReimbursementsPage() {
                                       opacity: isItemLoading ? 0.6 : 1,
                                     }}
                                   >
-                                    {uploadingItemId === lineItem.id ? '上传中...' : (lineItem.receiptUrl ? '更换凭证' : '上传凭证')}
+                                    {uploadingItemId === lineItem.id ? t.reimbursements.uploading : (lineItem.receiptUrl ? t.reimbursements.replaceReceipt : t.reimbursements.uploadReceipt)}
                                   </button>
                                   {expandedData.items.length > 1 && (
                                     <button
@@ -936,7 +941,7 @@ export default function ReimbursementsPage() {
                         fontSize: '12px',
                         color: '#991b1b',
                       }}>
-                        <strong>拒绝原因：</strong>{expandedData.rejectReason}
+                        <strong>{t.reimbursements.rejectReason}</strong>{expandedData.rejectReason}
                       </div>
                     )}
                   </div>
@@ -965,7 +970,7 @@ export default function ReimbursementsPage() {
           <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
             <img
               src={previewImage}
-              alt="凭证预览"
+              alt={t.reimbursements.receiptPreview}
               style={{
                 maxWidth: '100%',
                 maxHeight: '90vh',
@@ -998,7 +1003,7 @@ export default function ReimbursementsPage() {
               color: 'rgba(255, 255, 255, 0.7)',
               fontSize: '14px',
             }}>
-              点击任意位置关闭
+              {t.reimbursements.clickToClose}
             </p>
           </div>
         </div>
