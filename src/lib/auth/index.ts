@@ -171,3 +171,32 @@ export {
   type Permission,
   type PermissionCheckResult,
 } from './permissions';
+
+// API Key 认证（OpenClaw / M2M 集成）
+export {
+  authenticate,
+  authenticateApiKey,
+  isApiKeyRequest,
+  generateApiKey,
+  hashApiKey,
+  logAgentAction,
+  type AuthContext,
+  type ApiKeyAuthContext,
+  type ApiKeyAuthError,
+} from './api-key';
+
+// Scope 权限控制
+export {
+  API_SCOPES,
+  SCOPE_METADATA,
+  SCOPE_PRESETS,
+  ROUTE_SCOPE_MAP,
+  hasScope,
+  getRequiredScope,
+  validateScopes,
+  checkScopeRoleRequirement,
+  getScopeCategory,
+  getScopesByCategory,
+  type ApiScope,
+  type ScopeMetadata,
+} from './scopes';
