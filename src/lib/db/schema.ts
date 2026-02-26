@@ -709,33 +709,6 @@ export const invitationsRelations = relations(invitations, ({ one }) => ({
   }),
 }));
 
-export const apiKeysRelations = relations(apiKeys, ({ one, many }) => ({
-  tenant: one(tenants, {
-    fields: [apiKeys.tenantId],
-    references: [tenants.id],
-  }),
-  user: one(users, {
-    fields: [apiKeys.userId],
-    references: [users.id],
-  }),
-  auditLogs: many(agentAuditLogs),
-}));
-
-export const agentAuditLogsRelations = relations(agentAuditLogs, ({ one }) => ({
-  tenant: one(tenants, {
-    fields: [agentAuditLogs.tenantId],
-    references: [tenants.id],
-  }),
-  apiKey: one(apiKeys, {
-    fields: [agentAuditLogs.apiKeyId],
-    references: [apiKeys.id],
-  }),
-  user: one(users, {
-    fields: [agentAuditLogs.userId],
-    references: [users.id],
-  }),
-}));
-
 // ============================================================================
 // API Key 表（OpenClaw / M2M 集成）
 // ============================================================================
@@ -852,6 +825,33 @@ export const agentAuditLogs = pgTable('agent_audit_logs', {
   // 按 Agent 类型筛选
   index('idx_agent_audit_agent_type').on(table.tenantId, table.agentType, table.createdAt),
 ]);
+
+export const apiKeysRelations = relations(apiKeys, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [apiKeys.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [apiKeys.userId],
+    references: [users.id],
+  }),
+  auditLogs: many(agentAuditLogs),
+}));
+
+export const agentAuditLogsRelations = relations(agentAuditLogs, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [agentAuditLogs.tenantId],
+    references: [tenants.id],
+  }),
+  apiKey: one(apiKeys, {
+    fields: [agentAuditLogs.apiKeyId],
+    references: [apiKeys.id],
+  }),
+  user: one(users, {
+    fields: [agentAuditLogs.userId],
+    references: [users.id],
+  }),
+}));
 
 // ============================================================================
 // 汇率相关表
