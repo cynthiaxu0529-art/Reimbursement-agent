@@ -41,6 +41,8 @@ function getNavItems(t: ReturnType<typeof useLanguage>['t']) {
     // 财务专属
     disbursements: { name: t.nav.disbursements, href: '/dashboard/disbursements', icon: '💳' },
     exchangeRates: { name: t.nav.exchangeRates, href: '/dashboard/settings/exchange-rates', icon: '💱' },
+    // API Key（所有人可用）
+    apiKeys: { name: 'API Keys', href: '/dashboard/settings/api-keys', icon: '🔑' },
     // 管理员专属
     team: { name: t.nav.team, href: '/dashboard/team', icon: '👥' },
   };
@@ -86,6 +88,9 @@ function buildNavigation(roles: string[], navItems: ReturnType<typeof getNavItem
   if (roles.includes('admin') || roles.includes('super_admin')) {
     addItem(navItems.team);
   }
+
+  // API Keys（所有人可用）
+  addItem(navItems.apiKeys);
 
   // 设置始终在最后
   addItem(navItems.settings);
