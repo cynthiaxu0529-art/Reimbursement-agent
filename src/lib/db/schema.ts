@@ -12,6 +12,7 @@ import {
   jsonb,
   uuid,
   pgEnum,
+  index,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
@@ -792,7 +793,12 @@ export const apiKeys = pgTable('api_keys', {
 
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => [
+  // 认证时通过 keyHash 查找（核心热路径）
+  // keyHash 已有 unique 约束会自动创建索引，这里显式声明便于可读性
+  // 按用户列出其 API Keys
+  index('idx_api_keys_user').on(table.userId, table.tenantId),
+]);
 
 /**
  * Agent 操作审计日志
@@ -834,7 +840,18 @@ export const agentAuditLogs = pgTable('agent_audit_logs', {
   durationMs: integer('duration_ms'),                  // 请求耗时
 
   createdAt: timestamp('created_at').notNull().defaultNow(),
-});
+}, (table) => [
+  // 按租户+时间倒序查询（管理员全局视图的核心查询路径）
+  index('idx_agent_audit_tenant_created').on(table.tenantId, table.createdAt),
+  // 按 API Key 查询（某个 Key 的操作历史）
+  index('idx_agent_audit_apikey').on(table.apiKeyId, table.createdAt),
+  // 按用户查询（某个用户的所有 Agent 操作）
+  index('idx_agent_audit_user').on(table.userId, table.createdAt),
+  // 按操作类型筛选
+  index('idx_agent_audit_action').on(table.tenantId, table.action, table.createdAt),
+  // 按 Agent 类型筛选
+  index('idx_agent_audit_agent_type').on(table.tenantId, table.agentType, table.createdAt),
+]);
 
 // ============================================================================
 // 汇率相关表
