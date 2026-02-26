@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useBaseCurrencyConversion } from '@/hooks/useBaseCurrencyConversion';
 import { CurrencyType } from '@/types';
+import TripItineraryPanel from '@/components/TripItineraryPanel';
 
 const expenseCategories = [
   { value: 'flight', label: '机票', icon: '✈️' },
@@ -101,6 +102,9 @@ export default function NewReimbursementPage() {
     },
   ]);
   const [itemsAutoFilled, setItemsAutoFilled] = useState(false);
+
+  // Trip itinerary (saved after confirmation)
+  const [confirmedItinerary, setConfirmedItinerary] = useState<any>(null);
 
   // 使用本位币转换 Hook（自动处理目标货币，避免方向错误）
   const {
@@ -579,6 +583,22 @@ export default function NewReimbursementPage() {
 
       const result = await response.json();
       if (result.success) {
+        // 如果有已确认的行程单，关联到新创建的报销单
+        if (confirmedItinerary && result.data?.id) {
+          try {
+            await fetch('/api/trip-itineraries', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...confirmedItinerary,
+                reimbursementId: result.data.id,
+                status: 'confirmed',
+              }),
+            });
+          } catch (itineraryError) {
+            console.error('Failed to save itinerary association:', itineraryError);
+          }
+        }
         router.push('/dashboard/reimbursements');
       } else {
         const errMsg = result.detail ? `${result.error}\n详情: ${result.detail}` : result.error;
@@ -1246,6 +1266,15 @@ export default function NewReimbursementPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Trip Itinerary Panel - 差旅报销时自动显示 */}
+              <TripItineraryPanel
+                lineItems={lineItems}
+                description={description}
+                onItineraryConfirmed={(itinerary) => {
+                  setConfirmedItinerary(itinerary);
+                }}
+              />
 
               {/* Total and Actions */}
               <div style={{

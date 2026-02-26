@@ -393,6 +393,60 @@ export interface TripBudget {
 }
 
 /**
+ * 行程单状态
+ */
+export type ItineraryStatusType = 'draft' | 'confirmed' | 'modified';
+
+/**
+ * 行程单（从报销内容智能生成）
+ */
+export interface TripItinerary {
+  id: string;
+  tenantId: string;
+  userId: string;
+  reimbursementId?: string;
+  tripId?: string;
+  title: string;
+  purpose?: string;
+  startDate?: Date;
+  endDate?: Date;
+  destinations?: string[];
+  status: ItineraryStatusType;
+  aiGenerated: boolean;
+  items: TripItineraryItem[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * 行程节点
+ */
+export interface TripItineraryItem {
+  id: string;
+  itineraryId: string;
+  date: Date;
+  time?: string;
+  type: 'transport' | 'hotel' | 'meal' | 'meeting' | 'other';
+  category?: string;
+  title: string;
+  description?: string;
+  location?: string;
+  departure?: string;
+  arrival?: string;
+  transportNumber?: string;
+  hotelName?: string;
+  checkIn?: Date;
+  checkOut?: Date;
+  amount?: number;
+  currency?: string;
+  reimbursementItemId?: string;
+  receiptUrl?: string;
+  sortOrder: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
  * 报销单
  */
 export interface Reimbursement {
