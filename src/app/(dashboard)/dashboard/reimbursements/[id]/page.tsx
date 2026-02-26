@@ -929,9 +929,9 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
                     } catch { return dateStr; }
                   };
 
-                  return Object.entries(grouped)
+                  return (Object.entries(grouped) as [string, any[]][])
                     .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([date, items]: [string, any[]]) => (
+                    .map(([date, items]) => (
                       <div key={date} style={{ marginBottom: '12px' }}>
                         <div style={{
                           display: 'flex',
