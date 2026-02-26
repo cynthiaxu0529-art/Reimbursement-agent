@@ -708,6 +708,134 @@ export const invitationsRelations = relations(invitations, ({ one }) => ({
   }),
 }));
 
+export const apiKeysRelations = relations(apiKeys, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [apiKeys.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [apiKeys.userId],
+    references: [users.id],
+  }),
+  auditLogs: many(agentAuditLogs),
+}));
+
+export const agentAuditLogsRelations = relations(agentAuditLogs, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [agentAuditLogs.tenantId],
+    references: [tenants.id],
+  }),
+  apiKey: one(apiKeys, {
+    fields: [agentAuditLogs.apiKeyId],
+    references: [apiKeys.id],
+  }),
+  user: one(users, {
+    fields: [agentAuditLogs.userId],
+    references: [users.id],
+  }),
+}));
+
+// ============================================================================
+// API Key 表（OpenClaw / M2M 集成）
+// ============================================================================
+
+/**
+ * API Key 表
+ * 支持外部 AI Agent（如 OpenClaw）以用户身份调用 API
+ *
+ * 设计原则：
+ * 1. 每个 API Key 绑定一个用户，代表该用户执行操作
+ * 2. 通过 scopes 控制 Agent 可执行的操作范围
+ * 3. 只存储 key 的 SHA-256 哈希，不存储明文
+ * 4. 支持过期时间和手动撤销
+ * 5. 内置速率限制配置
+ */
+export const apiKeys = pgTable('api_keys', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  // Key 标识
+  name: text('name').notNull(),                      // 用户自定义名称，如 "我的 OpenClaw Agent"
+  keyPrefix: text('key_prefix').notNull(),            // Key 前缀用于展示，如 "rk_a1b2c3..."
+  keyHash: text('key_hash').notNull().unique(),       // SHA-256 哈希值
+
+  // 权限范围
+  scopes: jsonb('scopes').$type<string[]>().notNull().default([]),
+
+  // Agent 元数据
+  agentType: text('agent_type'),                      // 'openclaw' | 'custom' | ...
+  agentMetadata: jsonb('agent_metadata'),             // Agent 的额外信息
+
+  // 速率限制
+  rateLimitPerMinute: integer('rate_limit_per_minute').notNull().default(60),
+  rateLimitPerDay: integer('rate_limit_per_day').notNull().default(1000),
+
+  // 金额限制（Agent 安全防护）
+  maxAmountPerRequest: real('max_amount_per_request'),  // 单次报销最大金额
+  maxAmountPerDay: real('max_amount_per_day'),          // 每日报销最大总金额
+
+  // 状态管理
+  isActive: boolean('is_active').notNull().default(true),
+  expiresAt: timestamp('expires_at'),                   // 可选的过期时间
+  lastUsedAt: timestamp('last_used_at'),
+  usageCount: integer('usage_count').notNull().default(0),
+
+  // 撤销信息
+  revokedAt: timestamp('revoked_at'),
+  revokedBy: uuid('revoked_by').references(() => users.id),
+  revokeReason: text('revoke_reason'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * Agent 操作审计日志
+ * 记录所有通过 API Key 执行的操作，便于审计和追踪
+ */
+export const agentAuditLogs = pgTable('agent_audit_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  apiKeyId: uuid('api_key_id')
+    .notNull()
+    .references(() => apiKeys.id),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id),
+
+  // 操作信息
+  action: text('action').notNull(),                   // 'reimbursement:create', 'reimbursement:read' 等
+  method: text('method').notNull(),                   // HTTP method: GET, POST, PUT, DELETE
+  path: text('path').notNull(),                       // 请求路径
+  statusCode: integer('status_code'),                 // 响应状态码
+
+  // Agent 信息
+  agentType: text('agent_type'),                      // 'openclaw', 'custom' 等
+  agentVersion: text('agent_version'),                // Agent 版本号
+
+  // 请求/响应摘要
+  requestSummary: jsonb('request_summary'),            // 请求关键参数（脱敏）
+  responseSummary: jsonb('response_summary'),           // 响应摘要
+
+  // 资源信息
+  entityType: text('entity_type'),                     // 'reimbursement', 'receipt' 等
+  entityId: uuid('entity_id'),                         // 关联的资源 ID
+
+  // 元数据
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  durationMs: integer('duration_ms'),                  // 请求耗时
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
 // ============================================================================
 // 汇率相关表
 // ============================================================================

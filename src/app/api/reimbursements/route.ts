@@ -6,19 +6,25 @@ import { eq, desc, and, or, inArray } from 'drizzle-orm';
 import { getUserRoles, canApprove, canProcessPayment, isAdmin } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
 import { checkItemsLimit } from '@/lib/policy/limit-service';
+import { authenticate, logAgentAction, type AuthContext } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/reimbursements - 获取报销列表
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+    // 统一认证（自动判断 Session 或 API Key）
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_READ);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
+    const authCtx = authResult.context;
+    const startTime = Date.now();
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
@@ -29,7 +35,7 @@ export async function GET(request: NextRequest) {
 
     // 获取用户实际的数据库角色
     const currentUser = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
+      where: eq(users.id, authCtx.userId),
     });
 
     if (!currentUser) {
@@ -42,8 +48,11 @@ export async function GET(request: NextRequest) {
     // 构建查询条件
     const conditions: any[] = [];
 
+    // API Key 认证时，Agent 默认只能看绑定用户自己的报销（安全限制）
+    const isAgentRequest = authCtx.authType === 'api_key';
+
     // 验证角色权限并应用部门级数据隔离
-    if (role === 'approver' && currentUser.tenantId) {
+    if (role === 'approver' && currentUser.tenantId && !isAgentRequest) {
       // 检查用户是否有审批权限（admin也可以查看和审批）
       if (!canApprove(userRoles) && !isAdmin(userRoles)) {
         return NextResponse.json({ error: '无审批权限' }, { status: 403 });
@@ -51,7 +60,7 @@ export async function GET(request: NextRequest) {
 
       // 获取用户可以查看的报销提交人ID列表（部门级数据隔离）
       const visibleUserIds = await getVisibleUserIds(
-        session.user.id,
+        authCtx.userId,
         currentUser.tenantId,
         userRoles
       );
@@ -65,17 +74,17 @@ export async function GET(request: NextRequest) {
         conditions.push(inArray(reimbursements.userId, visibleUserIds));
       } else {
         // 没有管理任何部门，只能看自己的
-        conditions.push(eq(reimbursements.userId, session.user.id));
+        conditions.push(eq(reimbursements.userId, authCtx.userId));
       }
 
       // 如果只看自己处理的（批准或驳回）
       if (myApprovals) {
         conditions.push(or(
-          eq(reimbursements.approvedBy, session.user.id),
-          eq(reimbursements.rejectedBy, session.user.id)
+          eq(reimbursements.approvedBy, authCtx.userId),
+          eq(reimbursements.rejectedBy, authCtx.userId)
         ));
       }
-    } else if (role === 'finance' && currentUser.tenantId) {
+    } else if (role === 'finance' && currentUser.tenantId && !isAgentRequest) {
       // 检查用户是否有财务权限
       if (!canProcessPayment(userRoles)) {
         return NextResponse.json({ error: '无财务权限' }, { status: 403 });
@@ -83,8 +92,8 @@ export async function GET(request: NextRequest) {
       // 财务可以看同租户所有报销（需要处理付款）
       conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
     } else {
-      // 员工模式：只看自己的
-      conditions.push(eq(reimbursements.userId, session.user.id));
+      // 员工模式 / Agent 模式：只看自己的
+      conditions.push(eq(reimbursements.userId, authCtx.userId));
     }
 
     // 支持多个状态（逗号分隔）
@@ -135,11 +144,33 @@ export async function GET(request: NextRequest) {
       user: undefined, // Remove the raw user object
     }));
 
-    return NextResponse.json({
+    const response = {
       success: true,
       data: transformedList,
       meta: { page, pageSize },
-    });
+    };
+
+    // Agent 审计日志
+    if (authCtx.authType === 'api_key' && authCtx.apiKey) {
+      logAgentAction({
+        tenantId: authCtx.tenantId!,
+        apiKeyId: authCtx.apiKey.id,
+        userId: authCtx.userId,
+        action: 'reimbursement:read',
+        method: 'GET',
+        path: '/api/reimbursements',
+        statusCode: 200,
+        agentType: authCtx.apiKey.agentType,
+        requestSummary: { status, role, page, pageSize },
+        responseSummary: { count: transformedList.length },
+        entityType: 'reimbursement',
+        ipAddress: request.headers.get('x-forwarded-for') || undefined,
+        userAgent: request.headers.get('user-agent') || undefined,
+        durationMs: Date.now() - startTime,
+      });
+    }
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error('Get reimbursements error:', error);
     return NextResponse.json(
@@ -151,13 +182,17 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/reimbursements - 创建报销单
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+    // 统一认证
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_CREATE);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
+    const authCtx = authResult.context;
+    const startTime = Date.now();
 
     const body = await request.json();
     const { title, description, tripId, items, status: submitStatus, totalAmountInBaseCurrency } = body;
@@ -170,16 +205,41 @@ export async function POST(request: NextRequest) {
     }
 
     // 检查用户是否有公司
-    if (!session.user.tenantId) {
+    const tenantId = authCtx.tenantId;
+    if (!tenantId) {
       return NextResponse.json(
         { error: '请先在设置中创建或加入公司，才能提交报销' },
         { status: 400 }
       );
     }
 
+    // Agent 金额限制检查
+    if (authCtx.authType === 'api_key' && authCtx.apiKey?.limits.maxAmountPerRequest) {
+      const requestTotal = items.reduce(
+        (sum: number, item: any) => sum + (parseFloat(item.amount) || 0), 0
+      );
+      if (requestTotal > authCtx.apiKey.limits.maxAmountPerRequest) {
+        return NextResponse.json(
+          { error: `Agent 单次报销金额超过限制（上限: ${authCtx.apiKey.limits.maxAmountPerRequest}）` },
+          { status: 403 }
+        );
+      }
+    }
+
+    // Agent 创建报销时，如果要直接提交（status=pending），需要额外的 submit scope
+    if (authCtx.authType === 'api_key' && submitStatus === 'pending') {
+      const hasSubmitScope = authCtx.apiKey?.scopes.includes(API_SCOPES.REIMBURSEMENT_SUBMIT);
+      if (!hasSubmitScope) {
+        return NextResponse.json(
+          { error: 'Agent 缺少 reimbursement:submit scope，只能创建草稿' },
+          { status: 403 }
+        );
+      }
+    }
+
     // 获取租户本位币
     const tenantRecord = await db.query.tenants.findFirst({
-      where: eq(tenants.id, session.user.tenantId),
+      where: eq(tenants.id, tenantId),
       columns: { baseCurrency: true },
     });
     const tenantBaseCurrency = tenantRecord?.baseCurrency || 'USD';
@@ -209,8 +269,8 @@ export async function POST(request: NextRequest) {
 
     // 应用政策限额约束（支持 per_day 和 per_month 类型）
     const limitResult = await checkItemsLimit(
-      session.user.id,
-      session.user.tenantId,
+      authCtx.userId,
+      tenantId,
       items.map((item: any) => ({
         category: item.category,
         amount: parseFloat(item.amount) || 0,
@@ -253,16 +313,16 @@ export async function POST(request: NextRequest) {
 
     // 构建报销单数据（不包含 undefined 值）
     const reimbursementData: any = {
-      tenantId: session.user.tenantId,
-      userId: session.user.id,
+      tenantId: tenantId,
+      userId: authCtx.userId,
       title,
       description: description || null,
       totalAmount,
       totalAmountInBaseCurrency: usdTotal,
       baseCurrency: tenantBaseCurrency,
       status: submitStatus === 'pending' ? 'pending' : 'draft',
-      autoCollected: false,
-      sourceType: 'manual',
+      autoCollected: authCtx.authType === 'api_key',
+      sourceType: authCtx.authType === 'api_key' ? `agent:${authCtx.apiKey?.agentType || 'api'}` : 'manual',
     };
 
     // 只有当有值时才添加这些字段
@@ -340,10 +400,35 @@ export async function POST(request: NextRequest) {
       };
     }
 
+    // Agent 审计日志
+    if (authCtx.authType === 'api_key' && authCtx.apiKey) {
+      logAgentAction({
+        tenantId: tenantId,
+        apiKeyId: authCtx.apiKey.id,
+        userId: authCtx.userId,
+        action: submitStatus === 'pending' ? 'reimbursement:submit' : 'reimbursement:create',
+        method: 'POST',
+        path: '/api/reimbursements',
+        statusCode: 200,
+        agentType: authCtx.apiKey.agentType,
+        requestSummary: {
+          title,
+          itemCount: items.length,
+          totalAmount,
+          status: submitStatus || 'draft',
+        },
+        responseSummary: { reimbursementId: reimbursement.id },
+        entityType: 'reimbursement',
+        entityId: reimbursement.id,
+        ipAddress: request.headers.get('x-forwarded-for') || undefined,
+        userAgent: request.headers.get('user-agent') || undefined,
+        durationMs: Date.now() - startTime,
+      });
+    }
+
     return NextResponse.json(responseData);
   } catch (error: any) {
     console.error('Create reimbursement error:', error);
-    // 返回详细的错误信息以便调试
     return NextResponse.json(
       {
         error: `创建失败: ${error?.message || '未知错误'}`,
