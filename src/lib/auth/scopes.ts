@@ -266,6 +266,9 @@ export const ROUTE_SCOPE_MAP: Record<string, { method: string; scope: ApiScope }
   '/api/payments/process': [
     { method: 'POST', scope: API_SCOPES.PAYMENT_PROCESS },
   ],
+  '/api/settings/categories': [
+    { method: 'GET', scope: API_SCOPES.SETTINGS_READ },
+  ],
   '/api/settings/profile': [
     { method: 'GET', scope: API_SCOPES.PROFILE_READ },
   ],

@@ -29,6 +29,30 @@ API 基础地址：`{REIMBURSEMENT_API_URL}`
 3. **政策合规**：提交前先查询政策确认是否超限
 4. **不要猜测**：如果用户没有提供必要信息（金额、类别、日期），请追问而不是猜测
 
+## 登录后初始化
+
+认证成功后，在执行任何报销操作之前，必须先获取当前公司的费用类别配置：
+
+```http
+GET {REIMBURSEMENT_API_URL}/api/settings/categories
+```
+
+返回示例：
+```json
+{
+  "success": true,
+  "data": {
+    "categories": [
+      { "value": "flight", "label": "机票", "labelEn": "Flight", "icon": "✈️" },
+      { "value": "train", "label": "火车票", "labelEn": "Train", "icon": "🚄" },
+      { "value": "hotel", "label": "酒店住宿", "labelEn": "Hotel", "icon": "🏨" }
+    ]
+  }
+}
+```
+
+**注意**：不同公司的费用类别不同，创建报销时 `category` 字段的值必须来自此接口返回的 `value` 列表。不要使用硬编码的类别值。
+
 ## 可用操作
 
 ### 1. 查看我的报销单
@@ -108,18 +132,7 @@ Content-Type: application/json
 }
 ```
 
-费用类别（category）可选值：
-- `flight` - 机票
-- `hotel` - 酒店
-- `train` - 火车票
-- `taxi` - 出租车/网约车
-- `meal` - 餐饮
-- `transport` - 市内交通
-- `office_supplies` - 办公用品
-- `software` - 软件/订阅
-- `equipment` - 设备
-- `phone` - 通讯费
-- `other` - 其他
+费用类别（category）：使用 `GET /api/settings/categories` 返回的 `value` 值，不要硬编码。
 
 状态说明：
 - `"status": "draft"` - 仅保存草稿（推荐，让用户确认后再提交）
