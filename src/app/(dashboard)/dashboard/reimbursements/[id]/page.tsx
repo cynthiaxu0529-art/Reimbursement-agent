@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, use, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
@@ -126,6 +126,8 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string>('');
+  const [itinerary, setItinerary] = useState<any>(null);
+  const [itineraryLoading, setItineraryLoading] = useState(false);
 
   // 从 API 获取报销详情
   useEffect(() => {
@@ -182,6 +184,25 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
       setIsOwner(reimbursementUserId === currentUserId);
     }
   }, [reimbursement, currentUserId]);
+
+  // 获取关联的行程单
+  useEffect(() => {
+    const fetchItinerary = async () => {
+      setItineraryLoading(true);
+      try {
+        const response = await fetch(`/api/trip-itineraries?reimbursementId=${id}`);
+        const result = await response.json();
+        if (result.success && result.data && result.data.length > 0) {
+          setItinerary(result.data[0]);
+        }
+      } catch (error) {
+        console.error('Failed to fetch itinerary:', error);
+      } finally {
+        setItineraryLoading(false);
+      }
+    };
+    fetchItinerary();
+  }, [id]);
 
   // 重新编辑（将状态改为草稿）
   const handleReEdit = async () => {
@@ -824,6 +845,175 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
               )}
             </div>
           </div>
+
+          {/* Trip Itinerary Section */}
+          {itinerary && itinerary.items && itinerary.items.length > 0 && (
+            <div style={{
+              backgroundColor: 'white',
+              borderRadius: '0.75rem',
+              border: '1px solid #e5e7eb',
+              overflow: 'hidden',
+              marginTop: '1rem',
+            }}>
+              <div style={{
+                padding: '1rem 1.25rem',
+                borderBottom: '1px solid #e5e7eb',
+                backgroundColor: '#eff6ff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '16px' }}>🗺️</span>
+                  <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e40af' }}>
+                    差旅行程单
+                  </h3>
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '2px 8px',
+                    backgroundColor: itinerary.status === 'confirmed' ? '#dcfce7' : '#fef3c7',
+                    color: itinerary.status === 'confirmed' ? '#166534' : '#92400e',
+                    borderRadius: '9999px',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                  }}>
+                    {itinerary.status === 'confirmed' ? '✓ 已确认' :
+                     itinerary.status === 'modified' ? '已修改' : '草稿'}
+                  </span>
+                </div>
+              </div>
+              <div style={{ padding: '1.25rem' }}>
+                {/* Itinerary header */}
+                <div style={{
+                  marginBottom: '1rem',
+                  padding: '0.75rem 1rem',
+                  backgroundColor: '#f9fafb',
+                  borderRadius: '8px',
+                }}>
+                  <h4 style={{ fontSize: '15px', fontWeight: 600, color: '#111827', marginBottom: '4px' }}>
+                    {itinerary.title}
+                  </h4>
+                  {itinerary.purpose && (
+                    <p style={{ fontSize: '12px', color: '#6b7280' }}>目的：{itinerary.purpose}</p>
+                  )}
+                  {itinerary.destinations && itinerary.destinations.length > 0 && (
+                    <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                      目的地：{itinerary.destinations.join(' → ')}
+                    </p>
+                  )}
+                </div>
+
+                {/* Itinerary items grouped by date */}
+                {(() => {
+                  const grouped = (itinerary.items || []).reduce((groups: any, item: any) => {
+                    const date = (item.date || '').split('T')[0] || '未知日期';
+                    if (!groups[date]) groups[date] = [];
+                    groups[date].push(item);
+                    return groups;
+                  }, {} as Record<string, any[]>);
+
+                  const typeIcons: Record<string, string> = {
+                    transport: '🚆', hotel: '🏨', meal: '🍽️', meeting: '📋', other: '📌',
+                  };
+                  const catIcons: Record<string, string> = {
+                    flight: '✈️', train: '🚄', hotel: '🏨', meal: '🍽️', taxi: '🚕',
+                  };
+
+                  const formatDate = (dateStr: string) => {
+                    try {
+                      const d = new Date(dateStr);
+                      const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+                      return `${d.getMonth() + 1}月${d.getDate()}日 周${weekdays[d.getDay()]}`;
+                    } catch { return dateStr; }
+                  };
+
+                  return Object.entries(grouped)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([date, items]: [string, any[]]) => (
+                      <div key={date} style={{ marginBottom: '12px' }}>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          marginBottom: '6px',
+                        }}>
+                          <div style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            backgroundColor: '#2563eb',
+                          }} />
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#1e40af' }}>
+                            {formatDate(date)}
+                          </span>
+                        </div>
+                        <div style={{
+                          marginLeft: '4px',
+                          borderLeft: '2px solid #e5e7eb',
+                          paddingLeft: '16px',
+                        }}>
+                          {items
+                            .sort((a: any, b: any) => (a.sortOrder || 0) - (b.sortOrder || 0))
+                            .map((item: any, idx: number) => (
+                              <div key={idx} style={{
+                                padding: '8px 12px',
+                                backgroundColor: '#fafafa',
+                                borderRadius: '6px',
+                                marginBottom: '6px',
+                                border: '1px solid #f3f4f6',
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                                  <span style={{ fontSize: '14px' }}>
+                                    {item.category ? (catIcons[item.category] || typeIcons[item.type] || '📌')
+                                      : (typeIcons[item.type] || '📌')}
+                                  </span>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                      {item.time && (
+                                        <span style={{
+                                          fontSize: '11px',
+                                          color: '#6b7280',
+                                          backgroundColor: '#f3f4f6',
+                                          padding: '1px 6px',
+                                          borderRadius: '4px',
+                                        }}>
+                                          {item.time}
+                                        </span>
+                                      )}
+                                      <span style={{ fontSize: '13px', fontWeight: 500, color: '#111827' }}>
+                                        {item.title}
+                                      </span>
+                                    </div>
+                                    {item.description && (
+                                      <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                                        {item.description}
+                                      </p>
+                                    )}
+                                    <div style={{ display: 'flex', gap: '12px', marginTop: '3px', flexWrap: 'wrap' }}>
+                                      {item.amount && (
+                                        <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: 500 }}>
+                                          💰 {item.currency || 'CNY'} {parseFloat(item.amount).toLocaleString()}
+                                        </span>
+                                      )}
+                                      {item.receiptUrl && (
+                                        <span style={{ fontSize: '11px', color: '#16a34a' }}>
+                                          🧾 已关联凭证
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    ));
+                })()}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Sidebar */}

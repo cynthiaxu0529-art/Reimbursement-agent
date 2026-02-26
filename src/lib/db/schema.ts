@@ -53,6 +53,12 @@ export const complianceStatusEnum = pgEnum('compliance_status', [
   'failed',
 ]);
 
+export const itineraryStatusEnum = pgEnum('itinerary_status', [
+  'draft',          // AI 生成的草稿
+  'confirmed',      // 用户确认
+  'modified',       // 用户修改后
+]);
+
 export const approvalStepStatusEnum = pgEnum('approval_step_status', [
   'pending',      // 待审批
   'approved',     // 已通过
@@ -236,6 +242,73 @@ export const trips = pgTable('trips', {
   budgetSource: text('budget_source'),
 
   calendarEventIds: jsonb('calendar_event_ids').default([]),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * 行程单表（从报销内容智能生成的行程）
+ */
+export const tripItineraries = pgTable('trip_itineraries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id),
+  reimbursementId: uuid('reimbursement_id'),         // 关联的报销单（提交后关联）
+  tripId: uuid('trip_id')
+    .references(() => trips.id),                      // 可选：关联已有行程
+
+  title: text('title').notNull(),                     // 行程标题，如"上海-北京出差"
+  purpose: text('purpose'),                           // 出差目的
+  startDate: timestamp('start_date'),                 // 行程开始日期
+  endDate: timestamp('end_date'),                     // 行程结束日期
+  destinations: jsonb('destinations').default([]),     // 目的地列表
+
+  status: itineraryStatusEnum('status').notNull().default('draft'),
+  aiGenerated: boolean('ai_generated').notNull().default(true), // 是否AI生成
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * 行程明细表（行程中的每个节点/事件）
+ */
+export const tripItineraryItems = pgTable('trip_itinerary_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  itineraryId: uuid('itinerary_id')
+    .notNull()
+    .references(() => tripItineraries.id, { onDelete: 'cascade' }),
+
+  date: timestamp('date').notNull(),                   // 日期
+  time: text('time'),                                  // 时间（可选，如 "08:00"）
+  type: text('type').notNull(),                        // 类型: transport, hotel, meal, meeting, other
+  category: text('category'),                          // 对应报销类别: flight, train, hotel, meal, taxi
+  title: text('title').notNull(),                      // 标题，如"北京→上海 G102"
+  description: text('description'),                    // 详细描述
+  location: text('location'),                          // 地点
+
+  // 交通信息
+  departure: text('departure'),                        // 出发地
+  arrival: text('arrival'),                            // 到达地
+  transportNumber: text('transport_number'),            // 车次/航班号
+
+  // 住宿信息
+  hotelName: text('hotel_name'),
+  checkIn: timestamp('check_in'),
+  checkOut: timestamp('check_out'),
+
+  // 费用关联
+  amount: real('amount'),                              // 关联金额
+  currency: text('currency'),                          // 币种
+  reimbursementItemId: uuid('reimbursement_item_id'),  // 关联的报销明细ID
+  receiptUrl: text('receipt_url'),                     // 关联的票据URL
+
+  sortOrder: integer('sort_order').notNull().default(0), // 排序顺序
+
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -615,6 +688,30 @@ export const tripsRelations = relations(trips, ({ one, many }) => ({
     references: [users.id],
   }),
   reimbursements: many(reimbursements),
+  itineraries: many(tripItineraries),
+}));
+
+export const tripItinerariesRelations = relations(tripItineraries, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [tripItineraries.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [tripItineraries.userId],
+    references: [users.id],
+  }),
+  trip: one(trips, {
+    fields: [tripItineraries.tripId],
+    references: [trips.id],
+  }),
+  items: many(tripItineraryItems),
+}));
+
+export const tripItineraryItemsRelations = relations(tripItineraryItems, ({ one }) => ({
+  itinerary: one(tripItineraries, {
+    fields: [tripItineraryItems.itineraryId],
+    references: [tripItineraries.id],
+  }),
 }));
 
 export const reimbursementsRelations = relations(reimbursements, ({ one, many }) => ({
