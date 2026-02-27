@@ -10,6 +10,7 @@ import { users, reimbursements, reimbursementItems, tenants } from '@/lib/db/sch
 import { eq, and, gte, lte, inArray, sql, desc } from 'drizzle-orm';
 import { getUserRoles, isAdmin, canApprove, canProcessPayment } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
+import { apiError } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -87,7 +88,7 @@ export async function GET(request: NextRequest) {
       });
 
       if (!user || user.tenantId !== internalTenantId) {
-        return NextResponse.json({ error: '内部认证失败' }, { status: 403 });
+        return apiError('内部认证失败', 403);
       }
 
       userId = internalUserId;
@@ -95,7 +96,7 @@ export async function GET(request: NextRequest) {
       // 正常的 session 认证
       const session = await auth();
       if (!session?.user) {
-        return NextResponse.json({ error: '未登录' }, { status: 401 });
+        return apiError('未登录', 401);
       }
 
       user = await db.query.users.findFirst({
@@ -103,7 +104,7 @@ export async function GET(request: NextRequest) {
       });
 
       if (!user?.tenantId) {
-        return NextResponse.json({ error: '未关联公司' }, { status: 404 });
+        return apiError('未关联公司', 404, 'NO_TENANT');
       }
 
       userId = session.user.id;
@@ -449,6 +450,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('[Expenses API] Error:', error);
-    return NextResponse.json({ error: '获取费用分析失败' }, { status: 500 });
+    return apiError('获取费用分析失败', 500);
   }
 }

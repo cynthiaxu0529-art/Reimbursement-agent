@@ -4,6 +4,7 @@ import { tenants, users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { authenticate } from '@/lib/auth/api-key';
 import { API_SCOPES } from '@/lib/auth/scopes';
+import { apiError } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
   try {
     const authResult = await authenticate(request, API_SCOPES.SETTINGS_READ);
     if (!authResult.success) {
-      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
+      return apiError(authResult.error, authResult.statusCode);
     }
 
     const { context: authCtx } = authResult;
@@ -74,7 +75,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, data: { categories } });
   } catch (error) {
     console.error('Get categories error:', error);
-    return NextResponse.json({ error: '获取费用类别失败' }, { status: 500 });
+    return apiError('获取费用类别失败', 500);
   }
 }
 
