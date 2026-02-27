@@ -40,6 +40,19 @@ metadata:
 
 你可以帮助用户管理企业报销流程。通过以下 API 操作，你可以代替用户完成报销的全流程。
 
+## 环境配置
+
+使用此技能前，必须配置以下两个环境变量，缺一不可：
+
+| 变量名 | 必填 | 说明 | 示例 |
+|--------|------|------|------|
+| \`REIMBURSEMENT_API_KEY\` | ✅ | API 认证密钥，以 \`rk_\` 开头 | \`rk_abc123...\` |
+| \`REIMBURSEMENT_API_URL\` | ✅ | 报销服务的完整基础 URL（不带末尾斜杠） | \`${baseUrl}\` |
+
+**常见错误**：只配置了 \`REIMBURSEMENT_API_KEY\` 而没有配置 \`REIMBURSEMENT_API_URL\`，会导致所有 API 请求失败（地址为空）。请确保两个变量都已正确设置。
+
+获取方式：登录报销系统后台，进入 **设置 → API 密钥** 页面创建密钥，同时记下系统的访问地址作为 \`REIMBURSEMENT_API_URL\`。
+
 ## 认证
 
 所有 API 请求必须在 Header 中携带：
@@ -233,6 +246,7 @@ GET {REIMBURSEMENT_API_URL}/api/settings/profile
 
 | 状态码 | 含义 | 建议操作 |
 |--------|------|---------|
+| 连接失败 | \`REIMBURSEMENT_API_URL\` 未配置或格式错误 | 检查环境变量是否已设置完整的 URL（含 https://） |
 | 401 | API Key 无效或过期 | 提醒用户重新配置 API Key |
 | 403 | 权限不足（scope 不够） | 告知用户需要哪个权限 |
 | 400 | 请求参数错误 | 根据 error 字段提示用户修正 |
