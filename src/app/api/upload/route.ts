@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { put } from '@vercel/blob';
 import { auth } from '@/lib/auth';
+import { apiError } from '@/lib/api-error';
 
 // 强制动态渲染
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
     // 验证登录状态
     const session = await auth();
     if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+      return apiError('未登录', 401);
     }
 
     // 解析 FormData
@@ -36,26 +37,17 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null;
 
     if (!file) {
-      return NextResponse.json(
-        { error: '请选择要上传的文件' },
-        { status: 400 }
-      );
+      return apiError('请选择要上传的文件', 400, 'MISSING_REQUIRED_FIELDS');
     }
 
     // 验证文件类型
     if (!ALLOWED_TYPES.includes(file.type)) {
-      return NextResponse.json(
-        { error: `不支持的文件类型: ${file.type}。支持: JPG, PNG, WebP, GIF, PDF` },
-        { status: 400 }
-      );
+      return apiError(`不支持的文件类型: ${file.type}。支持: JPG, PNG, WebP, GIF, PDF`, 400, 'INVALID_FILE_TYPE');
     }
 
     // 验证文件大小
     if (file.size > MAX_FILE_SIZE) {
-      return NextResponse.json(
-        { error: `文件过大，最大支持 ${MAX_FILE_SIZE / 1024 / 1024}MB` },
-        { status: 400 }
-      );
+      return apiError(`文件过大，最大支持 ${MAX_FILE_SIZE / 1024 / 1024}MB`, 400, 'FILE_TOO_LARGE');
     }
 
     // 生成唯一文件名
@@ -82,15 +74,9 @@ export async function POST(request: NextRequest) {
 
     // 检查是否是 Blob token 未配置的错误
     if (error.message?.includes('BLOB_READ_WRITE_TOKEN')) {
-      return NextResponse.json(
-        { error: '文件存储服务未配置，请联系管理员' },
-        { status: 500 }
-      );
+      return apiError('文件存储服务未配置，请联系管理员', 500, 'STORAGE_NOT_CONFIGURED');
     }
 
-    return NextResponse.json(
-      { error: `上传失败: ${error.message || '未知错误'}` },
-      { status: 500 }
-    );
+    return apiError(`上传失败: ${error.message || '未知错误'}`, 500);
   }
 }

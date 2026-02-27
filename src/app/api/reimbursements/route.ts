@@ -2,15 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems, users, tenants } from '@/lib/db/schema';
-import { eq, desc, and, or, inArray } from 'drizzle-orm';
+import { eq, desc, and, or, inArray, sql } from 'drizzle-orm';
 import { getUserRoles, canApprove, canProcessPayment, isAdmin } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
 import { checkItemsLimit } from '@/lib/policy/limit-service';
 import { authenticate, logAgentAction, type AuthContext } from '@/lib/auth/api-key';
 import { API_SCOPES } from '@/lib/auth/scopes';
+import { apiError } from '@/lib/api-error';
+import { getIdempotencyKey, getCachedResponse, cacheResponse } from '@/lib/idempotency';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
+
+/** 向响应注入 Rate Limit header（如果有） */
+function withRateHeaders(response: NextResponse, authCtx: AuthContext): NextResponse {
+  if (authCtx.rateLimit) {
+    response.headers.set('X-RateLimit-Limit', String(authCtx.rateLimit.limit));
+    response.headers.set('X-RateLimit-Remaining', String(authCtx.rateLimit.remaining));
+    response.headers.set('X-RateLimit-Reset', String(authCtx.rateLimit.resetAt));
+  }
+  return response;
+}
 
 /**
  * GET /api/reimbursements - 获取报销列表
@@ -21,7 +33,7 @@ export async function GET(request: NextRequest) {
     // 统一认证（自动判断 Session 或 API Key）
     const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_READ);
     if (!authResult.success) {
-      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
+      return apiError(authResult.error, authResult.statusCode);
     }
     const authCtx = authResult.context;
     const startTime = Date.now();
@@ -39,7 +51,7 @@ export async function GET(request: NextRequest) {
     });
 
     if (!currentUser) {
-      return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+      return apiError('用户不存在', 404);
     }
 
     // 获取用户的角色数组（支持多角色）
@@ -55,7 +67,7 @@ export async function GET(request: NextRequest) {
     if (role === 'approver' && currentUser.tenantId && !isAgentRequest) {
       // 检查用户是否有审批权限（admin也可以查看和审批）
       if (!canApprove(userRoles) && !isAdmin(userRoles)) {
-        return NextResponse.json({ error: '无审批权限' }, { status: 403 });
+        return apiError('无审批权限', 403, 'ROLE_INSUFFICIENT');
       }
 
       // 获取用户可以查看的报销提交人ID列表（部门级数据隔离）
@@ -87,7 +99,7 @@ export async function GET(request: NextRequest) {
     } else if (role === 'finance' && currentUser.tenantId && !isAgentRequest) {
       // 检查用户是否有财务权限
       if (!canProcessPayment(userRoles)) {
-        return NextResponse.json({ error: '无财务权限' }, { status: 403 });
+        return apiError('无财务权限', 403, 'ROLE_INSUFFICIENT');
       }
       // 财务可以看同租户所有报销（需要处理付款）
       conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
@@ -112,25 +124,34 @@ export async function GET(request: NextRequest) {
     const isApproverOrFinance = (role === 'approver' && (canApprove(userRoles) || isAdmin(userRoles))) ||
                                  (role === 'finance' && canProcessPayment(userRoles));
 
-    // 查询报销列表
-    const list = await db.query.reimbursements.findMany({
-      where: and(...conditions),
-      orderBy: [desc(reimbursements.createdAt)],
-      limit: pageSize,
-      offset: (page - 1) * pageSize,
-      with: {
-        items: true,
-        user: isApproverOrFinance ? {
-          columns: {
-            id: true,
-            name: true,
-            email: true,
-            avatar: true,
-            department: true,
-          },
-        } : undefined,
-      },
-    });
+    // 并行查询：报销列表 + 总数
+    const whereClause = and(...conditions);
+
+    const [list, countResult] = await Promise.all([
+      db.query.reimbursements.findMany({
+        where: whereClause,
+        orderBy: [desc(reimbursements.createdAt)],
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+        with: {
+          items: true,
+          user: isApproverOrFinance ? {
+            columns: {
+              id: true,
+              name: true,
+              email: true,
+              avatar: true,
+              department: true,
+            },
+          } : undefined,
+        },
+      }),
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(reimbursements)
+        .where(whereClause),
+    ]);
+
+    const total = countResult[0]?.count ?? 0;
 
     // Transform data to include submitter info for approver mode
     const transformedList = list.map((item: any) => ({
@@ -147,7 +168,7 @@ export async function GET(request: NextRequest) {
     const response = {
       success: true,
       data: transformedList,
-      meta: { page, pageSize },
+      meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
     };
 
     // Agent 审计日志
@@ -170,13 +191,10 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return NextResponse.json(response);
+    return withRateHeaders(NextResponse.json(response), authCtx);
   } catch (error) {
     console.error('Get reimbursements error:', error);
-    return NextResponse.json(
-      { error: '获取报销列表失败' },
-      { status: 500 }
-    );
+    return apiError('获取报销列表失败', 500);
   }
 }
 
@@ -186,10 +204,17 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
+    // 幂等性检查：如果有 Idempotency-Key 且已缓存，直接返回
+    const idempotencyKey = getIdempotencyKey(request);
+    if (idempotencyKey) {
+      const cached = getCachedResponse(idempotencyKey);
+      if (cached) return cached;
+    }
+
     // 统一认证
     const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_CREATE);
     if (!authResult.success) {
-      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
+      return apiError(authResult.error, authResult.statusCode);
     }
     const authCtx = authResult.context;
     const startTime = Date.now();
@@ -198,19 +223,13 @@ export async function POST(request: NextRequest) {
     const { title, description, tripId, items, status: submitStatus, totalAmountInBaseCurrency } = body;
 
     if (!title || !items || items.length === 0) {
-      return NextResponse.json(
-        { error: '请填写标题和至少一项费用' },
-        { status: 400 }
-      );
+      return apiError('请填写标题和至少一项费用', 400, 'MISSING_REQUIRED_FIELDS');
     }
 
     // 检查用户是否有公司
     const tenantId = authCtx.tenantId;
     if (!tenantId) {
-      return NextResponse.json(
-        { error: '请先在设置中创建或加入公司，才能提交报销' },
-        { status: 400 }
-      );
+      return apiError('请先在设置中创建或加入公司，才能提交报销', 400, 'NO_TENANT');
     }
 
     // Agent 金额限制检查
@@ -219,9 +238,10 @@ export async function POST(request: NextRequest) {
         (sum: number, item: any) => sum + (parseFloat(item.amount) || 0), 0
       );
       if (requestTotal > authCtx.apiKey.limits.maxAmountPerRequest) {
-        return NextResponse.json(
-          { error: `Agent 单次报销金额超过限制（上限: ${authCtx.apiKey.limits.maxAmountPerRequest}）` },
-          { status: 403 }
+        return apiError(
+          `Agent 单次报销金额超过限制（上限: ${authCtx.apiKey.limits.maxAmountPerRequest}）`,
+          403,
+          'AMOUNT_LIMIT_EXCEEDED',
         );
       }
     }
@@ -230,10 +250,7 @@ export async function POST(request: NextRequest) {
     if (authCtx.authType === 'api_key' && submitStatus === 'pending') {
       const hasSubmitScope = authCtx.apiKey?.scopes.includes(API_SCOPES.REIMBURSEMENT_SUBMIT);
       if (!hasSubmitScope) {
-        return NextResponse.json(
-          { error: 'Agent 缺少 reimbursement:submit scope，只能创建草稿' },
-          { status: 403 }
-        );
+        return apiError('Agent 缺少 reimbursement:submit scope，只能创建草稿', 403, 'INSUFFICIENT_SCOPE');
       }
     }
 
@@ -248,22 +265,13 @@ export async function POST(request: NextRequest) {
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (!item.category) {
-        return NextResponse.json(
-          { error: `第 ${i + 1} 项费用缺少类别` },
-          { status: 400 }
-        );
+        return apiError(`第 ${i + 1} 项费用缺少类别`, 400, 'MISSING_REQUIRED_FIELDS');
       }
       if (!item.amount || isNaN(parseFloat(item.amount))) {
-        return NextResponse.json(
-          { error: `第 ${i + 1} 项费用金额无效` },
-          { status: 400 }
-        );
+        return apiError(`第 ${i + 1} 项费用金额无效`, 400, 'INVALID_AMOUNT');
       }
       if (!item.date) {
-        return NextResponse.json(
-          { error: `第 ${i + 1} 项费用缺少日期` },
-          { status: 400 }
-        );
+        return apiError(`第 ${i + 1} 项费用缺少日期`, 400, 'MISSING_REQUIRED_FIELDS');
       }
     }
 
@@ -426,15 +434,16 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json(responseData);
+    const jsonResponse = withRateHeaders(NextResponse.json(responseData), authCtx);
+
+    // 缓存幂等性响应
+    if (idempotencyKey) {
+      cacheResponse(idempotencyKey, jsonResponse).catch(() => {});
+    }
+
+    return jsonResponse;
   } catch (error: any) {
     console.error('Create reimbursement error:', error);
-    return NextResponse.json(
-      {
-        error: `创建失败: ${error?.message || '未知错误'}`,
-        detail: error?.detail || error?.code || null
-      },
-      { status: 500 }
-    );
+    return apiError(`创建失败: ${error?.message || '未知错误'}`, 500);
   }
 }

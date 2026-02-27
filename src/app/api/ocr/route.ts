@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createReceiptOCRAgent } from '@/agents/receipt-ocr-agent';
 import { auth } from '@/lib/auth';
+import { apiError } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,10 +11,7 @@ export async function POST(request: NextRequest) {
     const { imageUrl, imageBase64, mimeType, collectForLearning = true } = body;
 
     if (!imageUrl && !imageBase64) {
-      return NextResponse.json(
-        { error: 'Either imageUrl or imageBase64 is required' },
-        { status: 400 }
-      );
+      return apiError('imageUrl 或 imageBase64 至少提供一个', 400, 'MISSING_REQUIRED_FIELDS');
     }
 
     const agent = createReceiptOCRAgent();
@@ -38,12 +36,10 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('OCR error:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'OCR failed',
-      },
-      { status: 500 }
+    return apiError(
+      error instanceof Error ? error.message : 'OCR 识别失败',
+      500,
+      'OCR_FAILED',
     );
   }
 }
