@@ -1,24 +1,23 @@
 /**
  * 统一 API 错误响应工具
  *
- * 确保所有端点返回一致的错误格式，方便 Agent 程序化解析：
+ * 返回格式兼容前端（浏览器）和 Agent（API Key）双方：
  * {
  *   "success": false,
- *   "error": {
- *     "code": "ERROR_CODE",
- *     "message": "人类可读的描述"
- *   }
+ *   "error": "人类可读的描述",       ← 前端直接用 result.error 显示
+ *   "error_code": "MACHINE_CODE"     ← Agent 用来程序化判断错误类型
  * }
+ *
+ * 前端现有代码大量使用 `result.error` 作为字符串，
+ * 所以 error 字段必须保持为字符串，不能改成对象。
  */
 
 import { NextResponse } from 'next/server';
 
 export interface ApiErrorBody {
   success: false;
-  error: {
-    code: string;
-    message: string;
-  };
+  error: string;
+  error_code: string;
 }
 
 /**
@@ -37,7 +36,8 @@ export function apiError(
   return NextResponse.json(
     {
       success: false as const,
-      error: { code: resolvedCode, message },
+      error: message,
+      error_code: resolvedCode,
     },
     { status },
   );

@@ -421,12 +421,13 @@ GET {REIMBURSEMENT_API_URL}/api/settings/profile
 ```json
 {
   "success": false,
-  "error": {
-    "code": "ERROR_CODE",
-    "message": "人类可读的错误描述"
-  }
+  "error": "人类可读的错误描述",
+  "error_code": "MACHINE_READABLE_CODE"
 }
 ```
+
+- `error` 字段是字符串，可以直接展示给用户
+- `error_code` 字段是机器可读的错误码，用于程序化判断错误类型
 
 常见错误码：
 
