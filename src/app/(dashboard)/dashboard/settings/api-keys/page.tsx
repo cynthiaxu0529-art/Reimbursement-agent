@@ -110,6 +110,15 @@ export default function ApiKeysPage() {
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Edit state
+  const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editScopes, setEditScopes] = useState<string[]>([]);
+  const [editMaxAmount, setEditMaxAmount] = useState('');
+  const [editRateLimitPerMinute, setEditRateLimitPerMinute] = useState('');
+  const [editRateLimitPerDay, setEditRateLimitPerDay] = useState('');
+  const [saving, setSaving] = useState(false);
+
   // Fetch keys
   useEffect(() => {
     fetchKeys();
@@ -189,7 +198,62 @@ export default function ApiKeysPage() {
     }
   };
 
-  // Scope toggle
+  // Start editing a key
+  const startEdit = (key: ApiKeyItem) => {
+    setEditingKeyId(key.id);
+    setEditName(key.name);
+    setEditScopes([...key.scopes]);
+    setEditMaxAmount(key.maxAmountPerRequest?.toString() || '');
+    setEditRateLimitPerMinute(key.rateLimitPerMinute.toString());
+    setEditRateLimitPerDay(key.rateLimitPerDay.toString());
+  };
+
+  const cancelEdit = () => {
+    setEditingKeyId(null);
+  };
+
+  // Save edited key
+  const handleSave = async () => {
+    if (!editingKeyId) return;
+    if (!editName.trim()) { showMsg(t.nameRequired, true); return; }
+    if (editScopes.length === 0) { showMsg(t.scopeRequired, true); return; }
+
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/api-keys/${editingKeyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName.trim(),
+          scopes: editScopes,
+          maxAmountPerRequest: editMaxAmount ? parseFloat(editMaxAmount) : 0,
+          rateLimitPerMinute: editRateLimitPerMinute ? parseInt(editRateLimitPerMinute) : 60,
+          rateLimitPerDay: editRateLimitPerDay ? parseInt(editRateLimitPerDay) : 1000,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showMsg(t.editSuccess);
+        setEditingKeyId(null);
+        fetchKeys();
+      } else {
+        showMsg(data.error || t.editFailed, true);
+      }
+    } catch {
+      showMsg(t.editFailed, true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Toggle edit scope
+  const toggleEditScope = (scope: string) => {
+    setEditScopes(prev =>
+      prev.includes(scope) ? prev.filter(s => s !== scope) : [...prev, scope]
+    );
+  };
+
+  // Scope toggle (for create form)
   const toggleScope = (scope: string) => {
     setSelectedScopes(prev =>
       prev.includes(scope) ? prev.filter(s => s !== scope) : [...prev, scope]
@@ -489,16 +553,146 @@ export default function ApiKeysPage() {
                   </div>
                   {/* Actions */}
                   {!key.revokedAt && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-red-600 border-red-200 hover:bg-red-50"
-                      onClick={() => handleRevoke(key.id, key.name)}
-                    >
-                      {t.revoke}
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => editingKeyId === key.id ? cancelEdit() : startEdit(key)}
+                      >
+                        {editingKeyId === key.id ? t.cancelCreate : t.edit}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-red-600 border-red-200 hover:bg-red-50"
+                        onClick={() => handleRevoke(key.id, key.name)}
+                      >
+                        {t.revoke}
+                      </Button>
+                    </div>
                   )}
                 </div>
+
+                {/* Inline Edit Form */}
+                {editingKeyId === key.id && (
+                  <div className="mt-4 pt-4 border-t border-gray-200 space-y-4">
+                    {/* Edit Name */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{t.keyName}</label>
+                      <Input
+                        value={editName}
+                        onChange={e => setEditName(e.target.value)}
+                      />
+                    </div>
+
+                    {/* Edit Scope Presets */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">{t.scopePreset}</label>
+                      <div className="flex gap-2">
+                        {Object.entries(SCOPE_PRESETS).map(([presetKey, preset]) => (
+                          <Button
+                            key={presetKey}
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setEditScopes([...preset.scopes])}
+                            className={editScopes.length === preset.scopes.length &&
+                              preset.scopes.every(s => editScopes.includes(s))
+                              ? 'border-blue-500 bg-blue-50 text-blue-700' : ''}
+                          >
+                            {preset.label[language]}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Edit Scope Checkboxes */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">{t.scopes}</label>
+                      <div className="space-y-3">
+                        {SCOPE_GROUPS.map(group => (
+                          <div key={group.label.en}>
+                            <div className="text-xs font-medium text-gray-500 uppercase mb-1.5">
+                              {group.label[language]}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {group.scopes.map(scope => (
+                                <label
+                                  key={scope.value}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs cursor-pointer border transition-colors ${
+                                    editScopes.includes(scope.value)
+                                      ? 'bg-blue-50 border-blue-300 text-blue-800'
+                                      : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={editScopes.includes(scope.value)}
+                                    onChange={() => toggleEditScope(scope.value)}
+                                    className="sr-only"
+                                  />
+                                  <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center ${
+                                    editScopes.includes(scope.value)
+                                      ? 'bg-blue-600 border-blue-600'
+                                      : 'border-gray-300'
+                                  }`}>
+                                    {editScopes.includes(scope.value) && (
+                                      <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    )}
+                                  </span>
+                                  {scope.label[language]}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Edit Limits */}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">{t.maxAmount}</label>
+                        <Input
+                          type="number"
+                          placeholder="5000"
+                          value={editMaxAmount}
+                          onChange={e => setEditMaxAmount(e.target.value)}
+                        />
+                        <p className="text-xs text-gray-400 mt-1">{t.maxAmountHint}</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">{t.rateLimitMinute}</label>
+                        <Input
+                          type="number"
+                          placeholder="60"
+                          value={editRateLimitPerMinute}
+                          onChange={e => setEditRateLimitPerMinute(e.target.value)}
+                        />
+                        <p className="text-xs text-gray-400 mt-1">{t.rateLimitMinuteHint}</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">{t.rateLimitDay}</label>
+                        <Input
+                          type="number"
+                          placeholder="1000"
+                          value={editRateLimitPerDay}
+                          onChange={e => setEditRateLimitPerDay(e.target.value)}
+                        />
+                        <p className="text-xs text-gray-400 mt-1">{t.rateLimitDayHint}</p>
+                      </div>
+                    </div>
+
+                    {/* Save / Cancel */}
+                    <div className="flex justify-end gap-3 pt-2">
+                      <Button variant="outline" onClick={cancelEdit}>{t.cancelCreate}</Button>
+                      <Button onClick={handleSave} disabled={saving}>
+                        {saving ? t.saving : t.save}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </Card>
           ))}
@@ -556,6 +750,15 @@ const TEXT_ZH = {
   revokeConfirm: '确定要撤销 "{name}" 吗？撤销后该 Key 立即失效，无法恢复。',
   revokeSuccess: 'API Key 已撤销',
   revokeFailed: '撤销失败',
+  edit: '编辑',
+  editSuccess: '修改已保存',
+  editFailed: '保存失败',
+  save: '保存修改',
+  saving: '保存中...',
+  rateLimitMinute: '每分钟调用上限',
+  rateLimitMinuteHint: '默认 60 次/分钟',
+  rateLimitDay: '每日调用上限',
+  rateLimitDayHint: '默认 1000 次/天',
   guideTitle: '如何配置 OpenClaw',
   guideStep1: '点击上方「创建 API Key」按钮',
   guideStep2: '复制生成的 Key，配置到 OpenClaw 环境变量',
@@ -607,6 +810,15 @@ const TEXT_EN = {
   revokeConfirm: 'Are you sure you want to revoke "{name}"? This is irreversible.',
   revokeSuccess: 'API Key revoked',
   revokeFailed: 'Failed to revoke',
+  edit: 'Edit',
+  editSuccess: 'Changes saved',
+  editFailed: 'Failed to save changes',
+  save: 'Save Changes',
+  saving: 'Saving...',
+  rateLimitMinute: 'Rate Limit (per minute)',
+  rateLimitMinuteHint: 'Default 60 req/min',
+  rateLimitDay: 'Rate Limit (per day)',
+  rateLimitDayHint: 'Default 1000 req/day',
   guideTitle: 'How to set up OpenClaw',
   guideStep1: 'Click "Create API Key" above',
   guideStep2: 'Copy the generated key and set it as OpenClaw environment variable',
