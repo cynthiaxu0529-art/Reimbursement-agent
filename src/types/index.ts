@@ -454,6 +454,11 @@ export interface ReimbursementItem {
   location?: string;                      // 消费地点（允许缺失）
   vendor?: string;                        // 商家名称
 
+  // 酒店住宿专用字段
+  checkInDate?: Date;                     // 入住日期
+  checkOutDate?: Date;                    // 离店日期
+  nights?: number;                        // 住宿天数
+
   // 票据关联
   receiptId?: string;
   receiptUrl?: string;

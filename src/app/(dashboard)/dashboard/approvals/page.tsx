@@ -17,6 +17,10 @@ interface ReimbursementItem {
   receiptUrl?: string;
   receiptFileName?: string;
   vendor?: string;
+  // Hotel specific fields
+  checkInDate?: string;
+  checkOutDate?: string;
+  nights?: number;
   isOfficialInvoice?: boolean;
   documentCountry?: string;
   invoiceValidation?: {
@@ -145,8 +149,35 @@ const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): Risk
       const limitType = rule.limit.type;
 
       if (limitType === 'per_day') {
+        // Hotel items with nights: compare per-night cost against daily limit
+        const hotelItems = item.items?.filter(exp => exp.category === 'hotel' && ruleCategories.includes('hotel') && exp.nights && exp.nights > 0) || [];
+        for (const hotelExp of hotelItems) {
+          const perNightUSD = (hotelExp.amountInBaseCurrency || 0) / (hotelExp.nights || 1);
+          if (perNightUSD > limitAmountUSD) {
+            const overAmount = perNightUSD - limitAmountUSD;
+            const percentage = Math.round((overAmount / limitAmountUSD) * 100);
+            const dateLabel = hotelExp.checkInDate
+              ? `${hotelExp.checkInDate.split('T')[0]}~${(hotelExp.checkOutDate || '').split('T')[0]}`
+              : hotelExp.date?.split('T')[0] || '';
+            alerts.push({
+              id: `risk-hotel-${hotelExp.id}-pernight`,
+              type: 'over_budget',
+              level: percentage > 50 ? 'high' : 'medium',
+              itemId: hotelExp.id,
+              message: `酒店 ${dateLabel}（${hotelExp.nights}晚）每晚 $${perNightUSD.toFixed(0)} 超出每日限额 $${limitAmountUSD}`,
+              standardValue: limitAmountUSD,
+              actualValue: perNightUSD,
+              percentage,
+            });
+          }
+        }
+
+        // Non-hotel items: original per-date grouping logic
         for (const [date, dateItems] of Object.entries(itemsByDate)) {
-          const matchingItems = dateItems.filter(exp => ruleCategories.includes(exp.category));
+          const matchingItems = dateItems.filter(exp =>
+            ruleCategories.includes(exp.category) &&
+            !(exp.category === 'hotel' && exp.nights && exp.nights > 0)
+          );
           if (matchingItems.length === 0) continue;
 
           const dailyTotalUSD = matchingItems.reduce((sum, exp) => {
@@ -196,13 +227,27 @@ const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): Risk
 
   item.items?.forEach((expense) => {
     const catLabel = categoryLabels[expense.category]?.label || expense.category;
+
+    // Hotel items: warn if missing check-in/check-out dates or nights
+    if (expense.category === 'hotel' && (!expense.checkInDate || !expense.checkOutDate || !expense.nights)) {
+      alerts.push({
+        id: `risk-${expense.id}-hotel-dates`,
+        type: 'policy_violation',
+        level: 'medium',
+        itemId: expense.id,
+        message: `酒店住宿缺少入住/离店日期或住宿天数，无法核实每晚费用`,
+      });
+    }
+
     if (!expense.receiptUrl && expense.amount > 100) {
       alerts.push({
         id: `risk-${expense.id}-attachment`,
         type: 'missing_attachment',
-        level: 'low',
+        level: expense.category === 'hotel' ? 'high' : 'low',
         itemId: expense.id,
-        message: `${catLabel}费用缺少发票附件`,
+        message: expense.category === 'hotel'
+          ? `${catLabel}费用缺少发票和详单附件（酒店报销需提交发票及消费详单）`
+          : `${catLabel}费用缺少发票附件`,
       });
       return;
     }
@@ -831,10 +876,31 @@ export default function ApprovalsPage() {
                                       <div>
                                         <p className="text-sm font-medium text-gray-900">{lineItem.description || catInfo.label}</p>
                                         {lineItem.vendor && <p className="text-xs text-gray-500">{lineItem.vendor}</p>}
+                                        {lineItem.category === 'hotel' && (lineItem.checkInDate || lineItem.checkOutDate || lineItem.nights) && (
+                                          <div className="flex items-center gap-1.5 mt-1">
+                                            {lineItem.checkInDate && lineItem.checkOutDate && (
+                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-xs text-blue-700">
+                                                {formatDate(lineItem.checkInDate)} ~ {formatDate(lineItem.checkOutDate)}
+                                              </span>
+                                            )}
+                                            {lineItem.nights && (
+                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-50 text-xs text-purple-700">
+                                                {lineItem.nights}{language === 'zh' ? '晚' : (lineItem.nights > 1 ? ' nights' : ' night')}
+                                              </span>
+                                            )}
+                                            {lineItem.nights && lineItem.amountInBaseCurrency ? (
+                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-xs text-gray-600">
+                                                ${(lineItem.amountInBaseCurrency / lineItem.nights).toFixed(0)}/{language === 'zh' ? '晚' : 'night'}
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                        )}
                                       </div>
                                     </div>
                                     <div className="text-center text-sm text-gray-600">
-                                      {formatDate(lineItem.date)}
+                                      {lineItem.category === 'hotel' && lineItem.checkInDate
+                                        ? formatDate(lineItem.checkInDate)
+                                        : formatDate(lineItem.date)}
                                     </div>
                                     <div className="text-right text-sm font-medium text-gray-900">
                                       {itemSymbol}{lineItem.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
