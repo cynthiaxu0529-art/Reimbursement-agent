@@ -129,8 +129,10 @@ GET {REIMBURSEMENT_API_URL}/api/reimbursements
           "description": "上海→北京 机票",
           "amount": 1200,
           "currency": "CNY",
+          "amountInBaseCurrency": 165.6,
           "date": "2026-02-15",
-          "vendor": "东方航空"
+          "vendor": "东方航空",
+          "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-flight.jpg"
         }
       ]
     }
@@ -143,6 +145,8 @@ GET {REIMBURSEMENT_API_URL}/api/reimbursements
   }
 }
 ```
+
+**返回字段说明**：每个 item 包含 `receiptUrl`（票据图片地址，可能为 `null`）。Agent 可以通过此字段判断某项费用是否已关联票据，如果为 `null` 则缺少附件，应提醒用户补充上传。
 
 ### 2. 创建报销单
 
