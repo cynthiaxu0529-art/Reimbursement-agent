@@ -14,6 +14,10 @@ interface ReimbursementItem {
   location?: string;
   vendor?: string;
   receiptUrl?: string;
+  // Hotel specific fields
+  checkInDate?: string;
+  checkOutDate?: string;
+  nights?: number;
 }
 
 interface PayoutInfo {
@@ -793,6 +797,39 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
                           {item.date && ` · ${new Date(item.date).toLocaleDateString('zh-CN')}`}
                           {item.location && ` · ${item.location}`}
                         </p>
+                        {item.category === 'hotel' && (item.checkInDate || item.checkOutDate || item.nights) && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginTop: '0.25rem' }}>
+                            {item.checkInDate && item.checkOutDate && (
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                                padding: '0.125rem 0.375rem', borderRadius: '0.25rem',
+                                backgroundColor: '#eff6ff', fontSize: '0.75rem', color: '#1d4ed8'
+                              }}>
+                                {new Date(item.checkInDate).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
+                                {' ~ '}
+                                {new Date(item.checkOutDate).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
+                              </span>
+                            )}
+                            {item.nights && (
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center',
+                                padding: '0.125rem 0.375rem', borderRadius: '0.25rem',
+                                backgroundColor: '#f5f3ff', fontSize: '0.75rem', color: '#6d28d9'
+                              }}>
+                                {item.nights}晚
+                              </span>
+                            )}
+                            {item.nights && item.amount ? (
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center',
+                                padding: '0.125rem 0.375rem', borderRadius: '0.25rem',
+                                backgroundColor: '#f3f4f6', fontSize: '0.75rem', color: '#4b5563'
+                              }}>
+                                ¥{(item.amount / item.nights).toFixed(0)}/晚
+                              </span>
+                            ) : null}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>

@@ -327,20 +327,44 @@ export async function PUT(
         .delete(reimbursementItems)
         .where(eq(reimbursementItems.reimbursementId, id));
 
+      const parseDate = (dateStr: string): Date => {
+        if (!dateStr) return new Date();
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) return d;
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+          return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        }
+        return new Date();
+      };
+
       await db.insert(reimbursementItems).values(
-        items.map((item: any) => ({
-          reimbursementId: id,
-          category: item.category,
-          description: item.description || '',
-          amount: parseFloat(item.amount) || 0,
-          currency: item.currency || 'CNY',
-          exchangeRate: item.exchangeRate || null,
-          amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
-          date: new Date(item.date),
-          location: item.location || null,
-          vendor: item.vendor || null,
-          receiptUrl: item.receiptUrl || null,
-        }))
+        items.map((item: any) => {
+          const itemData: any = {
+            reimbursementId: id,
+            category: item.category,
+            description: item.description || '',
+            amount: parseFloat(item.amount) || 0,
+            currency: item.currency || 'CNY',
+            exchangeRate: item.exchangeRate || null,
+            amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
+            date: new Date(item.date),
+            location: item.location || null,
+            vendor: item.vendor || null,
+            receiptUrl: item.receiptUrl || null,
+          };
+          // Hotel-specific fields
+          if (item.checkInDate) {
+            itemData.checkInDate = parseDate(item.checkInDate);
+          }
+          if (item.checkOutDate) {
+            itemData.checkOutDate = parseDate(item.checkOutDate);
+          }
+          if (item.nights) {
+            itemData.nights = parseInt(item.nights) || null;
+          }
+          return itemData;
+        })
       );
     }
 
