@@ -129,8 +129,10 @@ GET {REIMBURSEMENT_API_URL}/api/reimbursements
           "description": "上海→北京 机票",
           "amount": 1200,
           "currency": "CNY",
+          "amountInBaseCurrency": 165.6,
           "date": "2026-02-15",
-          "vendor": "东方航空"
+          "vendor": "东方航空",
+          "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-flight.jpg"
         }
       ]
     }
@@ -143,6 +145,8 @@ GET {REIMBURSEMENT_API_URL}/api/reimbursements
   }
 }
 ```
+
+**返回字段说明**：每个 item 包含 `receiptUrl`（票据图片地址，可能为 `null`）。Agent 可以通过此字段判断某项费用是否已关联票据，如果为 `null` 则缺少附件，应提醒用户补充上传。
 
 ### 2. 创建报销单
 
@@ -165,7 +169,8 @@ Content-Type: application/json
       "currency": "CNY",
       "date": "2026-02-15",
       "vendor": "东方航空",
-      "location": "上海"
+      "location": "上海",
+      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-flight.jpg"
     },
     {
       "category": "hotel",
@@ -177,7 +182,8 @@ Content-Type: application/json
       "location": "北京",
       "checkInDate": "2026-02-15",
       "checkOutDate": "2026-02-17",
-      "nights": 2
+      "nights": 2,
+      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-hotel.jpg"
     },
     {
       "category": "meal",
@@ -186,7 +192,8 @@ Content-Type: application/json
       "currency": "CNY",
       "date": "2026-02-16",
       "vendor": "全聚德",
-      "location": "北京"
+      "location": "北京",
+      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-meal.jpg"
     }
   ]
 }
@@ -218,6 +225,7 @@ Content-Type: application/json
 ```
 
 **注意事项：**
+- **必须附带票据（重要）**：每个费用明细的 `receiptUrl` 字段必须填入对应的票据图片 URL。没有附件的报销会被财务驳回。流程是：先调用 `POST /api/upload` 上传票据获取 `url`，然后把该 `url` 填入 items 的 `receiptUrl` 字段。
 - 如果费用超过政策限额，系统会自动调整金额并在 `limitAdjustments` 中说明。请将调整信息告知用户。
 - **汇率自动转换**：`amount` 和 `currency` 是必填项，`exchangeRate` 和 `amountInBaseCurrency` 可以省略。服务端会自动按照管理员设定的汇率将原币金额转换为公司记账本位币。Agent 无需手动计算汇率。
 - **OCR 金额保护**：通过 OCR 识别出的发票原始金额应如实填入 `amount`，不要修改 OCR 识别的金额。
@@ -372,7 +380,12 @@ Agent 无需单独调用 OCR，也无需计算汇率，一步到位。
 - `amount` / `currency` → 票面原始金额（系统识别，不可修改）
 - `exchangeRate` / `amountInBaseCurrency` → 系统自动换算的本位币金额
 - `category` / `vendor` / `date` → 直接填入报销明细
-- `url` → 填入 `receiptUrl` 关联票据
+- **`url` → 必须填入 `receiptUrl` 关联票据**（这是返回的顶层 `url` 字段，不是 `ocr` 内的字段）
+
+**完整流程示例（上传 → 创建报销）：**
+1. 调用 `POST /api/upload` 上传每张票据 → 记下返回的 `url` 和 `ocr` 数据
+2. 创建报销时，每个 item 都必须填入 `receiptUrl: "<上传返回的 url>"`
+3. 没有 `receiptUrl` 的报销会被财务驳回，务必确保每项都附带票据
 
 ### 6. OCR 识别发票（备用）
 
@@ -469,10 +482,12 @@ GET {REIMBURSEMENT_API_URL}/api/settings/profile
 ### 用户："帮我报销这张发票"（附带图片）
 
 1. 上传图片到 /api/upload（系统自动 OCR + 汇率转换）
-2. 从返回的 `ocr` 字段获取金额、币种、类别等信息
+2. 记下返回的 `url`（票据永久链接）和 `ocr` 字段（金额、币种、类别等）
 3. 展示识别结果让用户确认（金额已由系统识别，不可修改）
-4. 根据 OCR 结果创建报销单（草稿），`amount`/`currency` 使用系统识别值
+4. 创建报销单（草稿），每个 item 的 `receiptUrl` 必须填入步骤 2 的 `url`
 5. 让用户确认后通过 PUT 提交
+
+**重要**：如果忘记填 `receiptUrl`，报销单会没有附件，财务会驳回。
 
 ### 用户："那笔被驳回的报销帮我重新提交"
 
