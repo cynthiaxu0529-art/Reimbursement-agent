@@ -102,11 +102,16 @@ export async function POST(request: NextRequest) {
           date: ocrResult.date,
           confidence: ocrResult.confidence,
           description: ocrResult.items?.map((i: { name: string }) => i.name).join(', ') || undefined,
+          // 火车票/机票专用字段
           departure: ocrResult.departure,
           destination: ocrResult.destination,
           trainNumber: ocrResult.trainNumber,
           flightNumber: ocrResult.flightNumber,
           seatClass: ocrResult.seatClass,
+          // 酒店专用字段
+          checkInDate: ocrResult.checkInDate,
+          checkOutDate: ocrResult.checkOutDate,
+          nights: ocrResult.nights,
         };
 
         // 自动汇率转换：查找公司本位币并转换
