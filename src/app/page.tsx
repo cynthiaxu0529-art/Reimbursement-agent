@@ -11,8 +11,9 @@ export default function HomePage() {
     <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
       {/* Header */}
       <header style={{
-        backgroundColor: 'white',
-        borderBottom: '1px solid #e5e7eb',
+        backgroundColor: 'rgba(15, 10, 46, 0.95)',
+        backdropFilter: 'blur(12px)',
+        borderBottom: '1px solid rgba(255,255,255,0.08)',
         position: 'sticky',
         top: 0,
         zIndex: 50
@@ -29,7 +30,7 @@ export default function HomePage() {
             <div style={{
               width: '40px',
               height: '40px',
-              background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
+              background: 'linear-gradient(135deg, #818cf8 0%, #6366f1 100%)',
               borderRadius: '10px',
               display: 'flex',
               alignItems: 'center',
@@ -37,7 +38,7 @@ export default function HomePage() {
             }}>
               <span style={{ color: 'white', fontWeight: 'bold', fontSize: '1.25rem' }}>R</span>
             </div>
-            <span style={{ fontWeight: 600, fontSize: '1.25rem', color: '#111827' }}>
+            <span style={{ fontWeight: 600, fontSize: '1.25rem', color: '#f1f5f9' }}>
               {t.common.appName}
             </span>
           </div>
@@ -46,7 +47,7 @@ export default function HomePage() {
             <Link
               href="/login"
               style={{
-                color: '#4b5563',
+                color: '#cbd5e1',
                 textDecoration: 'none',
                 padding: '0.5rem 1rem',
                 fontWeight: 500
@@ -57,7 +58,7 @@ export default function HomePage() {
             <Link
               href="/register"
               style={{
-                backgroundColor: '#2563eb',
+                background: 'linear-gradient(135deg, #818cf8 0%, #6366f1 100%)',
                 color: 'white',
                 padding: '0.625rem 1.25rem',
                 borderRadius: '0.5rem',
@@ -73,53 +74,87 @@ export default function HomePage() {
 
       {/* Hero Section */}
       <section style={{
-        background: 'linear-gradient(180deg, #eff6ff 0%, #ffffff 100%)',
-        padding: '5rem 1.5rem'
+        background: 'linear-gradient(180deg, #0f0a2e 0%, #1a1145 50%, #1e1b4b 100%)',
+        padding: '5rem 1.5rem 4rem',
+        position: 'relative',
+        overflow: 'hidden'
       }}>
-        <div style={{ maxWidth: '800px', margin: '0 auto', textAlign: 'center' }}>
+        {/* Decorative grid bg */}
+        <div style={{
+          position: 'absolute', inset: 0, opacity: 0.06,
+          backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
+          backgroundSize: '60px 60px'
+        }} />
+
+        <div style={{ maxWidth: '1000px', margin: '0 auto', textAlign: 'center', position: 'relative', zIndex: 1 }}>
+          {/* Badge */}
           <div style={{
-            display: 'inline-block',
-            backgroundColor: '#dbeafe',
-            color: '#1d4ed8',
-            padding: '0.375rem 1rem',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            backgroundColor: 'rgba(129, 140, 248, 0.15)',
+            border: '1px solid rgba(129, 140, 248, 0.3)',
+            color: '#a5b4fc',
+            padding: '0.5rem 1.25rem',
             borderRadius: '9999px',
             fontSize: '0.875rem',
             fontWeight: 500,
-            marginBottom: '1.5rem'
+            marginBottom: '2rem'
           }}>
+            <span style={{
+              display: 'inline-block',
+              width: '8px', height: '8px',
+              borderRadius: '50%',
+              backgroundColor: '#34d399',
+              boxShadow: '0 0 8px rgba(52, 211, 153, 0.6)'
+            }} />
             {t.home.heroBadge}
           </div>
+
+          {/* Title */}
           <h1 style={{
-            fontSize: '3rem',
-            fontWeight: 700,
-            color: '#111827',
-            lineHeight: 1.2,
-            marginBottom: '1.5rem'
+            fontSize: '3.25rem',
+            fontWeight: 800,
+            color: 'white',
+            lineHeight: 1.15,
+            marginBottom: '1.5rem',
+            letterSpacing: '-0.02em'
           }}>
-            {t.home.heroTitle1}
-            <span style={{ color: '#2563eb' }}>{t.home.heroTitle2}</span>
+            {t.home.heroTitle1}<br />
+            <span style={{
+              background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #c084fc 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+            }}>{t.home.heroTitle2}</span>
           </h1>
+
+          {/* Subtitle */}
           <p style={{
-            fontSize: '1.25rem',
-            color: '#6b7280',
+            fontSize: '1.2rem',
+            color: '#94a3b8',
             marginBottom: '2.5rem',
-            lineHeight: 1.6
+            lineHeight: 1.7,
+            maxWidth: '680px',
+            margin: '0 auto 2.5rem'
           }}>
             {t.home.heroDesc1}<br />
             {t.home.heroDesc2}
           </p>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
+
+          {/* CTA buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', marginBottom: '4rem' }}>
             <Link
               href="/register"
               style={{
-                background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                background: 'linear-gradient(135deg, #818cf8 0%, #6366f1 100%)',
                 color: 'white',
                 padding: '0.875rem 2rem',
                 borderRadius: '0.5rem',
                 textDecoration: 'none',
                 fontWeight: 600,
                 fontSize: '1rem',
-                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.3)'
+                boxShadow: '0 4px 20px rgba(99, 102, 241, 0.4)'
               }}
             >
               {t.home.getStarted}
@@ -127,18 +162,112 @@ export default function HomePage() {
             <Link
               href="/login"
               style={{
-                backgroundColor: 'white',
-                color: '#374151',
+                backgroundColor: 'rgba(255,255,255,0.08)',
+                color: '#e2e8f0',
                 padding: '0.875rem 2rem',
                 borderRadius: '0.5rem',
                 textDecoration: 'none',
                 fontWeight: 500,
                 fontSize: '1rem',
-                border: '1px solid #d1d5db'
+                border: '1px solid rgba(255,255,255,0.15)'
               }}
             >
               {t.home.hasAccount}
             </Link>
+          </div>
+
+          {/* Dual-mode visual: Human + Agent */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr auto 1fr',
+            gap: '1.5rem',
+            maxWidth: '820px',
+            margin: '0 auto',
+            alignItems: 'center'
+          }}>
+            {/* Human mode card */}
+            <div style={{
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '1rem',
+              padding: '1.75rem',
+              textAlign: 'left'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', marginBottom: '1rem' }}>
+                <div style={{
+                  width: '36px', height: '36px',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <span style={{ fontSize: '1.1rem' }}>&#x1F464;</span>
+                </div>
+                <span style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.95rem' }}>
+                  {t.home.humanMode}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {[t.home.humanStep1, t.home.humanStep2, t.home.humanStep3].map((step, i) => (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    color: '#94a3b8', fontSize: '0.825rem'
+                  }}>
+                    <span style={{ color: '#3b82f6' }}>&#x25B8;</span>
+                    {step}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Connector */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+              <div style={{
+                width: '44px', height: '44px',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #818cf8, #6366f1)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 0 24px rgba(99, 102, 241, 0.4)'
+              }}>
+                <span style={{ color: 'white', fontSize: '1.25rem', fontWeight: 700 }}>&#x00D7;</span>
+              </div>
+              <span style={{ color: '#6366f1', fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.05em' }}>
+                {t.home.collab}
+              </span>
+            </div>
+
+            {/* Agent mode card */}
+            <div style={{
+              backgroundColor: 'rgba(129, 140, 248, 0.08)',
+              border: '1px solid rgba(129, 140, 248, 0.25)',
+              borderRadius: '1rem',
+              padding: '1.75rem',
+              textAlign: 'left'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', marginBottom: '1rem' }}>
+                <div style={{
+                  width: '36px', height: '36px',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #818cf8, #6366f1)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <span style={{ fontSize: '1.1rem' }}>&#x1F916;</span>
+                </div>
+                <span style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.95rem' }}>
+                  {t.home.agentMode}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {[t.home.agentModeStep1, t.home.agentModeStep2, t.home.agentModeStep3].map((step, i) => (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    color: '#a5b4fc', fontSize: '0.825rem'
+                  }}>
+                    <span style={{ color: '#818cf8' }}>&#x25B8;</span>
+                    {step}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </section>
