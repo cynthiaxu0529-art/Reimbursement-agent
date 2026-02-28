@@ -11,6 +11,8 @@ import { API_SCOPES } from '@/lib/auth/scopes';
 import { createChatCompletion, extractTextContent } from '@/lib/ai/openrouter-client';
 import { apiError } from '@/lib/api-error';
 import { getIdempotencyKey, getCachedResponse, cacheResponse } from '@/lib/idempotency';
+import { exchangeRateService } from '@/lib/currency/exchange-service';
+import type { CurrencyType } from '@/types';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -273,6 +275,40 @@ export async function POST(request: NextRequest) {
       }
       if (!item.date) {
         return apiError(`第 ${i + 1} 项费用缺少日期`, 400, 'MISSING_REQUIRED_FIELDS');
+      }
+    }
+
+    // 服务端汇率转换：如果 item 缺少 exchangeRate / amountInBaseCurrency，自动转换
+    // 保证 Agent 提交和手动提交行为一致（前端在客户端做转换，Agent 由服务端补齐）
+    for (const item of items) {
+      const itemCurrency = (item.currency || 'CNY') as CurrencyType;
+      const itemAmount = parseFloat(item.amount) || 0;
+
+      // 如果币种和本位币相同，无需转换
+      if (itemCurrency === tenantBaseCurrency) {
+        item.exchangeRate = item.exchangeRate || 1;
+        item.amountInBaseCurrency = item.amountInBaseCurrency || itemAmount;
+        continue;
+      }
+
+      // 如果前端/Agent 已经提供了有效的 exchangeRate 和 amountInBaseCurrency，直接使用
+      if (item.exchangeRate && item.amountInBaseCurrency && item.amountInBaseCurrency !== itemAmount) {
+        continue;
+      }
+
+      // 否则使用服务端汇率自动转换
+      try {
+        const conversion = await exchangeRateService.convert({
+          amount: itemAmount,
+          fromCurrency: itemCurrency,
+          toCurrency: tenantBaseCurrency as CurrencyType,
+        });
+        item.exchangeRate = conversion.exchangeRate;
+        item.amountInBaseCurrency = conversion.convertedAmount;
+      } catch (err) {
+        console.warn(`Exchange rate conversion failed for ${itemCurrency} → ${tenantBaseCurrency}:`, err);
+        // 回退：使用原始金额（与之前行为一致）
+        item.amountInBaseCurrency = item.amountInBaseCurrency || itemAmount;
       }
     }
 

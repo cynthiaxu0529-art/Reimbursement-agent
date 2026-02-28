@@ -118,7 +118,7 @@ const zh = {
     agent4Title: '生产级可靠性',
     agent4Desc: '内置速率限制、幂等性支持和审计日志，确保 Agent 高频调用安全稳定',
     agentCodeTitle: '三步完成 Agent 接入',
-    agentStep1: '1. 在后台创建 API Key',
+    agentStep1: '1. 在侧栏 API Keys 页面创建密钥',
     agentStep2: '2. 配置 OpenClaw 环境变量',
     agentStep3: '3. Agent 自动开始工作',
     // CTA section
