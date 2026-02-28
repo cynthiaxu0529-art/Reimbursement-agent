@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users, tenants } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, tenants, tripItineraries, tripItineraryItems } from '@/lib/db/schema';
 import { eq, desc, and, or, inArray, sql } from 'drizzle-orm';
 import { getUserRoles, canApprove, canProcessPayment, isAdmin } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
 import { checkItemsLimit } from '@/lib/policy/limit-service';
 import { authenticate, logAgentAction, type AuthContext } from '@/lib/auth/api-key';
 import { API_SCOPES } from '@/lib/auth/scopes';
+import { createChatCompletion, extractTextContent } from '@/lib/ai/openrouter-client';
 import { apiError } from '@/lib/api-error';
 import { getIdempotencyKey, getCachedResponse, cacheResponse } from '@/lib/idempotency';
 
@@ -434,6 +435,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // 自动生成差旅行程单（异步，不阻塞响应）
+    const TRAVEL_CATEGORIES = ['flight', 'train', 'hotel', 'meal', 'taxi', 'car_rental', 'fuel', 'parking', 'toll'];
+    const hasTravelItems = items.some((item: any) => TRAVEL_CATEGORIES.includes(item.category));
+    if (hasTravelItems) {
+      // 异步生成，不阻塞主请求返回
+      generateTripItinerary(
+        tenantId,
+        authCtx.userId,
+        reimbursement.id,
+        title,
+        items
+      ).catch(err => console.error('Auto-generate itinerary failed (non-blocking):', err));
+    }
+
     const jsonResponse = withRateHeaders(NextResponse.json(responseData), authCtx);
 
     // 缓存幂等性响应
@@ -445,5 +460,160 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Create reimbursement error:', error);
     return apiError(`创建失败: ${error?.message || '未知错误'}`, 500);
+  }
+}
+
+/**
+ * 自动生成差旅行程单（后台异步执行）
+ * 报销单创建成功后，如果包含差旅类别费用项，自动调用 AI 生成 draft 行程单
+ */
+async function generateTripItinerary(
+  tenantId: string,
+  userId: string,
+  reimbursementId: string,
+  title: string,
+  items: any[]
+) {
+  try {
+    // 构建 AI prompt
+    const itemsSummary = items.map((item: any, index: number) => {
+      const parts = [`第${index + 1}项：`];
+      parts.push(`类别: ${item.category}`);
+      if (item.description) parts.push(`描述: ${item.description}`);
+      if (item.vendor) parts.push(`供应商: ${item.vendor}`);
+      if (item.amount) parts.push(`金额: ${item.currency || 'CNY'} ${item.amount}`);
+      if (item.date) parts.push(`日期: ${item.date}`);
+      if (item.departure) parts.push(`出发地: ${item.departure}`);
+      if (item.destination) parts.push(`目的地: ${item.destination}`);
+      if (item.trainNumber) parts.push(`车次: ${item.trainNumber}`);
+      if (item.flightNumber) parts.push(`航班: ${item.flightNumber}`);
+      if (item.seatClass) parts.push(`座位: ${item.seatClass}`);
+      if (item.checkInDate) parts.push(`入住: ${item.checkInDate}`);
+      if (item.checkOutDate) parts.push(`退房: ${item.checkOutDate}`);
+      return parts.join(', ');
+    }).join('\n');
+
+    const systemPrompt = `你是一个智能行程生成助手。根据用户提交的报销费用明细，智能推断并生成一份完整的差旅行程单。
+
+要求：
+1. 根据交通票据（机票、火车票）的出发地、目的地、日期推断行程路线
+2. 根据酒店入住信息补充住宿安排
+3. 根据餐饮、交通等费用补充日程中的相关活动
+4. 按时间顺序排列行程节点
+5. 为每个节点推断合理的时间（如航班通常早晨，酒店入住通常下午）
+6. 生成一个简洁的行程标题
+
+请严格按照以下 JSON 格式输出，不要输出任何其他内容：
+{
+  "title": "行程标题，如：上海-北京出差",
+  "purpose": "推断的出差目的",
+  "startDate": "YYYY-MM-DD",
+  "endDate": "YYYY-MM-DD",
+  "destinations": ["目的地1", "目的地2"],
+  "items": [
+    {
+      "date": "YYYY-MM-DD",
+      "time": "HH:mm",
+      "type": "transport|hotel|meal|meeting|other",
+      "category": "对应报销类别如flight/train/hotel/meal/taxi",
+      "title": "节点标题",
+      "description": "详细描述",
+      "location": "地点",
+      "departure": "出发地（交通类）",
+      "arrival": "到达地（交通类）",
+      "transportNumber": "车次/航班号",
+      "hotelName": "酒店名称（住宿类）",
+      "checkIn": "YYYY-MM-DD（住宿类）",
+      "checkOut": "YYYY-MM-DD（住宿类）",
+      "amount": 金额数字,
+      "currency": "币种",
+      "sourceItemIndex": 对应报销明细的索引号(从0开始),
+      "sortOrder": 排序号
+    }
+  ]
+}`;
+
+    const userPrompt = `报销说明：${title || '未填写'}
+
+报销费用明细：
+${itemsSummary}
+
+请根据以上信息，推断并生成完整的差旅行程单。`;
+
+    const response = await createChatCompletion(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      { temperature: 0.3, max_tokens: 4096 }
+    );
+
+    const content = extractTextContent(response);
+
+    // 解析 AI 返回的 JSON
+    let itinerary;
+    try {
+      const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, content];
+      const jsonStr = jsonMatch[1]?.trim() || content.trim();
+      itinerary = JSON.parse(jsonStr);
+    } catch (parseError) {
+      console.error('[Auto-itinerary] Failed to parse AI response:', content);
+      return;
+    }
+
+    // 保存行程单到数据库（status=draft）
+    const [saved] = await db
+      .insert(tripItineraries)
+      .values({
+        tenantId,
+        userId,
+        reimbursementId,
+        title: itinerary.title || title,
+        purpose: itinerary.purpose || null,
+        startDate: itinerary.startDate ? new Date(itinerary.startDate) : null,
+        endDate: itinerary.endDate ? new Date(itinerary.endDate) : null,
+        destinations: itinerary.destinations || [],
+        status: 'draft',
+        aiGenerated: true,
+      })
+      .returning();
+
+    // 保存行程明细
+    if (itinerary.items && itinerary.items.length > 0) {
+      await db.insert(tripItineraryItems).values(
+        itinerary.items.map((item: any, index: number) => {
+          // 关联报销凭证
+          const sourceIndex = item.sourceItemIndex;
+          const sourceItem = (sourceIndex !== undefined && sourceIndex !== null && items[sourceIndex])
+            ? items[sourceIndex] : null;
+
+          return {
+            itineraryId: saved.id,
+            date: new Date(item.date),
+            time: item.time || null,
+            type: item.type || 'other',
+            category: item.category || null,
+            title: item.title,
+            description: item.description || null,
+            location: item.location || null,
+            departure: item.departure || null,
+            arrival: item.arrival || null,
+            transportNumber: item.transportNumber || null,
+            hotelName: item.hotelName || null,
+            checkIn: item.checkIn ? new Date(item.checkIn) : null,
+            checkOut: item.checkOut ? new Date(item.checkOut) : null,
+            amount: item.amount ? parseFloat(item.amount) : null,
+            currency: item.currency || null,
+            reimbursementItemId: null,
+            receiptUrl: sourceItem?.receiptUrl || null,
+            sortOrder: item.sortOrder ?? index,
+          };
+        })
+      );
+    }
+
+    console.log(`[Auto-itinerary] Generated draft itinerary ${saved.id} for reimbursement ${reimbursementId}`);
+  } catch (error) {
+    console.error('[Auto-itinerary] Generation failed:', error);
   }
 }
