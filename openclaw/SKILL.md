@@ -254,6 +254,64 @@ Content-Type: application/json
 - 撤回已提交的报销：`{ "status": "draft" }`
 - 驳回后重新提交：`{ "status": "pending" }`（会清除驳回信息）
 
+### 3a. 修改单个费用明细
+
+```http
+PATCH {REIMBURSEMENT_API_URL}/api/reimbursements/{id}/items/{itemId}
+Content-Type: application/json
+```
+
+仅 `draft` 或 `rejected` 状态的报销单可以编辑。支持局部更新，只需传要修改的字段。
+
+请求体（所有字段均为可选，只传需要修改的）：
+```json
+{
+  "amount": 200,
+  "currency": "CNY",
+  "category": "taxi",
+  "description": "机场打车（修改后）",
+  "vendor": "滴滴出行",
+  "date": "2026-02-16",
+  "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-xxx.jpg"
+}
+```
+
+响应示例：
+```json
+{
+  "success": true,
+  "data": { "id": "itemId", "amount": 200, "..." : "..." },
+  "limitAdjustment": {
+    "wasAdjusted": true,
+    "message": "金额超过每日限额，已从 200 调整为 150"
+  }
+}
+```
+
+**注意**：如果金额超过政策限额，系统会自动调整并在 `limitAdjustment` 中说明。
+
+**与 PUT /api/reimbursements/{id} 的区别**：
+- `PUT` 是**全量替换**所有费用明细（传完整 items 数组），适合批量修改
+- `PATCH` 是**修改单个**费用明细，适合只改一项的场景（更高效）
+
+### 3b. 删除单个费用明细
+
+```http
+DELETE {REIMBURSEMENT_API_URL}/api/reimbursements/{id}/items/{itemId}
+```
+
+仅 `draft` 或 `rejected` 状态的报销单可以编辑。至少需要保留一项费用明细，不能删除最后一项。
+
+响应：
+```json
+{
+  "success": true,
+  "message": "删除成功"
+}
+```
+
+**注意**：删除后报销单总金额会自动重新计算。如需删除整个报销单，请用下方的 DELETE /api/reimbursements/{id}。
+
 ### 4. 删除报销单
 
 ```http
@@ -422,6 +480,20 @@ GET {REIMBURSEMENT_API_URL}/api/settings/profile
 2. 展示驳回原因（rejectReason 字段）
 3. 询问用户是否需要修改
 4. 用 PUT 更新内容并设 status 为 pending 重新提交
+
+### 用户："帮我把那笔报销里的打车费改成 80 元"
+
+1. 调用 GET /api/reimbursements 找到对应报销单和费用明细
+2. 确认要修改的明细项（展示当前金额）
+3. 调用 PATCH /api/reimbursements/{id}/items/{itemId} 修改金额
+4. 如果系统返回 limitAdjustment，告知用户金额被政策调整
+
+### 用户："帮我删掉报销单里的那笔餐费"
+
+1. 调用 GET /api/reimbursements 找到对应报销单
+2. 确认要删除的明细项（展示明细内容）
+3. 调用 DELETE /api/reimbursements/{id}/items/{itemId} 删除
+4. 告知用户删除成功，报销总金额已自动更新
 
 ### 用户："删掉那个草稿报销单"
 
