@@ -120,7 +120,7 @@ const en: Translations = {
     agent4Title: 'Production-Grade Reliability',
     agent4Desc: 'Built-in rate limiting, idempotency support, and audit logging for safe high-frequency agent calls',
     agentCodeTitle: 'Agent Setup in 3 Steps',
-    agentStep1: '1. Create an API Key in settings',
+    agentStep1: '1. Create an API Key from the sidebar',
     agentStep2: '2. Configure OpenClaw environment',
     agentStep3: '3. Agent starts working automatically',
     // CTA section

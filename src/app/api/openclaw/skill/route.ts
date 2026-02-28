@@ -51,7 +51,7 @@ metadata:
 
 **常见错误**：只配置了 \`REIMBURSEMENT_API_KEY\` 而没有配置 \`REIMBURSEMENT_API_URL\`，会导致所有 API 请求失败（地址为空）。请确保两个变量都已正确设置。
 
-获取方式：登录报销系统后台，进入 **设置 → API 密钥** 页面创建密钥，同时记下系统的访问地址作为 \`REIMBURSEMENT_API_URL\`。
+获取方式：登录报销系统后台，点击侧栏 **API Keys** 页面创建密钥，同时记下系统的访问地址作为 \`REIMBURSEMENT_API_URL\`。
 
 ## 认证
 
@@ -225,7 +225,10 @@ Content-Type: application/json
 - \`"status": "draft"\` - 仅保存草稿（推荐，让用户确认后再提交）
 - \`"status": "pending"\` - 直接提交审批（需要 \`reimbursement:submit\` scope）
 
-响应中如果费用超过政策限额，会包含 \`limitAdjustments\` 字段说明调整详情，请告知用户。
+**注意事项：**
+- 如果费用超过政策限额，会包含 \`limitAdjustments\` 字段说明调整详情，请告知用户。
+- **汇率自动转换**：\`amount\` 和 \`currency\` 是必填项，\`exchangeRate\` 和 \`amountInBaseCurrency\` 可以省略。服务端会自动按照管理员设定的汇率转换为公司记账本位币。
+- **OCR 金额保护**：通过 OCR 识别出的发票原始金额应如实填入 \`amount\`，不要修改 OCR 识别的金额。
 
 ### 3. 更新报销单
 
@@ -401,7 +404,7 @@ export async function GET(request: NextRequest) {
         { method: 'GET', path: '/api/reimbursements', scope: 'reimbursement:read', description: '查看报销单列表' },
         { method: 'POST', path: '/api/reimbursements', scope: 'reimbursement:create', description: '创建报销单' },
         { method: 'PUT', path: '/api/reimbursements/{id}', scope: 'reimbursement:update', description: '更新报销单（编辑/提交/撤回）' },
-        { method: 'DELETE', path: '/api/reimbursements/{id}', scope: 'reimbursement:update', description: '删除报销单（仅 draft/rejected）' },
+        { method: 'DELETE', path: '/api/reimbursements/{id}', scope: 'reimbursement:cancel', description: '删除报销单（仅 draft/rejected）' },
         { method: 'PATCH', path: '/api/reimbursements/{id}', scope: 'approval:approve', description: '审批操作（批准/驳回）' },
         { method: 'POST', path: '/api/upload', scope: 'receipt:upload', description: '上传票据' },
         { method: 'POST', path: '/api/ocr', scope: 'receipt:upload', description: 'OCR 识别发票' },

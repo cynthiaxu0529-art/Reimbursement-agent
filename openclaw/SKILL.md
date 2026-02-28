@@ -24,7 +24,7 @@ metadata:
 
 **常见错误**：只配置了 `REIMBURSEMENT_API_KEY` 而没有配置 `REIMBURSEMENT_API_URL`，会导致所有 API 请求失败（地址为空）。请确保两个变量都已正确设置。
 
-获取方式：登录报销系统后台，进入 **设置 → API 密钥** 页面创建密钥，同时记下系统的访问地址作为 `REIMBURSEMENT_API_URL`。
+获取方式：登录报销系统后台，点击侧栏 **API Keys** 页面创建密钥，同时记下系统的访问地址作为 `REIMBURSEMENT_API_URL`。
 
 ## 认证
 
@@ -217,7 +217,10 @@ Content-Type: application/json
 }
 ```
 
-**注意**：如果费用超过政策限额，系统会自动调整金额并在 `limitAdjustments` 中说明。请将调整信息告知用户。
+**注意事项：**
+- 如果费用超过政策限额，系统会自动调整金额并在 `limitAdjustments` 中说明。请将调整信息告知用户。
+- **汇率自动转换**：`amount` 和 `currency` 是必填项，`exchangeRate` 和 `amountInBaseCurrency` 可以省略。服务端会自动按照管理员设定的汇率将原币金额转换为公司记账本位币。Agent 无需手动计算汇率。
+- **OCR 金额保护**：通过 OCR 识别出的发票原始金额应如实填入 `amount`，不要修改 OCR 识别的金额。
 
 ### 3. 更新报销单
 
