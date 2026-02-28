@@ -20,6 +20,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { createHash, randomBytes } from 'crypto';
 import { hasScope, getRequiredScope, checkScopeRoleRequirement, type ApiScope } from './scopes';
 import { getUserRoles } from './roles';
+import { checkRateLimit } from '@/lib/rate-limit';
 
 // ============================================================================
 // 类型定义
@@ -85,6 +86,12 @@ export interface AuthContext {
       maxAmountPerRequest?: number;
       maxAmountPerDay?: number;
     };
+  };
+  /** 速率限制信息（仅 API Key 认证时存在），用于向响应注入 header */
+  rateLimit?: {
+    limit: number;
+    remaining: number;
+    resetAt: number;
   };
 }
 
@@ -423,21 +430,40 @@ export async function authenticate(
       };
     }
 
-    return {
-      success: true,
-      context: {
-        authType: 'api_key',
-        userId: result.context.userId,
-        tenantId: result.context.tenantId,
-        user: result.context.user,
-        apiKey: {
-          id: result.context.apiKeyId,
-          scopes: result.context.scopes,
-          agentType: result.context.agentType,
-          limits: result.context.limits,
-        },
+    const authContext: AuthContext = {
+      authType: 'api_key',
+      userId: result.context.userId,
+      tenantId: result.context.tenantId,
+      user: result.context.user,
+      apiKey: {
+        id: result.context.apiKeyId,
+        scopes: result.context.scopes,
+        agentType: result.context.agentType,
+        limits: result.context.limits,
       },
     };
+
+    // 速率限制检查
+    const rateLimitResult = checkRateLimit(authContext);
+    if (rateLimitResult && !rateLimitResult.allowed) {
+      const retryAfter = Math.max(1, rateLimitResult.resetAt - Math.floor(Date.now() / 1000));
+      return {
+        success: false,
+        error: `请求过于频繁，请 ${retryAfter} 秒后重试`,
+        statusCode: 429,
+      };
+    }
+
+    // 将限流信息附到上下文，方便路由注入 header
+    if (rateLimitResult) {
+      authContext.rateLimit = {
+        limit: rateLimitResult.limit,
+        remaining: rateLimitResult.remaining,
+        resetAt: rateLimitResult.resetAt,
+      };
+    }
+
+    return { success: true, context: authContext };
   }
 
   // 回退到 NextAuth Session 认证
