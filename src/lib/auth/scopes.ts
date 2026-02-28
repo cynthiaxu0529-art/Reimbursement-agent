@@ -239,6 +239,10 @@ export const ROUTE_SCOPE_MAP: Record<string, { method: string; scope: ApiScope }
     { method: 'PUT', scope: API_SCOPES.REIMBURSEMENT_UPDATE },
     { method: 'DELETE', scope: API_SCOPES.REIMBURSEMENT_CANCEL },
   ],
+  '/api/reimbursements/[id]/items/[itemId]': [
+    { method: 'PATCH', scope: API_SCOPES.REIMBURSEMENT_UPDATE },
+    { method: 'DELETE', scope: API_SCOPES.REIMBURSEMENT_UPDATE },
+  ],
   '/api/reimbursements/stats': [
     { method: 'GET', scope: API_SCOPES.ANALYTICS_READ },
   ],

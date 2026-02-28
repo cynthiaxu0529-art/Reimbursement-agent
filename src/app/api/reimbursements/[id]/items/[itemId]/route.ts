@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { checkItemsLimit } from '@/lib/policy/limit-service';
+import { authenticate, logAgentAction } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
+import { apiError } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +13,7 @@ type RouteParams = { params: Promise<{ id: string; itemId: string }> };
 
 /**
  * DELETE /api/reimbursements/[id]/items/[itemId] - Delete individual expense item
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function DELETE(
   request: NextRequest,
@@ -18,16 +21,19 @@ export async function DELETE(
 ) {
   try {
     const { id, itemId } = await params;
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+
+    // 统一认证（支持 Session 和 API Key）
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_UPDATE);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
     }
+    const authCtx = authResult.context;
 
     // Check if reimbursement exists and belongs to user
     const existing = await db.query.reimbursements.findFirst({
       where: and(
         eq(reimbursements.id, id),
-        eq(reimbursements.userId, session.user.id)
+        eq(reimbursements.userId, authCtx.userId)
       ),
       with: {
         items: true,
@@ -35,29 +41,23 @@ export async function DELETE(
     });
 
     if (!existing) {
-      return NextResponse.json({ error: '报销单不存在' }, { status: 404 });
+      return apiError('报销单不存在', 404);
     }
 
     // Only allow editing in draft or rejected status
     if (existing.status !== 'draft' && existing.status !== 'rejected') {
-      return NextResponse.json(
-        { error: '只有草稿或已拒绝状态的报销单可以编辑' },
-        { status: 400 }
-      );
+      return apiError('只有草稿或已拒绝状态的报销单可以编辑', 400);
     }
 
     // Check if item exists
     const item = existing.items.find(i => i.id === itemId);
     if (!item) {
-      return NextResponse.json({ error: '费用明细不存在' }, { status: 404 });
+      return apiError('费用明细不存在', 404);
     }
 
     // Don't allow deleting the last item
     if (existing.items.length <= 1) {
-      return NextResponse.json(
-        { error: '至少需要保留一项费用明细' },
-        { status: 400 }
-      );
+      return apiError('至少需要保留一项费用明细', 400);
     }
 
     // Delete the item
@@ -85,21 +85,36 @@ export async function DELETE(
       })
       .where(eq(reimbursements.id, id));
 
+    // 记录审计日志（API Key 认证时）
+    if (authCtx.authType === 'api_key' && authCtx.apiKey) {
+      logAgentAction({
+        tenantId: authCtx.tenantId || '',
+        apiKeyId: authCtx.apiKey.id,
+        userId: authCtx.userId,
+        action: 'reimbursement:delete_item',
+        method: 'DELETE',
+        path: `/api/reimbursements/${id}/items/${itemId}`,
+        statusCode: 200,
+        agentType: authCtx.apiKey.agentType,
+        entityType: 'reimbursement_item',
+        entityId: itemId,
+        requestSummary: { reimbursementId: id, itemId },
+      });
+    }
+
     return NextResponse.json({
       success: true,
       message: '删除成功',
     });
   } catch (error) {
     console.error('Delete item error:', error);
-    return NextResponse.json(
-      { error: '删除费用明细失败' },
-      { status: 500 }
-    );
+    return apiError('删除费用明细失败', 500);
   }
 }
 
 /**
  * PATCH /api/reimbursements/[id]/items/[itemId] - Update individual expense item
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function PATCH(
   request: NextRequest,
@@ -107,16 +122,19 @@ export async function PATCH(
 ) {
   try {
     const { id, itemId } = await params;
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+
+    // 统一认证（支持 Session 和 API Key）
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_UPDATE);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
     }
+    const authCtx = authResult.context;
 
     // Check if reimbursement exists and belongs to user
     const existing = await db.query.reimbursements.findFirst({
       where: and(
         eq(reimbursements.id, id),
-        eq(reimbursements.userId, session.user.id)
+        eq(reimbursements.userId, authCtx.userId)
       ),
       with: {
         items: true,
@@ -124,21 +142,18 @@ export async function PATCH(
     });
 
     if (!existing) {
-      return NextResponse.json({ error: '报销单不存在' }, { status: 404 });
+      return apiError('报销单不存在', 404);
     }
 
     // Only allow editing in draft or rejected status
     if (existing.status !== 'draft' && existing.status !== 'rejected') {
-      return NextResponse.json(
-        { error: '只有草稿或已拒绝状态的报销单可以编辑' },
-        { status: 400 }
-      );
+      return apiError('只有草稿或已拒绝状态的报销单可以编辑', 400);
     }
 
     // Check if item exists
     const item = existing.items.find(i => i.id === itemId);
     if (!item) {
-      return NextResponse.json({ error: '费用明细不存在' }, { status: 404 });
+      return apiError('费用明细不存在', 404);
     }
 
     const body = await request.json();
@@ -146,7 +161,7 @@ export async function PATCH(
 
     // 获取用户的租户ID
     const currentUser = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
+      where: eq(users.id, authCtx.userId),
     });
 
     // Build update object
@@ -180,7 +195,7 @@ export async function PATCH(
         const checkOutToCheck = body.checkOutDate || (item as any).checkOutDate;
 
         const limitResult = await checkItemsLimit(
-          session.user.id,
+          authCtx.userId,
           currentUser.tenantId,
           [{
             category: categoryToCheck,
@@ -253,6 +268,23 @@ export async function PATCH(
         .where(eq(reimbursements.id, id));
     }
 
+    // 记录审计日志（API Key 认证时）
+    if (authCtx.authType === 'api_key' && authCtx.apiKey) {
+      logAgentAction({
+        tenantId: authCtx.tenantId || '',
+        apiKeyId: authCtx.apiKey.id,
+        userId: authCtx.userId,
+        action: 'reimbursement:update_item',
+        method: 'PATCH',
+        path: `/api/reimbursements/${id}/items/${itemId}`,
+        statusCode: 200,
+        agentType: authCtx.apiKey.agentType,
+        entityType: 'reimbursement_item',
+        entityId: itemId,
+        requestSummary: { reimbursementId: id, itemId, fields: Object.keys(body) },
+      });
+    }
+
     const responseData: any = {
       success: true,
       data: updated,
@@ -266,9 +298,6 @@ export async function PATCH(
     return NextResponse.json(responseData);
   } catch (error) {
     console.error('Update item error:', error);
-    return NextResponse.json(
-      { error: '更新费用明细失败' },
-      { status: 500 }
-    );
+    return apiError('更新费用明细失败', 500);
   }
 }
