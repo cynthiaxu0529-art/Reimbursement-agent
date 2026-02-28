@@ -198,6 +198,111 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Agent Ready Section */}
+      <section style={{
+        padding: '5rem 1.5rem',
+        background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)'
+      }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
+            <div style={{
+              display: 'inline-block',
+              backgroundColor: '#e0e7ff',
+              color: '#4338ca',
+              padding: '0.375rem 1rem',
+              borderRadius: '9999px',
+              fontSize: '0.875rem',
+              fontWeight: 500,
+              marginBottom: '1.5rem'
+            }}>
+              {t.home.agentBadge}
+            </div>
+            <h2 style={{ fontSize: '2rem', fontWeight: 700, color: '#111827', marginBottom: '1rem' }}>
+              {t.home.agentSectionTitle}
+            </h2>
+            <p style={{ color: '#6b7280', fontSize: '1.125rem', maxWidth: '700px', margin: '0 auto' }}>
+              {t.home.agentSectionDesc}
+            </p>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: '1.5rem',
+            marginBottom: '3rem'
+          }}>
+            {[
+              { icon: '🔌', bg: '#e0e7ff', title: t.home.agent1Title, desc: t.home.agent1Desc },
+              { icon: '🔐', bg: '#fef3c7', title: t.home.agent2Title, desc: t.home.agent2Desc },
+              { icon: '🤖', bg: '#dcfce7', title: t.home.agent3Title, desc: t.home.agent3Desc },
+              { icon: '🛡️', bg: '#fce7f3', title: t.home.agent4Title, desc: t.home.agent4Desc },
+            ].map((feature, idx) => (
+              <div key={idx} style={{
+                backgroundColor: 'white',
+                borderRadius: '1rem',
+                padding: '2rem',
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+              }}>
+                <div style={{
+                  width: '48px',
+                  height: '48px',
+                  backgroundColor: feature.bg,
+                  borderRadius: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '1.25rem'
+                }}>
+                  <span style={{ fontSize: '1.5rem' }}>{feature.icon}</span>
+                </div>
+                <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827', marginBottom: '0.75rem' }}>
+                  {feature.title}
+                </h3>
+                <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
+                  {feature.desc}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* Agent setup steps */}
+          <div style={{
+            backgroundColor: '#1e1b4b',
+            borderRadius: '1rem',
+            padding: '2.5rem',
+            maxWidth: '680px',
+            margin: '0 auto'
+          }}>
+            <h3 style={{ color: 'white', fontWeight: 600, fontSize: '1.125rem', marginBottom: '1.5rem' }}>
+              {t.home.agentCodeTitle}
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {[t.home.agentStep1, t.home.agentStep2, t.home.agentStep3].map((step, idx) => (
+                <div key={idx} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '1rem',
+                  backgroundColor: 'rgba(255,255,255,0.08)',
+                  padding: '1rem 1.25rem',
+                  borderRadius: '0.75rem',
+                  borderLeft: '3px solid #818cf8'
+                }}>
+                  <span style={{
+                    color: '#a5b4fc',
+                    fontFamily: 'monospace',
+                    fontSize: '0.95rem',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    {step}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* CTA Section */}
       <section style={{
         background: 'linear-gradient(135deg, #1e40af 0%, #7c3aed 100%)',
