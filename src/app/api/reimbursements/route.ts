@@ -313,6 +313,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 应用政策限额约束（支持 per_day 和 per_month 类型）
+    // 传入 nights/checkInDate/checkOutDate 以便多日住宿按 每日限额×天数 计算
     const limitResult = await checkItemsLimit(
       authCtx.userId,
       tenantId,
@@ -322,6 +323,9 @@ export async function POST(request: NextRequest) {
         amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
         date: item.date,
         location: item.location,
+        nights: item.nights ? parseInt(item.nights) : undefined,
+        checkInDate: item.checkInDate,
+        checkOutDate: item.checkOutDate,
       }))
     );
 

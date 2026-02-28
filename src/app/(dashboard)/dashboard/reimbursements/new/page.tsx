@@ -229,19 +229,32 @@ export default function NewReimbursementPage() {
     }
 
     // 创建新的费用明细项（包含供应商）
+    // 酒店日期处理：OCR 提取的入住/离店日期自动填入
+    const ocrCheckIn = ocrData.checkInDate ? formatDateForInput(ocrData.checkInDate) : undefined;
+    const ocrCheckOut = ocrData.checkOutDate ? formatDateForInput(ocrData.checkOutDate) : undefined;
+    const ocrNights = ocrData.nights || (ocrCheckIn && ocrCheckOut ? calculateNights(ocrCheckIn, ocrCheckOut) : undefined);
+
+    // 酒店描述自动补充天数信息
+    if (category === 'hotel' && ocrCheckIn && ocrCheckOut && ocrNights) {
+      itemDescription = `${itemDescription || '酒店住宿'} (${ocrCheckIn} 至 ${ocrCheckOut}, ${ocrNights}晚)`;
+    }
+
     const newItem: LineItem = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
       description: itemDescription,
       category: category,
       amount: ocrData.amount ? ocrData.amount.toString() : '',
       currency: ocrData.currency || 'CNY',
-      date: ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0],
+      date: ocrCheckIn || (ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0]),
       vendor: ocrData.vendor || '',
       departure: ocrData.departure || '',
       destination: ocrData.destination || '',
       trainNumber: ocrData.trainNumber || '',
       flightNumber: ocrData.flightNumber || '',
       seatClass: ocrData.seatClass || '',
+      checkInDate: ocrCheckIn,
+      checkOutDate: ocrCheckOut,
+      nights: ocrNights,
     };
 
     // 添加新项目到列表（如果第一项是空的则替换，否则添加）
@@ -295,13 +308,22 @@ export default function NewReimbursementPage() {
         console.warn(`OCR 项目汇率警告: ${conversion.error}`);
       }
 
+      // 酒店日期处理：OCR 提取的入住/离店日期自动填入
+      const ocrCheckIn = ocrData.checkInDate ? formatDateForInput(ocrData.checkInDate) : undefined;
+      const ocrCheckOut = ocrData.checkOutDate ? formatDateForInput(ocrData.checkOutDate) : undefined;
+      const ocrNights = ocrData.nights || (ocrCheckIn && ocrCheckOut ? calculateNights(ocrCheckIn, ocrCheckOut) : undefined);
+
+      if (category === 'hotel' && ocrCheckIn && ocrCheckOut && ocrNights) {
+        itemDescription = `${itemDescription || '酒店住宿'} (${ocrCheckIn} 至 ${ocrCheckOut}, ${ocrNights}晚)`;
+      }
+
       newItems.push({
         id: Date.now().toString() + index + Math.random().toString(36).substr(2, 9),
         description: itemDescription,
         category: category,
         amount: ocrData.amount ? ocrData.amount.toString() : '',
         currency: currency,
-        date: ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0],
+        date: ocrCheckIn || (ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0]),
         vendor: ocrData.vendor || '',
         departure: ocrData.departure || '',
         destination: ocrData.destination || '',
@@ -312,6 +334,9 @@ export default function NewReimbursementPage() {
         amountInUSD: conversion?.success ? conversion.amount : undefined,
         receiptUrl: ocrData.receiptUrl || '',
         receiptFileName: ocrData.receiptFileName || '',
+        checkInDate: ocrCheckIn,
+        checkOutDate: ocrCheckOut,
+        nights: ocrNights,
       });
     }
 

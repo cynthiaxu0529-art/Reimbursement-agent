@@ -175,6 +175,10 @@ export async function PATCH(
       const dateToCheck = date || item.date;
 
       if (currentUser?.tenantId) {
+        const nightsToCheck = body.nights ? parseInt(body.nights) : (item as any).nights;
+        const checkInToCheck = body.checkInDate || (item as any).checkInDate;
+        const checkOutToCheck = body.checkOutDate || (item as any).checkOutDate;
+
         const limitResult = await checkItemsLimit(
           session.user.id,
           currentUser.tenantId,
@@ -184,6 +188,9 @@ export async function PATCH(
             amountInBaseCurrency: finalAmountInBaseCurrency,
             date: typeof dateToCheck === 'string' ? dateToCheck : dateToCheck?.toISOString(),
             location: body.location || item.location,
+            nights: nightsToCheck || undefined,
+            checkInDate: checkInToCheck ? (typeof checkInToCheck === 'string' ? checkInToCheck : checkInToCheck.toISOString()) : undefined,
+            checkOutDate: checkOutToCheck ? (typeof checkOutToCheck === 'string' ? checkOutToCheck : checkOutToCheck.toISOString()) : undefined,
           }]
         );
 
