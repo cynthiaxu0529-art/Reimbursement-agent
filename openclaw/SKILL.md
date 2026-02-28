@@ -270,7 +270,7 @@ DELETE {REIMBURSEMENT_API_URL}/api/reimbursements/{id}
 }
 ```
 
-### 5. 上传票据/发票
+### 5. 上传票据（推荐 - 自动 OCR + 汇率转换）
 
 ```http
 POST {REIMBURSEMENT_API_URL}/api/upload
@@ -280,18 +280,43 @@ Content-Type: multipart/form-data
 表单字段：
 - `file` - 图片文件（支持 jpg, png, webp, gif, pdf，最大 10MB）
 
-上传后会返回票据 URL，可以在创建报销时通过 `receiptUrl` 字段关联：
+**Agent 调用时，系统会自动完成以下操作：**
+1. 上传图片到云存储
+2. 自动 OCR 识别发票内容（金额、币种、商家、日期、类别）
+3. 自动按管理员设定的汇率转换为公司本位币
+
+Agent 无需单独调用 OCR，也无需计算汇率，一步到位。
+
+响应示例（Agent 模式）：
 ```json
 {
   "success": true,
   "url": "https://xxx.blob.vercel-storage.com/receipt-xxx.jpg",
   "filename": "receipt.jpg",
   "size": 102400,
-  "type": "image/jpeg"
+  "type": "image/jpeg",
+  "ocr": {
+    "type": "taxi",
+    "category": "taxi",
+    "amount": 45.00,
+    "currency": "CNY",
+    "vendor": "滴滴出行",
+    "date": "2026-02-15",
+    "confidence": 0.95,
+    "exchangeRate": 0.138,
+    "amountInBaseCurrency": 6.21,
+    "baseCurrency": "USD"
+  }
 }
 ```
 
-### 6. OCR 识别发票
+**使用方法**：将 `ocr` 返回的字段直接用于创建报销单的 `items`，其中：
+- `amount` / `currency` → 票面原始金额（系统识别，不可修改）
+- `exchangeRate` / `amountInBaseCurrency` → 系统自动换算的本位币金额
+- `category` / `vendor` / `date` → 直接填入报销明细
+- `url` → 填入 `receiptUrl` 关联票据
+
+### 6. OCR 识别发票（备用）
 
 ```http
 POST {REIMBURSEMENT_API_URL}/api/ocr
@@ -304,21 +329,7 @@ Content-Type: application/json
 }
 ```
 
-返回发票识别结果，可用于自动填充报销明细：
-```json
-{
-  "success": true,
-  "data": {
-    "type": "taxi",
-    "category": "taxi",
-    "amount": 45.00,
-    "currency": "CNY",
-    "vendor": "滴滴出行",
-    "date": "2026-02-15",
-    "confidence": 0.95
-  }
-}
-```
+**注意**：推荐使用上方的 `POST /api/upload`，上传时自动完成 OCR + 汇率转换。此端点作为备用，适用于已有图片 URL 需要单独识别的场景。Agent 调用时同样会自动附带汇率转换结果。
 
 ### 7. 查看报销政策
 
@@ -399,10 +410,10 @@ GET {REIMBURSEMENT_API_URL}/api/settings/profile
 
 ### 用户："帮我报销这张发票"（附带图片）
 
-1. 上传图片到 /api/upload
-2. 调用 /api/ocr 识别发票内容
-3. 展示识别结果让用户确认
-4. 根据识别结果自动创建报销单（草稿）
+1. 上传图片到 /api/upload（系统自动 OCR + 汇率转换）
+2. 从返回的 `ocr` 字段获取金额、币种、类别等信息
+3. 展示识别结果让用户确认（金额已由系统识别，不可修改）
+4. 根据 OCR 结果创建报销单（草稿），`amount`/`currency` 使用系统识别值
 5. 让用户确认后通过 PUT 提交
 
 ### 用户："那笔被驳回的报销帮我重新提交"

@@ -250,7 +250,7 @@ DELETE {REIMBURSEMENT_API_URL}/api/reimbursements/{id}
 
 仅 \`draft\` 和 \`rejected\` 状态可以删除。删除后不可恢复。
 
-### 5. 上传票据/发票
+### 5. 上传票据（推荐 - 自动 OCR + 汇率转换）
 
 \`\`\`http
 POST {REIMBURSEMENT_API_URL}/api/upload
@@ -260,20 +260,17 @@ Content-Type: multipart/form-data
 表单字段：
 - \`file\` - 图片文件（支持 jpg, png, webp, gif, pdf，最大 10MB）
 
-### 6. OCR 识别发票
+Agent 调用时，系统自动完成：上传 → OCR 识别 → 汇率转换。
+返回 \`ocr\` 字段包含票面金额、币种、汇率、本位币金额，直接用于创建报销单。
+
+### 6. OCR 识别发票（备用）
 
 \`\`\`http
 POST {REIMBURSEMENT_API_URL}/api/ocr
 Content-Type: application/json
 \`\`\`
 
-\`\`\`json
-{
-  "imageUrl": "https://xxx.blob.vercel-storage.com/receipt-xxx.jpg"
-}
-\`\`\`
-
-返回发票识别结果，可用于自动填充报销明细。
+推荐使用 \`POST /api/upload\`（上传时自动 OCR + 汇率转换）。此端点适用于已有图片 URL 需单独识别的场景。
 
 ### 7. 查看报销政策
 
@@ -328,10 +325,10 @@ GET {REIMBURSEMENT_API_URL}/api/settings/profile
 
 ### 用户："帮我报销这张发票"（附带图片）
 
-1. 上传图片到 /api/upload
-2. 调用 /api/ocr 识别发票内容
-3. 展示识别结果让用户确认
-4. 根据识别结果自动创建报销单（草稿）
+1. 上传图片到 /api/upload（系统自动 OCR + 汇率转换）
+2. 从返回的 \`ocr\` 字段获取金额、币种、类别等信息
+3. 展示识别结果让用户确认（金额由系统识别，不可修改）
+4. 根据 OCR 结果创建报销单（草稿）
 5. 让用户确认后通过 PUT 提交
 
 ### 用户："那笔被驳回的报销帮我重新提交"
