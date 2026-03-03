@@ -33,6 +33,24 @@ interface SyncResult {
 // ============================================================================
 
 const FALLBACK_ACCOUNTS: AccountingAccount[] = [
+  // ── R&D 研发费用 ──
+  { account_code: '6410', account_name: 'R&D - Salaries & Benefits', account_type: 'Expense', account_subtype: 'Research & Development' },
+  { account_code: '6420', account_name: 'R&D - Cloud & Infrastructure', account_type: 'Expense', account_subtype: 'Research & Development' },
+  { account_code: '6430', account_name: 'R&D - Software & Subscriptions', account_type: 'Expense', account_subtype: 'Research & Development' },
+  { account_code: '6440', account_name: 'R&D - Travel & Entertainment', account_type: 'Expense', account_subtype: 'Research & Development' },
+  { account_code: '6450', account_name: 'R&D - Meals & Entertainment', account_type: 'Expense', account_subtype: 'Research & Development' },
+  { account_code: '6460', account_name: 'R&D - Office Supplies', account_type: 'Expense', account_subtype: 'Research & Development' },
+  { account_code: '6470', account_name: 'R&D - Training & Conferences', account_type: 'Expense', account_subtype: 'Research & Development' },
+  { account_code: '6490', account_name: 'R&D - Miscellaneous Expense', account_type: 'Expense', account_subtype: 'Research & Development' },
+  // ── S&M 销售费用 ──
+  { account_code: '6110', account_name: 'S&M - Salaries & Commissions', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
+  { account_code: '6120', account_name: 'S&M - Advertising & Promotion', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
+  { account_code: '6130', account_name: 'S&M - Travel & Entertainment', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
+  { account_code: '6140', account_name: 'S&M - Meals & Client Entertainment', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
+  { account_code: '6150', account_name: 'S&M - Office Supplies', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
+  { account_code: '6160', account_name: 'S&M - Training & Conferences', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
+  { account_code: '6190', account_name: 'S&M - Miscellaneous Expense', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
+  // ── G&A 管理费用 ──
   { account_code: '6220', account_name: 'G&A - Rent & Facilities', account_type: 'Expense', account_subtype: 'General & Administrative' },
   { account_code: '6230', account_name: 'G&A - Office Supplies', account_type: 'Expense', account_subtype: 'General & Administrative' },
   { account_code: '6240', account_name: 'G&A - Insurance', account_type: 'Expense', account_subtype: 'General & Administrative' },

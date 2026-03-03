@@ -421,6 +421,7 @@ const zh = {
     totalRecords: '记录数',
     currency: '币种',
     employee: '员工',
+    department: '部门',
     amount: '金额',
     descriptionLabel: '描述',
     noSummaries: '暂无汇总数据。只有审批通过的报销才会生成汇总。',

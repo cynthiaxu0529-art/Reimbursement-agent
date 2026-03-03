@@ -423,6 +423,7 @@ const en: Translations = {
     totalRecords: 'Record Count',
     currency: 'Currency',
     employee: 'Employee',
+    department: 'Department',
     amount: 'Amount',
     descriptionLabel: 'Description',
     noSummaries: 'No summary data yet. Only approved reimbursements generate summaries.',

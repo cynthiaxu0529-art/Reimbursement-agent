@@ -104,6 +104,7 @@ export const departments = pgTable('departments', {
   name: text('name').notNull(),
   code: text('code'),                             // 部门编码，如 TECH-001
   description: text('description'),
+  costCenter: text('cost_center'),                // 费用性质：rd=研发费用, sm=销售费用, ga=管理费用（默认）
   parentId: uuid('parent_id'),                    // 上级部门，为空表示顶级部门
   managerId: uuid('manager_id'),                  // 部门负责人
   approverIds: jsonb('approver_ids').default([]), // 部门审批人列表（UUID数组）

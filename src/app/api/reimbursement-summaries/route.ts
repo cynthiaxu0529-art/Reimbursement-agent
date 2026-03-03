@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, departments } from '@/lib/db/schema';
 import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
 import { authenticateServiceAccount, isServiceKeyRequest } from '@/lib/auth/service-account';
 import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
@@ -197,9 +197,25 @@ export async function GET(request: NextRequest) {
     // 6. 获取用户信息（用于 details）
     const userIds = [...new Set(allReimbursements.map(r => r.userId))];
     const userRecords = userIds.length > 0
-      ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, userIds))
+      ? await db.select({ id: users.id, name: users.name, departmentId: users.departmentId, department: users.department }).from(users).where(inArray(users.id, userIds))
       : [];
     const userMap = new Map(userRecords.map((u: { id: string; name: string }) => [u.id, u.name]));
+
+    // 查询部门信息（名称 + costCenter）
+    const deptIds = [...new Set(userRecords.map(u => u.departmentId).filter(Boolean))] as string[];
+    const deptRecords = deptIds.length > 0
+      ? await db.select({ id: departments.id, name: departments.name, costCenter: departments.costCenter }).from(departments).where(inArray(departments.id, deptIds))
+      : [];
+    const deptMap = new Map(deptRecords.map(d => [d.id, { name: d.name, costCenter: d.costCenter }]));
+
+    const userDeptMap = new Map<string, { name: string; costCenter: string | null }>();
+    for (const u of userRecords) {
+      if (u.departmentId && deptMap.has(u.departmentId)) {
+        userDeptMap.set(u.id, deptMap.get(u.departmentId)!);
+      } else if (u.department) {
+        userDeptMap.set(u.id, { name: u.department, costCenter: null });
+      }
+    }
 
     // 创建 reimbursement 到 user 的映射
     const reimbToUser = new Map(allReimbursements.map(r => [r.id, r.userId]));
@@ -223,8 +239,10 @@ export async function GET(request: NextRequest) {
 
       const period = getHalfMonthPeriod(approvedAt);
 
-      // 映射科目
-      const mapping = await mapExpenseToAccount(item.category, item.description);
+      // 映射科目（传入部门 costCenter 和名称）
+      const userId = reimbToUser.get(item.reimbursementId);
+      const deptInfo = userId ? userDeptMap.get(userId) : undefined;
+      const mapping = await mapExpenseToAccount(item.category, item.description, deptInfo?.costCenter, deptInfo?.name);
 
       const groupKey = `${period.summaryId}::${mapping.accountCode}`;
 
@@ -240,7 +258,6 @@ export async function GET(request: NextRequest) {
       }
 
       const group = groups.get(groupKey)!;
-      const userId = reimbToUser.get(item.reimbursementId);
       const employeeName = userId ? (userMap.get(userId) || '未知') : '未知';
 
       group.details.push({
