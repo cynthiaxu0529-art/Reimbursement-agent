@@ -25,12 +25,14 @@ const DEPT_RD_KEYWORDS = [
   '研发', '技术', '工程', '开发', '算法', '架构', '测试', 'qa', '产品',
   'r&d', 'rd', 'research', 'development', 'engineering', 'eng', 'tech',
   'platform', 'infrastructure', 'data', 'ai', 'ml', 'devops', 'sre',
+  'cto',
 ];
 
 const DEPT_SM_KEYWORDS = [
   '销售', '市场', '营销', '商务', '品牌', '增长', '获客', '客户成功',
   'sales', 'marketing', 'growth', 'bd', 'business development',
   'go-to-market', 'gtm', 'customer success', 'cs', 'revenue',
+  'cmo', 'cso',
 ];
 
 /**
