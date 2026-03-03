@@ -20,6 +20,7 @@ const en: Translations = {
     noData: 'No data',
     operationFailed: 'Operation failed',
     close: 'Close',
+    logout: 'Log Out',
   },
 
   // Navigation

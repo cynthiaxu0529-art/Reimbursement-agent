@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
+import { signOut } from 'next-auth/react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 
@@ -104,22 +105,32 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [roles, setRoles] = useState<string[]>(['employee']);
   const [loading, setLoading] = useState(true);
+  const [userName, setUserName] = useState<string>('');
+  const [userEmail, setUserEmail] = useState<string>('');
   const { t } = useLanguage();
 
-  // 初始化：从数据库获取角色数组
+  // 初始化：从数据库获取角色数组和用户信息
   useEffect(() => {
-    const initRoles = async () => {
+    const initUser = async () => {
       try {
-        const response = await fetch('/api/settings/role');
-        const result = await response.json();
-        if (result.success && result.roles) {
-          // 转换数据库角色到前端角色
-          const frontendRoles = result.roles.map((r: string) => DB_TO_FRONTEND_ROLE[r] || r);
-          // 去重
+        // 并行获取角色和用户信息
+        const [roleRes, meRes] = await Promise.all([
+          fetch('/api/settings/role'),
+          fetch('/api/auth/me'),
+        ]);
+        const roleResult = await roleRes.json();
+        if (roleResult.success && roleResult.roles) {
+          const frontendRoles = roleResult.roles.map((r: string) => DB_TO_FRONTEND_ROLE[r] || r);
           const uniqueRoles = [...new Set(frontendRoles)] as string[];
           setRoles(uniqueRoles);
+        }
+        const meResult = await meRes.json();
+        if (meResult.success && meResult.data) {
+          setUserName(meResult.data.name || '');
+          setUserEmail(meResult.data.email || '');
         }
       } catch {
         setRoles(['employee']);
@@ -127,7 +138,7 @@ export default function DashboardLayout({
         setLoading(false);
       }
     };
-    initRoles();
+    initUser();
   }, []);
 
   const navItems = getNavItems(t);
@@ -254,25 +265,55 @@ export default function DashboardLayout({
         <div style={{
           padding: '1rem 1.5rem',
           borderTop: '1px solid #e5e7eb',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem'
         }}>
           <div style={{
-            width: '32px',
-            height: '32px',
-            backgroundColor: primaryColor,
-            borderRadius: '50%',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center'
+            gap: '0.75rem',
+            marginBottom: '0.75rem',
           }}>
-            <span style={{ color: 'white', fontSize: '0.875rem', fontWeight: 500 }}>U</span>
+            <div style={{
+              width: '32px',
+              height: '32px',
+              backgroundColor: primaryColor,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <span style={{ color: 'white', fontSize: '0.875rem', fontWeight: 500 }}>
+                {userName ? userName.charAt(0).toUpperCase() : 'U'}
+              </span>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.875rem', fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {userName || t.common.user}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={userEmail}>
+                {userEmail || roleLabels}
+              </div>
+            </div>
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.875rem', fontWeight: 500, color: '#111827' }}>{t.common.user}</div>
-            <div style={{ fontSize: '0.75rem', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{roleLabels}</div>
-          </div>
+          <button
+            onClick={() => signOut({ redirectTo: '/login' })}
+            style={{
+              width: '100%',
+              padding: '0.5rem',
+              backgroundColor: '#f3f4f6',
+              border: '1px solid #e5e7eb',
+              borderRadius: '0.375rem',
+              fontSize: '0.8125rem',
+              color: '#4b5563',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.375rem',
+            }}
+          >
+            {t.common.logout || '退出登录'}
+          </button>
         </div>
       </aside>
 
