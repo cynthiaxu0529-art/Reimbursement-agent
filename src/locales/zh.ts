@@ -18,6 +18,7 @@ const zh = {
     noData: '暂无数据',
     operationFailed: '操作失败',
     close: '关闭',
+    logout: '退出登录',
   },
 
   // Navigation

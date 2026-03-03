@@ -608,22 +608,53 @@ export default function NewReimbursementPage() {
 
       const result = await response.json();
       if (result.success) {
-        // 如果有已确认的行程单，关联到新创建的报销单
-        if (confirmedItinerary && result.data?.id) {
+        const reimbursementId = result.data?.id;
+
+        if (confirmedItinerary && reimbursementId) {
+          // 如果有已确认的行程单，关联到新创建的报销单
           try {
             await fetch('/api/trip-itineraries', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 ...confirmedItinerary,
-                reimbursementId: result.data.id,
+                reimbursementId,
                 status: 'confirmed',
               }),
             });
           } catch (itineraryError) {
             console.error('Failed to save itinerary association:', itineraryError);
           }
+        } else if (reimbursementId) {
+          // 自动生成差旅行程单（如果包含差旅类别的费用）
+          const TRAVEL_CATEGORIES = ['flight', 'train', 'hotel', 'meal', 'taxi', 'car_rental', 'fuel', 'parking', 'toll'];
+          const hasTravelItems = itemsData.some(item => TRAVEL_CATEGORIES.includes(item.category));
+          if (hasTravelItems) {
+            try {
+              const genRes = await fetch('/api/trip-itineraries/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items: itemsData, description }),
+              });
+              const genResult = await genRes.json();
+              if (genResult.success && genResult.data) {
+                // 保存生成的行程单
+                await fetch('/api/trip-itineraries', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    ...genResult.data,
+                    reimbursementId,
+                    status: 'draft',
+                  }),
+                });
+              }
+            } catch (genError) {
+              console.error('Auto-generate itinerary failed:', genError);
+            }
+          }
         }
+
         router.push('/dashboard/reimbursements');
       } else {
         const errMsg = result.detail ? `${result.error}\n详情: ${result.detail}` : result.error;
