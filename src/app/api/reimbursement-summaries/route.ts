@@ -17,6 +17,8 @@ import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems, users, departments } from '@/lib/db/schema';
 import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
 import { authenticateServiceAccount, isServiceKeyRequest } from '@/lib/auth/service-account';
+import { authenticateApiKey, isApiKeyRequest } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
 import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
 import { ensureAccountsSynced } from '@/lib/accounting/chart-of-accounts-sync';
 
@@ -131,19 +133,27 @@ function getAllHalfMonthPeriods(startDate: Date, endDate: Date): HalfMonthPeriod
 
 export async function GET(request: NextRequest) {
   try {
-    // 1. Service Account 认证
-    if (!isServiceKeyRequest(request)) {
+    // 1. 认证：支持 Service Account (X-Service-Key) 和 API Key (Bearer rk_xxx)
+    if (isServiceKeyRequest(request)) {
+      const authResult = await authenticateServiceAccount(request, 'read:reimbursement_summaries');
+      if (!authResult.success) {
+        return NextResponse.json(
+          { error: authResult.error.error, code: authResult.error.code },
+          { status: authResult.error.statusCode }
+        );
+      }
+    } else if (isApiKeyRequest(request)) {
+      const authResult = await authenticateApiKey(request, API_SCOPES.ACCOUNTING_SUMMARY_READ);
+      if (!authResult.success) {
+        return NextResponse.json(
+          { error: authResult.error.error, code: authResult.error.code },
+          { status: authResult.error.statusCode }
+        );
+      }
+    } else {
       return NextResponse.json(
-        { error: 'X-Service-Key header required' },
+        { error: 'X-Service-Key or Authorization: Bearer rk_xxx header required' },
         { status: 401 }
-      );
-    }
-
-    const authResult = await authenticateServiceAccount(request, 'read:reimbursement_summaries');
-    if (!authResult.success) {
-      return NextResponse.json(
-        { error: authResult.error.error, code: authResult.error.code },
-        { status: authResult.error.statusCode }
       );
     }
 
