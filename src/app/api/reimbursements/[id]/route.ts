@@ -16,6 +16,7 @@ import { apiError } from '@/lib/api-error';
 import { authenticate, logAgentAction } from '@/lib/auth/api-key';
 import { API_SCOPES } from '@/lib/auth/scopes';
 import { exchangeRateService } from '@/lib/currency/exchange-service';
+import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
 import type { CurrencyType } from '@/types';
 
 // 强制动态渲染，避免构建时预渲染
@@ -624,6 +625,28 @@ export async function PATCH(
       .set(updateData)
       .where(eq(reimbursements.id, id))
       .returning();
+
+    // 如果审批通过，自动给每笔明细打上 account_code 标签
+    if (newStatus === 'approved') {
+      try {
+        const items = await db.query.reimbursementItems.findMany({
+          where: eq(reimbursementItems.reimbursementId, id),
+        });
+        for (const item of items) {
+          const mapping = await mapExpenseToAccount(item.category, item.description);
+          await db.update(reimbursementItems)
+            .set({
+              coaCode: mapping.accountCode,
+              coaName: mapping.accountName,
+              updatedAt: new Date(),
+            })
+            .where(eq(reimbursementItems.id, item.id));
+        }
+      } catch (err) {
+        console.error('Failed to tag account_code on approval:', err);
+        // 不阻塞审批流程
+      }
+    }
 
     // 如果审批通过，自动发起支付
     let paymentResult = null;

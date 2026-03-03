@@ -42,6 +42,7 @@ function getNavItems(t: ReturnType<typeof useLanguage>['t']) {
     // 财务专属
     disbursements: { name: t.nav.disbursements, href: '/dashboard/disbursements', icon: '💳' },
     exchangeRates: { name: t.nav.exchangeRates, href: '/dashboard/settings/exchange-rates', icon: '💱' },
+    accountingSummaries: { name: t.nav.accountingSummaries, href: '/dashboard/accounting-summaries', icon: '📒' },
     // API Key（所有人可用）
     apiKeys: { name: 'API Keys', href: '/dashboard/settings/api-keys', icon: '🔑' },
     // 管理员专属
@@ -83,6 +84,7 @@ function buildNavigation(roles: string[], navItems: ReturnType<typeof getNavItem
   if (roles.includes('finance') || roles.includes('super_admin')) {
     addItem(navItems.disbursements);
     addItem(navItems.exchangeRates);
+    addItem(navItems.accountingSummaries);
   }
 
   // 管理员功能（admin 或 super_admin 都可以管理团队）
