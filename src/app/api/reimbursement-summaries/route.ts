@@ -6,7 +6,9 @@
  * 供 Accounting Agent 拉取汇总数据来入账。
  * 按半月周期 + account_code 维度 GROUP BY 已审批报销。
  *
- * 认证：X-Service-Key header，需要 read:reimbursement_summaries 权限
+ * 认证（任选其一）：
+ *   1. X-Service-Key header（Service Account，需要 read:reimbursement_summaries 权限）
+ *   2. Authorization: Bearer rk_*（API Key，需要 accounting_summary:read scope）
  *
  * 查询参数：
  *   since=<ISO timestamp> — 增量拉取，只返回该时间之后生成的汇总
@@ -17,7 +19,7 @@ import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems, users, departments } from '@/lib/db/schema';
 import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
 import { authenticateServiceAccount, isServiceKeyRequest } from '@/lib/auth/service-account';
-import { authenticateApiKey, isApiKeyRequest } from '@/lib/auth/api-key';
+import { authenticate, logAgentAction, type AuthContext } from '@/lib/auth/api-key';
 import { API_SCOPES } from '@/lib/auth/scopes';
 import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
 import { ensureAccountsSynced } from '@/lib/accounting/chart-of-accounts-sync';
@@ -131,30 +133,42 @@ function getAllHalfMonthPeriods(startDate: Date, endDate: Date): HalfMonthPeriod
 // API Handler
 // ============================================================================
 
+/** 向响应注入 Rate Limit header（如果有） */
+function withRateHeaders(response: NextResponse, authCtx: AuthContext): NextResponse {
+  if (authCtx.rateLimit) {
+    response.headers.set('X-RateLimit-Limit', String(authCtx.rateLimit.limit));
+    response.headers.set('X-RateLimit-Remaining', String(authCtx.rateLimit.remaining));
+    response.headers.set('X-RateLimit-Reset', String(authCtx.rateLimit.resetAt));
+  }
+  return response;
+}
+
 export async function GET(request: NextRequest) {
+  const startTime = Date.now();
+  let authCtx: AuthContext | null = null;
+
   try {
-    // 1. 认证：支持 Service Account (X-Service-Key) 和 API Key (Bearer rk_xxx)
+    // 1. 认证：优先 Service Account，其次 API Key（含 Session 回退）
     if (isServiceKeyRequest(request)) {
-      const authResult = await authenticateServiceAccount(request, 'read:reimbursement_summaries');
-      if (!authResult.success) {
+      // Service Account 认证（原有路径）
+      const saResult = await authenticateServiceAccount(request, 'read:reimbursement_summaries');
+      if (!saResult.success) {
         return NextResponse.json(
-          { error: authResult.error.error, code: authResult.error.code },
-          { status: authResult.error.statusCode }
+          { error: saResult.error.error, code: saResult.error.code },
+          { status: saResult.error.statusCode }
         );
       }
-    } else if (isApiKeyRequest(request)) {
-      const authResult = await authenticateApiKey(request, API_SCOPES.ACCOUNTING_SUMMARY_READ);
-      if (!authResult.success) {
-        return NextResponse.json(
-          { error: authResult.error.error, code: authResult.error.code },
-          { status: authResult.error.statusCode }
-        );
-      }
+      // Service Account 不需要填充 authCtx，后续无需审计
     } else {
-      return NextResponse.json(
-        { error: 'X-Service-Key or Authorization: Bearer rk_xxx header required' },
-        { status: 401 }
-      );
+      // API Key 或 Session 认证
+      const akResult = await authenticate(request, API_SCOPES.ACCOUNTING_SUMMARY_READ);
+      if (!akResult.success) {
+        return NextResponse.json(
+          { error: akResult.error },
+          { status: akResult.statusCode }
+        );
+      }
+      authCtx = akResult.context;
     }
 
     // 2. 确保科目表已同步
@@ -331,7 +345,30 @@ export async function GET(request: NextRequest) {
     // 按 period_start 排序
     summaries.sort((a, b) => a.period_start.localeCompare(b.period_start));
 
-    return NextResponse.json({ summaries });
+    const response = NextResponse.json({ summaries });
+
+    // API Key 审计日志 + Rate Limit headers
+    if (authCtx?.authType === 'api_key' && authCtx.apiKey) {
+      logAgentAction({
+        tenantId: authCtx.tenantId!,
+        apiKeyId: authCtx.apiKey.id,
+        userId: authCtx.userId,
+        action: 'accounting_summary:read',
+        method: 'GET',
+        path: '/api/reimbursement-summaries',
+        statusCode: 200,
+        agentType: authCtx.apiKey.agentType,
+        requestSummary: { since: sinceParam },
+        responseSummary: { count: summaries.length },
+        entityType: 'accounting_summary',
+        ipAddress: request.headers.get('x-forwarded-for') || undefined,
+        userAgent: request.headers.get('user-agent') || undefined,
+        durationMs: Date.now() - startTime,
+      });
+      return withRateHeaders(response, authCtx);
+    }
+
+    return response;
   } catch (error) {
     console.error('Reimbursement summaries error:', error);
     return NextResponse.json(

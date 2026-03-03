@@ -37,9 +37,9 @@ export async function PATCH(request: NextRequest) {
     }
 
     const userRoles = getUserRoles(currentUser);
-    const hasAccess = userRoles.some(r => ['finance', 'admin', 'super_admin'].includes(r));
+    const hasAccess = userRoles.some(r => ['finance', 'super_admin'].includes(r));
     if (!hasAccess) {
-      return NextResponse.json({ error: '需要财务或管理员权限' }, { status: 403 });
+      return NextResponse.json({ error: '需要财务权限' }, { status: 403 });
     }
 
     const body = await request.json();
