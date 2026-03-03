@@ -303,7 +303,10 @@ export default function DashboardLayout({
             </div>
           </div>
           <button
-            onClick={() => signOut({ redirectTo: '/login' })}
+            onClick={async () => {
+              await signOut({ redirect: false });
+              window.location.href = '/login';
+            }}
             style={{
               width: '100%',
               padding: '0.5rem',

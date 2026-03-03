@@ -83,6 +83,10 @@ export default function DashboardPage() {
     const fetchData = async () => {
       try {
         const userRes = await fetch('/api/auth/me');
+        if (userRes.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
         let userData: UserInfo | null = null;
         if (userRes.ok) {
           const userJson = await userRes.json();
