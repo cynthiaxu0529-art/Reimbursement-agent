@@ -141,18 +141,21 @@ export async function GET(request: NextRequest) {
       : [];
     const userMap = new Map(userRecords.map((u: { id: string; name: string }) => [u.id, u.name]));
 
-    // 查询部门名称
+    // 查询部门信息（名称 + costCenter）
     const deptIds = [...new Set(userRecords.map(u => u.departmentId).filter(Boolean))] as string[];
     const deptRecords = deptIds.length > 0
-      ? await db.select({ id: departments.id, name: departments.name }).from(departments).where(inArray(departments.id, deptIds))
+      ? await db.select({ id: departments.id, name: departments.name, costCenter: departments.costCenter }).from(departments).where(inArray(departments.id, deptIds))
       : [];
-    const deptMap = new Map(deptRecords.map(d => [d.id, d.name]));
+    const deptMap = new Map(deptRecords.map(d => [d.id, { name: d.name, costCenter: d.costCenter }]));
 
-    // 用户 → 部门名称映射
-    const userDeptMap = new Map<string, string>();
+    // 用户 → 部门信息映射
+    const userDeptMap = new Map<string, { name: string; costCenter: string | null }>();
     for (const u of userRecords) {
-      const deptName = (u.departmentId ? deptMap.get(u.departmentId) : null) || u.department || null;
-      if (deptName) userDeptMap.set(u.id, deptName);
+      if (u.departmentId && deptMap.has(u.departmentId)) {
+        userDeptMap.set(u.id, deptMap.get(u.departmentId)!);
+      } else if (u.department) {
+        userDeptMap.set(u.id, { name: u.department, costCenter: null });
+      }
     }
 
     const reimbToUser = new Map(allReimbs.map(r => [r.id, r.userId]));
@@ -174,14 +177,14 @@ export async function GET(request: NextRequest) {
 
       const period = getHalfMonthPeriod(approvedAt);
 
-      // 使用已存储的 coaCode 或重新映射（传入部门名称以区分 R&D / S&M / G&A）
+      // 使用已存储的 coaCode 或根据部门费用性质重新映射
       const userId = reimbToUser.get(item.reimbursementId);
-      const deptName = userId ? userDeptMap.get(userId) || null : null;
+      const deptInfo = userId ? userDeptMap.get(userId) : undefined;
 
       let accountCode = item.coaCode;
       let accountName = item.coaName;
       if (!accountCode) {
-        const mapping = await mapExpenseToAccount(item.category, item.description, deptName);
+        const mapping = await mapExpenseToAccount(item.category, item.description, deptInfo?.costCenter, deptInfo?.name);
         accountCode = mapping.accountCode;
         accountName = mapping.accountName;
       }
@@ -204,7 +207,7 @@ export async function GET(request: NextRequest) {
 
       group.details.push({
         employee_name: employeeName,
-        department: deptName || '-',
+        department: deptInfo?.name || '-',
         amount: Number((item.amountInBaseCurrency || item.amount).toFixed(2)),
         description: item.description,
         item_id: item.id,

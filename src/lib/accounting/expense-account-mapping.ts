@@ -1,12 +1,13 @@
 /**
  * 报销类别 → GL 科目映射
  *
- * 根据报销的 category、description 关键词以及员工所属部门，映射到 GL 科目。
+ * 根据报销的 category、description 关键词以及部门的费用性质(costCenter)，映射到 GL 科目。
  *
  * 核心逻辑：
- *   1. 先根据部门名称 / code 判断费用性质（R&D / S&M / G&A）
- *   2. 再根据 category + description 匹配具体费用类型
- *   3. 两者交叉得出最终科目代码
+ *   1. 优先使用部门表中的 costCenter 字段（rd / sm / ga）
+ *   2. 若无 costCenter，根据部门名称关键词推断
+ *   3. 根据 category + description 匹配具体费用类型
+ *   4. 两者交叉得出最终科目代码
  */
 
 import { getAccountName } from './chart-of-accounts-sync';
@@ -18,8 +19,7 @@ import { getAccountName } from './chart-of-accounts-sync';
 export type ExpenseFunction = 'rd' | 'sm' | 'ga';
 
 /**
- * 部门名称/code 关键词 → 费用性质
- * 匹配优先级：先 R&D，再 S&M，兜底 G&A
+ * 部门名称关键词 → 费用性质（仅在部门未设置 costCenter 时作为降级匹配）
  */
 const DEPT_RD_KEYWORDS = [
   '研发', '技术', '工程', '开发', '算法', '架构', '测试', 'qa', '产品',
@@ -34,9 +34,20 @@ const DEPT_SM_KEYWORDS = [
 ];
 
 /**
- * 根据部门名称判断费用性质
+ * 根据 costCenter 或部门名称判断费用性质
+ *
+ * @param costCenter  部门表中的 cost_center 字段（优先级最高）
+ * @param departmentName 部门名称（降级匹配）
  */
-export function classifyDepartment(departmentName?: string | null): ExpenseFunction {
+export function classifyDepartment(
+  costCenter?: string | null,
+  departmentName?: string | null,
+): ExpenseFunction {
+  // 1. 优先使用显式设置的 costCenter
+  if (costCenter === 'rd' || costCenter === 'sm' || costCenter === 'ga') {
+    return costCenter;
+  }
+  // 2. 降级：根据部门名称关键词推断
   if (!departmentName) return 'ga';
   const lower = departmentName.toLowerCase();
   for (const kw of DEPT_RD_KEYWORDS) {
@@ -52,9 +63,6 @@ export function classifyDepartment(departmentName?: string | null): ExpenseFunct
 // 费用类型 → 科目代码（按费用性质分列）
 // ============================================================================
 
-/**
- * 每种费用类型在三大费用性质下的科目代码
- */
 interface AccountCodeSet {
   rd: string;
   sm: string;
@@ -214,19 +222,21 @@ const EXPENSE_TYPE_RULES: ExpenseTypeRule[] = [
 // ============================================================================
 
 /**
- * 根据报销类别、描述和员工部门映射到 GL 科目
+ * 根据报销类别、描述和部门费用性质映射到 GL 科目
  *
- * @param category   报销的 category 字段
- * @param description 报销的 description 字段
- * @param departmentName 员工所属部门名称（可选，缺失则默认 G&A）
+ * @param category       报销的 category 字段
+ * @param description    报销的 description 字段
+ * @param costCenter     部门显式设定的费用性质（rd/sm/ga，优先使用）
+ * @param departmentName 部门名称（当 costCenter 未设时降级推断）
  * @returns { accountCode, accountName }
  */
 export async function mapExpenseToAccount(
   category: string,
   description: string,
+  costCenter?: string | null,
   departmentName?: string | null,
 ): Promise<{ accountCode: string; accountName: string }> {
-  const fn = classifyDepartment(departmentName);
+  const fn = classifyDepartment(costCenter, departmentName);
   const expenseType = matchExpenseType(category, description);
   const codes = EXPENSE_TYPE_ACCOUNTS[expenseType];
   const accountCode = codes[fn];
@@ -242,14 +252,12 @@ function matchExpenseType(category: string, description: string): ExpenseType {
   const categoryLower = (category || '').toLowerCase();
   const descLower = (description || '').toLowerCase();
 
-  // 1. category 精确匹配
   for (const rule of EXPENSE_TYPE_RULES) {
     if (rule.categories.includes(categoryLower)) {
       return rule.expenseType;
     }
   }
 
-  // 2. description 关键词匹配
   for (const rule of EXPENSE_TYPE_RULES) {
     for (const keyword of rule.keywords) {
       if (descLower.includes(keyword.toLowerCase())) {
@@ -277,9 +285,9 @@ async function resolveAccountName(accountCode: string, fallbackName: string): Pr
  * 批量映射报销明细
  */
 export async function mapExpenseItems(
-  items: { category: string; description: string; departmentName?: string | null }[]
+  items: { category: string; description: string; costCenter?: string | null; departmentName?: string | null }[]
 ): Promise<{ accountCode: string; accountName: string }[]> {
   return Promise.all(
-    items.map(item => mapExpenseToAccount(item.category, item.description, item.departmentName))
+    items.map(item => mapExpenseToAccount(item.category, item.description, item.costCenter, item.departmentName))
   );
 }
