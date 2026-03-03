@@ -1,118 +1,264 @@
 /**
  * 报销类别 → GL 科目映射
  *
- * 根据报销的 category 或 description 关键词，映射到 Accounting Agent 的 GL 科目。
- * 映射规则优先使用 synced_accounts 中的科目名称，如果不存在则使用 fallback 名称。
+ * 根据报销的 category、description 关键词以及员工所属部门，映射到 GL 科目。
+ *
+ * 核心逻辑：
+ *   1. 先根据部门名称 / code 判断费用性质（R&D / S&M / G&A）
+ *   2. 再根据 category + description 匹配具体费用类型
+ *   3. 两者交叉得出最终科目代码
  */
 
 import { getAccountName } from './chart-of-accounts-sync';
 
 // ============================================================================
-// 映射规则
+// 部门 → 费用性质
 // ============================================================================
 
-interface MappingRule {
-  accountCode: string;
-  fallbackAccountName: string;
+export type ExpenseFunction = 'rd' | 'sm' | 'ga';
+
+/**
+ * 部门名称/code 关键词 → 费用性质
+ * 匹配优先级：先 R&D，再 S&M，兜底 G&A
+ */
+const DEPT_RD_KEYWORDS = [
+  '研发', '技术', '工程', '开发', '算法', '架构', '测试', 'qa', '产品',
+  'r&d', 'rd', 'research', 'development', 'engineering', 'eng', 'tech',
+  'platform', 'infrastructure', 'data', 'ai', 'ml', 'devops', 'sre',
+];
+
+const DEPT_SM_KEYWORDS = [
+  '销售', '市场', '营销', '商务', '品牌', '增长', '获客', '客户成功',
+  'sales', 'marketing', 'growth', 'bd', 'business development',
+  'go-to-market', 'gtm', 'customer success', 'cs', 'revenue',
+];
+
+/**
+ * 根据部门名称判断费用性质
+ */
+export function classifyDepartment(departmentName?: string | null): ExpenseFunction {
+  if (!departmentName) return 'ga';
+  const lower = departmentName.toLowerCase();
+  for (const kw of DEPT_RD_KEYWORDS) {
+    if (lower.includes(kw)) return 'rd';
+  }
+  for (const kw of DEPT_SM_KEYWORDS) {
+    if (lower.includes(kw)) return 'sm';
+  }
+  return 'ga';
+}
+
+// ============================================================================
+// 费用类型 → 科目代码（按费用性质分列）
+// ============================================================================
+
+/**
+ * 每种费用类型在三大费用性质下的科目代码
+ */
+interface AccountCodeSet {
+  rd: string;
+  sm: string;
+  ga: string;
+  rdName: string;
+  smName: string;
+  gaName: string;
+}
+
+type ExpenseType =
+  | 'travel'
+  | 'meals'
+  | 'office_supplies'
+  | 'training'
+  | 'shipping'
+  | 'telecom'
+  | 'insurance'
+  | 'cloud'
+  | 'software'
+  | 'advertising'
+  | 'miscellaneous';
+
+const EXPENSE_TYPE_ACCOUNTS: Record<ExpenseType, AccountCodeSet> = {
+  travel: {
+    rd: '6440', sm: '6130', ga: '6270',
+    rdName: 'R&D - Travel & Entertainment',
+    smName: 'S&M - Travel & Entertainment',
+    gaName: 'G&A - Travel & Entertainment',
+  },
+  meals: {
+    rd: '6450', sm: '6140', ga: '6280',
+    rdName: 'R&D - Meals & Entertainment',
+    smName: 'S&M - Meals & Client Entertainment',
+    gaName: 'G&A - Meals & Entertainment',
+  },
+  office_supplies: {
+    rd: '6460', sm: '6150', ga: '6230',
+    rdName: 'R&D - Office Supplies',
+    smName: 'S&M - Office Supplies',
+    gaName: 'G&A - Office Supplies',
+  },
+  training: {
+    rd: '6470', sm: '6160', ga: '6330',
+    rdName: 'R&D - Training & Conferences',
+    smName: 'S&M - Training & Conferences',
+    gaName: 'G&A - Training & Development',
+  },
+  shipping: {
+    rd: '6490', sm: '6190', ga: '6370',
+    rdName: 'R&D - Miscellaneous Expense',
+    smName: 'S&M - Miscellaneous Expense',
+    gaName: 'G&A - Shipping & Postage',
+  },
+  telecom: {
+    rd: '6490', sm: '6190', ga: '6290',
+    rdName: 'R&D - Miscellaneous Expense',
+    smName: 'S&M - Miscellaneous Expense',
+    gaName: 'G&A - Telephone & Internet',
+  },
+  insurance: {
+    rd: '6490', sm: '6190', ga: '6240',
+    rdName: 'R&D - Miscellaneous Expense',
+    smName: 'S&M - Miscellaneous Expense',
+    gaName: 'G&A - Insurance',
+  },
+  cloud: {
+    rd: '6420', sm: '6190', ga: '6390',
+    rdName: 'R&D - Cloud & Infrastructure',
+    smName: 'S&M - Miscellaneous Expense',
+    gaName: 'G&A - Miscellaneous Expense',
+  },
+  software: {
+    rd: '6430', sm: '6190', ga: '6390',
+    rdName: 'R&D - Software & Subscriptions',
+    smName: 'S&M - Miscellaneous Expense',
+    gaName: 'G&A - Miscellaneous Expense',
+  },
+  advertising: {
+    rd: '6490', sm: '6120', ga: '6390',
+    rdName: 'R&D - Miscellaneous Expense',
+    smName: 'S&M - Advertising & Promotion',
+    gaName: 'G&A - Miscellaneous Expense',
+  },
+  miscellaneous: {
+    rd: '6490', sm: '6190', ga: '6390',
+    rdName: 'R&D - Miscellaneous Expense',
+    smName: 'S&M - Miscellaneous Expense',
+    gaName: 'G&A - Miscellaneous Expense',
+  },
+};
+
+// ============================================================================
+// Category / keyword → 费用类型
+// ============================================================================
+
+interface ExpenseTypeRule {
+  expenseType: ExpenseType;
   categories: string[];
   keywords: string[];
 }
 
-/**
- * 映射规则表：category 精确匹配 + description 关键词匹配
- */
-const MAPPING_RULES: MappingRule[] = [
+const EXPENSE_TYPE_RULES: ExpenseTypeRule[] = [
   {
-    accountCode: '6270',
-    fallbackAccountName: 'G&A - Travel & Entertainment',
+    expenseType: 'travel',
     categories: ['taxi', 'car_rental', 'fuel', 'parking', 'toll', 'flight', 'train', 'hotel'],
-    keywords: [
-      '交通', '打车', '出差', 'taxi', 'uber', 'rideshare',
-      '机票', 'flight', 'airfare',
-      '住宿', '酒店', 'hotel', 'lodging',
-      '差旅', 'travel',
-    ],
+    keywords: ['交通', '打车', '出差', 'taxi', 'uber', 'rideshare', '机票', 'flight', 'airfare', '住宿', '酒店', 'hotel', 'lodging', '差旅', 'travel'],
   },
   {
-    accountCode: '6280',
-    fallbackAccountName: 'G&A - Meals & Entertainment',
+    expenseType: 'meals',
     categories: ['meal', 'client_entertainment'],
     keywords: ['餐饮', '餐费', '招待', 'meals', 'food', '午餐', '晚餐', '早餐', 'dinner', 'lunch', 'breakfast'],
   },
   {
-    accountCode: '6230',
-    fallbackAccountName: 'G&A - Office Supplies',
+    expenseType: 'office_supplies',
     categories: ['office_supplies', 'equipment', 'printing'],
     keywords: ['办公用品', '文具', 'office supplies', '办公', 'stationery'],
   },
   {
-    accountCode: '6330',
-    fallbackAccountName: 'G&A - Training & Development',
+    expenseType: 'training',
     categories: ['training', 'conference'],
     keywords: ['培训', '课程', 'training', 'conference', '会议', '学习', '研讨'],
   },
   {
-    accountCode: '6370',
-    fallbackAccountName: 'G&A - Shipping & Postage',
+    expenseType: 'shipping',
     categories: ['courier'],
     keywords: ['快递', '邮寄', 'shipping', 'postage', '物流', '邮费'],
   },
   {
-    accountCode: '6290',
-    fallbackAccountName: 'G&A - Telephone & Internet',
+    expenseType: 'telecom',
     categories: ['phone', 'internet'],
     keywords: ['通讯', '电话', 'internet', 'phone', '网络', '宽带', 'telecom'],
   },
   {
-    accountCode: '6240',
-    fallbackAccountName: 'G&A - Insurance',
+    expenseType: 'insurance',
     categories: [],
     keywords: ['保险', 'insurance'],
   },
+  {
+    expenseType: 'cloud',
+    categories: ['cloud_resource', 'ai_token'],
+    keywords: ['云', 'cloud', 'aws', 'gcp', 'azure', 'server', '服务器', 'ai token', 'openai', 'anthropic'],
+  },
+  {
+    expenseType: 'software',
+    categories: ['software'],
+    keywords: ['软件', 'software', 'license', '许可', 'saas', 'subscription', '订阅'],
+  },
+  {
+    expenseType: 'advertising',
+    categories: [],
+    keywords: ['广告', 'advertising', 'promotion', '推广', '营销', 'marketing'],
+  },
 ];
 
-const DEFAULT_ACCOUNT_CODE = '6390';
-const DEFAULT_ACCOUNT_NAME = 'G&A - Miscellaneous Expense';
-
 // ============================================================================
-// 映射函数
+// 主映射函数
 // ============================================================================
 
 /**
- * 根据报销类别和描述映射到 GL 科目
+ * 根据报销类别、描述和员工部门映射到 GL 科目
  *
- * @param category 报销的 category 字段
+ * @param category   报销的 category 字段
  * @param description 报销的 description 字段
+ * @param departmentName 员工所属部门名称（可选，缺失则默认 G&A）
  * @returns { accountCode, accountName }
  */
 export async function mapExpenseToAccount(
   category: string,
-  description: string
+  description: string,
+  departmentName?: string | null,
 ): Promise<{ accountCode: string; accountName: string }> {
+  const fn = classifyDepartment(departmentName);
+  const expenseType = matchExpenseType(category, description);
+  const codes = EXPENSE_TYPE_ACCOUNTS[expenseType];
+  const accountCode = codes[fn];
+  const fallbackName = codes[`${fn}Name` as keyof AccountCodeSet] as string;
+  const accountName = await resolveAccountName(accountCode, fallbackName);
+  return { accountCode, accountName };
+}
+
+/**
+ * 根据 category + description 匹配费用类型
+ */
+function matchExpenseType(category: string, description: string): ExpenseType {
   const categoryLower = (category || '').toLowerCase();
   const descLower = (description || '').toLowerCase();
 
-  // 1. 先按 category 精确匹配
-  for (const rule of MAPPING_RULES) {
+  // 1. category 精确匹配
+  for (const rule of EXPENSE_TYPE_RULES) {
     if (rule.categories.includes(categoryLower)) {
-      const accountName = await resolveAccountName(rule.accountCode, rule.fallbackAccountName);
-      return { accountCode: rule.accountCode, accountName };
+      return rule.expenseType;
     }
   }
 
-  // 2. 再按 description 关键词匹配
-  for (const rule of MAPPING_RULES) {
+  // 2. description 关键词匹配
+  for (const rule of EXPENSE_TYPE_RULES) {
     for (const keyword of rule.keywords) {
       if (descLower.includes(keyword.toLowerCase())) {
-        const accountName = await resolveAccountName(rule.accountCode, rule.fallbackAccountName);
-        return { accountCode: rule.accountCode, accountName };
+        return rule.expenseType;
       }
     }
   }
 
-  // 3. 兜底：无法分类
-  const accountName = await resolveAccountName(DEFAULT_ACCOUNT_CODE, DEFAULT_ACCOUNT_NAME);
-  return { accountCode: DEFAULT_ACCOUNT_CODE, accountName };
+  return 'miscellaneous';
 }
 
 /**
@@ -131,9 +277,9 @@ async function resolveAccountName(accountCode: string, fallbackName: string): Pr
  * 批量映射报销明细
  */
 export async function mapExpenseItems(
-  items: { category: string; description: string }[]
+  items: { category: string; description: string; departmentName?: string | null }[]
 ): Promise<{ accountCode: string; accountName: string }[]> {
   return Promise.all(
-    items.map(item => mapExpenseToAccount(item.category, item.description))
+    items.map(item => mapExpenseToAccount(item.category, item.description, item.departmentName))
   );
 }

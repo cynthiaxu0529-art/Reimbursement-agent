@@ -10,6 +10,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 
 interface SummaryDetail {
   employee_name: string;
+  department: string;
   amount: number;
   description: string;
   item_id: string;
@@ -49,65 +50,85 @@ interface SyncedAccount {
 
 const MAPPING_RULES_DISPLAY = [
   {
-    categories: '交通/打车/出差/taxi/uber',
-    keywords: 'taxi, car_rental, fuel, parking, toll, flight, train, hotel',
-    accountCode: '6270',
-    accountName: 'G&A - Travel & Entertainment',
+    expenseType: '差旅 Travel',
+    categories: 'taxi, flight, train, hotel, car_rental, fuel, parking, toll',
+    rdCode: '6440', smCode: '6130', gaCode: '6270',
   },
   {
-    categories: '餐饮/餐费/招待/meals',
-    keywords: 'meal, client_entertainment',
-    accountCode: '6280',
-    accountName: 'G&A - Meals & Entertainment',
+    expenseType: '餐饮 Meals',
+    categories: 'meal, client_entertainment',
+    rdCode: '6450', smCode: '6140', gaCode: '6280',
   },
   {
-    categories: '办公用品/文具/office supplies',
-    keywords: 'office_supplies, equipment, printing',
-    accountCode: '6230',
-    accountName: 'G&A - Office Supplies',
+    expenseType: '办公用品 Office',
+    categories: 'office_supplies, equipment, printing',
+    rdCode: '6460', smCode: '6150', gaCode: '6230',
   },
   {
-    categories: '培训/课程/training/conference',
-    keywords: 'training, conference',
-    accountCode: '6330',
-    accountName: 'G&A - Training & Development',
+    expenseType: '培训 Training',
+    categories: 'training, conference',
+    rdCode: '6470', smCode: '6160', gaCode: '6330',
   },
   {
-    categories: '快递/邮寄/shipping',
-    keywords: 'courier',
-    accountCode: '6370',
-    accountName: 'G&A - Shipping & Postage',
+    expenseType: '云/AI Cloud',
+    categories: 'cloud_resource, ai_token',
+    rdCode: '6420', smCode: '6190', gaCode: '6390',
   },
   {
-    categories: '通讯/电话/internet',
-    keywords: 'phone, internet',
-    accountCode: '6290',
-    accountName: 'G&A - Telephone & Internet',
+    expenseType: '软件 Software',
+    categories: 'software',
+    rdCode: '6430', smCode: '6190', gaCode: '6390',
   },
   {
-    categories: '保险/insurance',
-    keywords: '—',
-    accountCode: '6240',
-    accountName: 'G&A - Insurance',
+    expenseType: '快递 Shipping',
+    categories: 'courier',
+    rdCode: '6490', smCode: '6190', gaCode: '6370',
   },
   {
-    categories: '无法分类',
-    keywords: '(default)',
-    accountCode: '6390',
-    accountName: 'G&A - Miscellaneous Expense',
+    expenseType: '通讯 Telecom',
+    categories: 'phone, internet',
+    rdCode: '6490', smCode: '6190', gaCode: '6290',
+  },
+  {
+    expenseType: '广告 Advertising',
+    categories: '(keyword match)',
+    rdCode: '6490', smCode: '6120', gaCode: '6390',
+  },
+  {
+    expenseType: '其他 Misc',
+    categories: '(default)',
+    rdCode: '6490', smCode: '6190', gaCode: '6390',
   },
 ];
 
 const AVAILABLE_ACCOUNTS = [
-  { code: '6220', name: 'G&A - Rent & Facilities' },
-  { code: '6230', name: 'G&A - Office Supplies' },
-  { code: '6240', name: 'G&A - Insurance' },
-  { code: '6270', name: 'G&A - Travel & Entertainment' },
-  { code: '6280', name: 'G&A - Meals & Entertainment' },
-  { code: '6290', name: 'G&A - Telephone & Internet' },
-  { code: '6330', name: 'G&A - Training & Development' },
-  { code: '6370', name: 'G&A - Shipping & Postage' },
-  { code: '6390', name: 'G&A - Miscellaneous Expense' },
+  // R&D 研发费用
+  { code: '6410', name: 'R&D - Salaries & Benefits', group: 'R&D' },
+  { code: '6420', name: 'R&D - Cloud & Infrastructure', group: 'R&D' },
+  { code: '6430', name: 'R&D - Software & Subscriptions', group: 'R&D' },
+  { code: '6440', name: 'R&D - Travel & Entertainment', group: 'R&D' },
+  { code: '6450', name: 'R&D - Meals & Entertainment', group: 'R&D' },
+  { code: '6460', name: 'R&D - Office Supplies', group: 'R&D' },
+  { code: '6470', name: 'R&D - Training & Conferences', group: 'R&D' },
+  { code: '6490', name: 'R&D - Miscellaneous Expense', group: 'R&D' },
+  // S&M 销售费用
+  { code: '6110', name: 'S&M - Salaries & Commissions', group: 'S&M' },
+  { code: '6120', name: 'S&M - Advertising & Promotion', group: 'S&M' },
+  { code: '6130', name: 'S&M - Travel & Entertainment', group: 'S&M' },
+  { code: '6140', name: 'S&M - Meals & Client Entertainment', group: 'S&M' },
+  { code: '6150', name: 'S&M - Office Supplies', group: 'S&M' },
+  { code: '6160', name: 'S&M - Training & Conferences', group: 'S&M' },
+  { code: '6190', name: 'S&M - Miscellaneous Expense', group: 'S&M' },
+  // G&A 管理费用
+  { code: '6220', name: 'G&A - Rent & Facilities', group: 'G&A' },
+  { code: '6230', name: 'G&A - Office Supplies', group: 'G&A' },
+  { code: '6240', name: 'G&A - Insurance', group: 'G&A' },
+  { code: '6270', name: 'G&A - Travel & Entertainment', group: 'G&A' },
+  { code: '6280', name: 'G&A - Meals & Entertainment', group: 'G&A' },
+  { code: '6290', name: 'G&A - Telephone & Internet', group: 'G&A' },
+  { code: '6330', name: 'G&A - Training & Development', group: 'G&A' },
+  { code: '6370', name: 'G&A - Shipping & Postage', group: 'G&A' },
+  { code: '6390', name: 'G&A - Miscellaneous Expense', group: 'G&A' },
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -119,6 +140,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   conference: '会议 Conference', courier: '快递 Courier',
   phone: '电话 Phone', internet: '网络 Internet',
   client_entertainment: '客户招待', printing: '打印 Printing',
+  cloud_resource: '云资源 Cloud', ai_token: 'AI Token',
   other: '其他 Other',
 };
 
@@ -400,7 +422,7 @@ export default function AccountingSummariesPage() {
                         {/* Detail header */}
                         <div style={{
                           display: 'grid',
-                          gridTemplateColumns: '1fr 1fr 100px 2fr 120px',
+                          gridTemplateColumns: '1fr 0.8fr 1fr 80px 1.5fr 120px',
                           padding: '0.5rem 1.25rem 0.5rem 2.5rem',
                           fontSize: '0.75rem',
                           fontWeight: 600,
@@ -409,6 +431,7 @@ export default function AccountingSummariesPage() {
                           letterSpacing: '0.05em',
                         }}>
                           <span>{ts.employee}</span>
+                          <span>{ts.department}</span>
                           <span>{ts.category}</span>
                           <span style={{ textAlign: 'right' }}>{ts.amount}</span>
                           <span>{ts.descriptionLabel}</span>
@@ -417,13 +440,14 @@ export default function AccountingSummariesPage() {
                         {item.details.map((detail, idx) => (
                           <div key={idx} style={{
                             display: 'grid',
-                            gridTemplateColumns: '1fr 1fr 100px 2fr 120px',
+                            gridTemplateColumns: '1fr 0.8fr 1fr 80px 1.5fr 120px',
                             padding: '0.5rem 1.25rem 0.5rem 2.5rem',
                             fontSize: '0.8125rem',
                             borderTop: '1px solid #f3f4f6',
                             alignItems: 'center',
                           }}>
                             <span style={{ color: '#374151' }}>{detail.employee_name}</span>
+                            <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>{detail.department}</span>
                             <span style={{ color: '#6b7280' }}>
                               {CATEGORY_LABELS[detail.category] || detail.category}
                             </span>
@@ -448,8 +472,12 @@ export default function AccountingSummariesPage() {
                                     }}
                                   >
                                     <option value="">--</option>
-                                    {AVAILABLE_ACCOUNTS.map(a => (
-                                      <option key={a.code} value={a.code}>{a.code}</option>
+                                    {['R&D', 'S&M', 'G&A'].map(g => (
+                                      <optgroup key={g} label={g}>
+                                        {AVAILABLE_ACCOUNTS.filter(a => a.group === g).map(a => (
+                                          <option key={a.code} value={a.code}>{a.code} {a.name.split(' - ')[1]}</option>
+                                        ))}
+                                      </optgroup>
                                     ))}
                                   </select>
                                   <button
@@ -636,7 +664,7 @@ export default function AccountingSummariesPage() {
           {/* Table header */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '100px 1fr 1fr 100px 2fr 140px',
+            gridTemplateColumns: '80px 1fr 0.8fr 1fr 80px 1.5fr 130px',
             padding: '0.625rem 1.25rem',
             fontSize: '0.75rem',
             fontWeight: 600,
@@ -648,6 +676,7 @@ export default function AccountingSummariesPage() {
           }}>
             <span>{ts.accountCode}</span>
             <span>{ts.employee}</span>
+            <span>{ts.department}</span>
             <span>{ts.category}</span>
             <span style={{ textAlign: 'right' }}>{ts.amount}</span>
             <span>{ts.descriptionLabel}</span>
@@ -658,7 +687,7 @@ export default function AccountingSummariesPage() {
           {allDetails.map((detail, idx) => (
             <div key={idx} style={{
               display: 'grid',
-              gridTemplateColumns: '100px 1fr 1fr 100px 2fr 140px',
+              gridTemplateColumns: '80px 1fr 0.8fr 1fr 80px 1.5fr 130px',
               padding: '0.625rem 1.25rem',
               fontSize: '0.8125rem',
               borderBottom: '1px solid #f3f4f6',
@@ -673,6 +702,7 @@ export default function AccountingSummariesPage() {
                 {detail.account_code}
               </span>
               <span style={{ color: '#374151' }}>{detail.employee_name}</span>
+              <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>{detail.department}</span>
               <span style={{ color: '#6b7280' }}>
                 {CATEGORY_LABELS[detail.category] || detail.category}
               </span>
@@ -702,8 +732,12 @@ export default function AccountingSummariesPage() {
                       }}
                     >
                       <option value="">--</option>
-                      {AVAILABLE_ACCOUNTS.map(a => (
-                        <option key={a.code} value={a.code}>{a.code}</option>
+                      {['R&D', 'S&M', 'G&A'].map(g => (
+                        <optgroup key={g} label={g}>
+                          {AVAILABLE_ACCOUNTS.filter(a => a.group === g).map(a => (
+                            <option key={a.code} value={a.code}>{a.code} {a.name.split(' - ')[1]}</option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                     <button
@@ -785,9 +819,10 @@ export default function AccountingSummariesPage() {
         </div>
 
         {/* Table header */}
+        {/* Table header: expense type → R&D / S&M / G&A codes */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '2fr 2fr 100px 1.5fr',
+          gridTemplateColumns: '1.5fr 2fr 1fr 1fr 1fr',
           padding: '0.625rem 1.25rem',
           fontSize: '0.75rem',
           fontWeight: 600,
@@ -798,78 +833,105 @@ export default function AccountingSummariesPage() {
           backgroundColor: '#fafbfc',
         }}>
           <span>{ts.ruleCategory}</span>
-          <span>{ts.ruleKeywords}</span>
-          <span>{ts.accountCode}</span>
-          <span>{ts.ruleAccount}</span>
+          <span>Categories</span>
+          <span style={{ textAlign: 'center', color: '#2563eb' }}>R&D</span>
+          <span style={{ textAlign: 'center', color: '#059669' }}>S&M</span>
+          <span style={{ textAlign: 'center', color: '#7c3aed' }}>G&A</span>
         </div>
 
         {/* Rules */}
         {MAPPING_RULES_DISPLAY.map((rule, idx) => (
           <div key={idx} style={{
             display: 'grid',
-            gridTemplateColumns: '2fr 2fr 100px 1.5fr',
+            gridTemplateColumns: '1.5fr 2fr 1fr 1fr 1fr',
             padding: '0.75rem 1.25rem',
             fontSize: '0.8125rem',
             borderBottom: '1px solid #f3f4f6',
             alignItems: 'center',
           }}>
-            <span style={{ color: '#374151' }}>{rule.categories}</span>
-            <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>{rule.keywords}</span>
-            <span style={{
-              fontFamily: 'monospace',
-              fontWeight: 600,
-              color: '#7c3aed',
-            }}>
-              {rule.accountCode}
-            </span>
-            <span style={{ color: '#374151' }}>{rule.accountName}</span>
+            <span style={{ color: '#374151', fontWeight: 500 }}>{rule.expenseType}</span>
+            <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>{rule.categories}</span>
+            <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#2563eb', textAlign: 'center' }}>{rule.rdCode}</span>
+            <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#059669', textAlign: 'center' }}>{rule.smCode}</span>
+            <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#7c3aed', textAlign: 'center' }}>{rule.gaCode}</span>
           </div>
         ))}
+
+        {/* Department classification legend */}
+        <div style={{
+          padding: '0.75rem 1.25rem',
+          backgroundColor: '#fafbfc',
+          borderTop: '1px solid #e5e7eb',
+          fontSize: '0.75rem',
+          color: '#6b7280',
+        }}>
+          <strong>部门 → 费用性质：</strong>
+          <span style={{ color: '#2563eb', marginLeft: '0.5rem' }}>R&D</span> = 研发/技术/工程/产品/数据/AI
+          <span style={{ color: '#059669', marginLeft: '0.75rem' }}>S&M</span> = 销售/市场/商务/增长/客户成功
+          <span style={{ color: '#7c3aed', marginLeft: '0.75rem' }}>G&A</span> = 其他部门（默认）
+        </div>
       </div>
 
-      {/* Available accounts */}
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '0.75rem',
-        border: '1px solid #e5e7eb',
-        overflow: 'hidden',
-      }}>
-        <div style={{
-          padding: '1rem 1.25rem',
-          borderBottom: '1px solid #e5e7eb',
-          fontWeight: 600,
-          fontSize: '0.9375rem',
-          color: '#111827',
-        }}>
-          {ts.selectAccount}
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', padding: '1rem 1.25rem' }}>
-          {AVAILABLE_ACCOUNTS.map(account => (
-            <div key={account.code} style={{
+      {/* Available accounts by group */}
+      {['R&D', 'S&M', 'G&A'].map(group => {
+        const groupAccounts = AVAILABLE_ACCOUNTS.filter(a => a.group === group);
+        const groupColors: Record<string, string> = { 'R&D': '#2563eb', 'S&M': '#059669', 'G&A': '#7c3aed' };
+        const groupLabels: Record<string, string> = { 'R&D': '研发费用 R&D', 'S&M': '销售费用 S&M', 'G&A': '管理费用 G&A' };
+        return (
+          <div key={group} style={{
+            backgroundColor: 'white',
+            borderRadius: '0.75rem',
+            border: '1px solid #e5e7eb',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '0.75rem 1.25rem',
+              borderBottom: '1px solid #e5e7eb',
+              fontWeight: 600,
+              fontSize: '0.875rem',
+              color: groupColors[group],
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
-              padding: '0.5rem 0.75rem',
-              backgroundColor: '#f9fafb',
-              borderRadius: '0.5rem',
-              border: '1px solid #f3f4f6',
             }}>
               <span style={{
-                fontFamily: 'monospace',
-                fontSize: '0.8125rem',
-                fontWeight: 600,
-                color: '#7c3aed',
-              }}>
-                {account.code}
-              </span>
-              <span style={{ fontSize: '0.8125rem', color: '#374151' }}>
-                {account.name}
-              </span>
+                display: 'inline-block',
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor: groupColors[group],
+              }} />
+              {groupLabels[group]}
             </div>
-          ))}
-        </div>
-      </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.5rem', padding: '0.75rem 1.25rem' }}>
+              {groupAccounts.map(account => (
+                <div key={account.code} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.375rem 0.625rem',
+                  backgroundColor: '#f9fafb',
+                  borderRadius: '0.375rem',
+                  border: '1px solid #f3f4f6',
+                }}>
+                  <span style={{
+                    fontFamily: 'monospace',
+                    fontSize: '0.8125rem',
+                    fontWeight: 600,
+                    color: groupColors[group],
+                  }}>
+                    {account.code}
+                  </span>
+                  <span style={{ fontSize: '0.8125rem', color: '#374151' }}>
+                    {account.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 

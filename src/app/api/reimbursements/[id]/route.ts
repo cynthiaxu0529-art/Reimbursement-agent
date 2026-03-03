@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users, payments, approvalChain, tenants } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, payments, approvalChain, tenants, departments } from '@/lib/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import { createPaymentService } from '@/lib/mcp/fluxpay-client';
 import {
@@ -626,14 +626,28 @@ export async function PATCH(
       .where(eq(reimbursements.id, id))
       .returning();
 
-    // 如果审批通过，自动给每笔明细打上 account_code 标签
+    // 如果审批通过，自动给每笔明细打上 account_code 标签（根据提交人部门区分 R&D/S&M/G&A）
     if (newStatus === 'approved') {
       try {
+        // 获取提交人的部门名称
+        const submitter = await db.query.users.findFirst({
+          where: eq(users.id, existing.userId),
+        });
+        let submitterDeptName: string | null = null;
+        if (submitter?.departmentId) {
+          const dept = await db.query.departments.findFirst({
+            where: eq(departments.id, submitter.departmentId),
+          });
+          submitterDeptName = dept?.name || submitter.department || null;
+        } else {
+          submitterDeptName = submitter?.department || null;
+        }
+
         const items = await db.query.reimbursementItems.findMany({
           where: eq(reimbursementItems.reimbursementId, id),
         });
         for (const item of items) {
-          const mapping = await mapExpenseToAccount(item.category, item.description);
+          const mapping = await mapExpenseToAccount(item.category, item.description, submitterDeptName);
           await db.update(reimbursementItems)
             .set({
               coaCode: mapping.accountCode,
