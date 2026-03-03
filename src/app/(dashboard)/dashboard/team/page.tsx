@@ -42,6 +42,16 @@ const COST_CENTER_OPTIONS = [
   { value: 'ga', label: 'G&A 管理费用', color: '#7c3aed' },
 ] as const;
 
+/** 前端推断部门的费用性质（当 costCenter 未设置时给建议） */
+function guessCostCenter(deptName: string): 'rd' | 'sm' | 'ga' {
+  const lower = deptName.toLowerCase();
+  const rdKeywords = ['研发', '技术', '工程', '开发', '算法', '架构', '测试', 'qa', '产品', 'cto', 'r&d', 'engineering', 'tech', 'data', 'ai', 'ml', 'devops', 'sre', 'platform'];
+  const smKeywords = ['销售', '市场', '营销', '商务', '品牌', '增长', '获客', '客户成功', 'cmo', 'cso', 'sales', 'marketing', 'growth', 'bd', 'revenue'];
+  for (const kw of rdKeywords) { if (lower.includes(kw)) return 'rd'; }
+  for (const kw of smKeywords) { if (lower.includes(kw)) return 'sm'; }
+  return 'ga';
+}
+
 interface ApprovalRule {
   id: string;
   name: string;
@@ -875,9 +885,22 @@ export default function TeamPage() {
                           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#111827' }}>{dept.name}</h3>
                           {dept.code && <span style={{ fontSize: '0.75rem', color: '#6b7280', backgroundColor: '#f3f4f6', padding: '0.125rem 0.5rem', borderRadius: '0.25rem' }}>{dept.code}</span>}
                           {(() => {
-                            const cc = COST_CENTER_OPTIONS.find(o => o.value === (dept.costCenter || ''));
-                            return dept.costCenter ? (
-                              <span style={{ fontSize: '0.75rem', color: cc?.color || '#9ca3af', backgroundColor: `${cc?.color || '#9ca3af'}10`, padding: '0.125rem 0.5rem', borderRadius: '0.25rem', border: `1px solid ${cc?.color || '#9ca3af'}30`, fontWeight: 500 }}>{cc?.label || dept.costCenter}</span>
+                            const effectiveCC = dept.costCenter || guessCostCenter(dept.name);
+                            const cc = COST_CENTER_OPTIONS.find(o => o.value === effectiveCC);
+                            const isGuess = !dept.costCenter;
+                            return cc ? (
+                              <span style={{
+                                fontSize: '0.75rem',
+                                color: cc.color,
+                                backgroundColor: `${cc.color}10`,
+                                padding: '0.125rem 0.5rem',
+                                borderRadius: '0.25rem',
+                                border: `1px ${isGuess ? 'dashed' : 'solid'} ${cc.color}40`,
+                                fontWeight: 500,
+                                opacity: isGuess ? 0.7 : 1,
+                              }}>
+                                {isGuess ? `${cc.label}?` : cc.label}
+                              </span>
                             ) : null;
                           })()}
                         </div>
@@ -896,7 +919,7 @@ export default function TeamPage() {
                             name: dept.name,
                             code: dept.code || '',
                             description: dept.description || '',
-                            costCenter: dept.costCenter || '',
+                            costCenter: dept.costCenter || guessCostCenter(dept.name),
                             parentId: dept.parentId || '',
                             managerId: dept.managerId || '',
                             approverIds: dept.approverIds || [],
