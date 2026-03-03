@@ -175,14 +175,14 @@ export const SCOPE_METADATA: Record<ApiScope, ScopeMetadata> = {
     label: '查看记账汇总',
     description: '读取按半月周期汇总的报销入账数据',
     category: 'sensitive',
-    requiredRoles: ['finance', 'super_admin'],
+    requiredRoles: ['finance', 'admin', 'super_admin'],
   },
   [API_SCOPES.ACCOUNT_MAPPING_READ]: {
     scope: API_SCOPES.ACCOUNT_MAPPING_READ,
     label: '查看科目映射',
     description: '读取费用类别到会计科目的映射规则',
     category: 'basic',
-    requiredRoles: ['finance', 'super_admin'],
+    requiredRoles: ['finance', 'admin', 'super_admin'],
   },
   [API_SCOPES.ACCOUNT_MAPPING_UPDATE]: {
     scope: API_SCOPES.ACCOUNT_MAPPING_UPDATE,
