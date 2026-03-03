@@ -90,6 +90,8 @@ const authConfig = {
     async jwt({ token, user }: { token: any; user: any }) {
       if (user) {
         token.id = user.id;
+        token.name = user.name;
+        token.email = user.email;
       }
       return token;
     },
@@ -104,6 +106,8 @@ const authConfig = {
           });
 
           if (dbUser) {
+            session.user.name = dbUser.name;
+            session.user.email = dbUser.email;
             session.user.role = dbUser.role;
             session.user.tenantId = dbUser.tenantId ?? undefined;
           }

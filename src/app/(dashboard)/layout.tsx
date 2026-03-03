@@ -121,6 +121,13 @@ export default function DashboardLayout({
           fetch('/api/settings/role'),
           fetch('/api/auth/me'),
         ]);
+
+        // 如果 API 返回 401，说明未认证，跳转登录页
+        if (meRes.status === 401 || roleRes.status === 401) {
+          router.push('/login');
+          return;
+        }
+
         const roleResult = await roleRes.json();
         if (roleResult.success && roleResult.roles) {
           const frontendRoles = roleResult.roles.map((r: string) => DB_TO_FRONTEND_ROLE[r] || r);
@@ -139,7 +146,7 @@ export default function DashboardLayout({
       }
     };
     initUser();
-  }, []);
+  }, [router]);
 
   const navItems = getNavItems(t);
 
