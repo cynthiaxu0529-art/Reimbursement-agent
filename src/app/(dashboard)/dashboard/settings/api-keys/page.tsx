@@ -52,6 +52,14 @@ const SCOPE_GROUPS = [
     ],
   },
   {
+    label: { zh: '记账与会计', en: 'Accounting' },
+    scopes: [
+      { value: 'accounting_summary:read', label: { zh: '查看记账汇总', en: 'View accounting summaries' } },
+      { value: 'account_mapping:read', label: { zh: '查看科目映射', en: 'View account mappings' } },
+      { value: 'account_mapping:update', label: { zh: '修改科目映射', en: 'Update account mappings' } },
+    ],
+  },
+  {
     label: { zh: '其他', en: 'Other' },
     scopes: [
       { value: 'policy:read', label: { zh: '查看政策', en: 'View policies' } },
@@ -79,6 +87,14 @@ const SCOPE_PRESETS = {
     scopes: [
       'reimbursement:read', 'receipt:read', 'policy:read',
       'trip:read', 'profile:read',
+    ],
+  },
+  accounting: {
+    label: { zh: 'Accounting Agent', en: 'Accounting Agent' },
+    scopes: [
+      'accounting_summary:read', 'account_mapping:read',
+      'reimbursement:read', 'receipt:read',
+      'analytics:read', 'settings:read',
     ],
   },
 };
