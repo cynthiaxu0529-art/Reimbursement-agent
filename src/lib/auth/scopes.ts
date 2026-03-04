@@ -49,6 +49,7 @@ export const API_SCOPES = {
 
   // 记账汇总（财务/会计专用）
   ACCOUNTING_SUMMARY_READ: 'accounting_summary:read',
+  ACCOUNTING_SUMMARY_GENERATE: 'accounting_summary:generate',
   ACCOUNT_MAPPING_READ: 'account_mapping:read',
   ACCOUNT_MAPPING_UPDATE: 'account_mapping:update',
 
@@ -177,6 +178,13 @@ export const SCOPE_METADATA: Record<ApiScope, ScopeMetadata> = {
     category: 'sensitive',
     requiredRoles: ['finance', 'admin', 'super_admin'],
   },
+  [API_SCOPES.ACCOUNTING_SUMMARY_GENERATE]: {
+    scope: API_SCOPES.ACCOUNTING_SUMMARY_GENERATE,
+    label: '生成记账汇总',
+    description: '触发按半月周期生成并持久化报销入账汇总',
+    category: 'sensitive',
+    requiredRoles: ['finance', 'admin', 'super_admin'],
+  },
   [API_SCOPES.ACCOUNT_MAPPING_READ]: {
     scope: API_SCOPES.ACCOUNT_MAPPING_READ,
     label: '查看科目映射',
@@ -246,9 +254,10 @@ export const SCOPE_PRESETS = {
     API_SCOPES.PROFILE_READ,
   ],
 
-  /** Accounting Agent：读取记账汇总 + 科目映射（供外部会计系统拉取数据） */
+  /** Accounting Agent：读取记账汇总 + 科目映射 + 触发生成（供外部会计系统拉取数据） */
   ACCOUNTING_AGENT: [
     API_SCOPES.ACCOUNTING_SUMMARY_READ,
+    API_SCOPES.ACCOUNTING_SUMMARY_GENERATE,
     API_SCOPES.ACCOUNT_MAPPING_READ,
     API_SCOPES.REIMBURSEMENT_READ,
     API_SCOPES.RECEIPT_READ,
@@ -317,6 +326,13 @@ export const ROUTE_SCOPE_MAP: Record<string, { method: string; scope: ApiScope }
   ],
   '/api/internal/accounting-summaries': [
     { method: 'GET', scope: API_SCOPES.ACCOUNTING_SUMMARY_READ },
+  ],
+  '/api/reimbursement-summaries/generate': [
+    { method: 'POST', scope: API_SCOPES.ACCOUNTING_SUMMARY_GENERATE },
+  ],
+  '/api/internal/generate-summary': [
+    { method: 'GET', scope: API_SCOPES.ACCOUNTING_SUMMARY_READ },
+    { method: 'POST', scope: API_SCOPES.ACCOUNTING_SUMMARY_GENERATE },
   ],
   '/api/internal/update-item-account': [
     { method: 'PATCH', scope: API_SCOPES.ACCOUNT_MAPPING_UPDATE },
