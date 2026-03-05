@@ -1,26 +1,37 @@
 /**
- * 内部 API：更新报销明细的 GL 科目映射
+ * 内部 API：更新报销明细的 GL 科目映射（单条 + 批量）
  *
  * PATCH /api/internal/update-item-account
  *
- * 请求体:
+ * 单条更新:
  * {
  *   item_id: string;
  *   account_code: string;
  *   account_name: string;
  * }
  *
- * 需要 finance 或 admin 权限。
+ * 批量更新:
+ * {
+ *   items: Array<{ item_id: string; account_code: string; account_name: string }>
+ * }
+ *
+ * 需要 finance 或 super_admin 权限。
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { reimbursementItems, users } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { getUserRoles } from '@/lib/auth/roles';
 
 export const dynamic = 'force-dynamic';
+
+interface UpdateItem {
+  item_id: string;
+  account_code: string;
+  account_name: string;
+}
 
 export async function PATCH(request: NextRequest) {
   try {
@@ -43,42 +54,85 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { item_id, account_code, account_name } = body;
 
-    if (!item_id || !account_code || !account_name) {
-      return NextResponse.json({ error: '缺少必填字段: item_id, account_code, account_name' }, { status: 400 });
+    // 兼容单条和批量
+    let updates: UpdateItem[];
+
+    if (body.items && Array.isArray(body.items)) {
+      // 批量模式
+      updates = body.items;
+    } else if (body.item_id) {
+      // 单条模式
+      updates = [{
+        item_id: body.item_id,
+        account_code: body.account_code,
+        account_name: body.account_name,
+      }];
+    } else {
+      return NextResponse.json(
+        { error: '请提供 item_id 或 items 数组' },
+        { status: 400 }
+      );
     }
 
-    // 查找明细
-    const item = await db.query.reimbursementItems.findFirst({
-      where: eq(reimbursementItems.id, item_id),
-    });
-
-    if (!item) {
-      return NextResponse.json({ error: '报销明细不存在' }, { status: 404 });
+    // 验证
+    for (const u of updates) {
+      if (!u.item_id || !u.account_code || !u.account_name) {
+        return NextResponse.json(
+          { error: `缺少必填字段: item_id=${u.item_id}, account_code=${u.account_code}, account_name=${u.account_name}` },
+          { status: 400 }
+        );
+      }
     }
 
-    // 更新科目
-    const [updated] = await db
-      .update(reimbursementItems)
-      .set({
-        coaCode: account_code,
-        coaName: account_name,
-        updatedAt: new Date(),
-      })
-      .where(eq(reimbursementItems.id, item_id))
-      .returning();
+    // 验证所有 item 存在
+    const itemIds = updates.map(u => u.item_id);
+    const existingItems = await db
+      .select({ id: reimbursementItems.id })
+      .from(reimbursementItems)
+      .where(inArray(reimbursementItems.id, itemIds));
+
+    const existingIds = new Set(existingItems.map(i => i.id));
+    const missingIds = itemIds.filter(id => !existingIds.has(id));
+    if (missingIds.length > 0) {
+      return NextResponse.json(
+        { error: `以下明细不存在: ${missingIds.join(', ')}` },
+        { status: 404 }
+      );
+    }
+
+    // 逐条更新（因为每条可能有不同的 account_code/account_name）
+    const results: { id: string; coaCode: string | null; coaName: string | null }[] = [];
+    const now = new Date();
+
+    for (const u of updates) {
+      const [updated] = await db
+        .update(reimbursementItems)
+        .set({
+          coaCode: u.account_code,
+          coaName: u.account_name,
+          updatedAt: now,
+        })
+        .where(eq(reimbursementItems.id, u.item_id))
+        .returning({
+          id: reimbursementItems.id,
+          coaCode: reimbursementItems.coaCode,
+          coaName: reimbursementItems.coaName,
+        });
+
+      results.push(updated);
+    }
 
     return NextResponse.json({
       success: true,
-      data: {
-        id: updated.id,
-        coaCode: updated.coaCode,
-        coaName: updated.coaName,
-      },
+      updated_count: results.length,
+      data: results,
     });
   } catch (error) {
     console.error('Update item account error:', error);
-    return NextResponse.json({ error: '更新科目失败' }, { status: 500 });
+    return NextResponse.json(
+      { error: '更新科目失败', details: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
   }
 }

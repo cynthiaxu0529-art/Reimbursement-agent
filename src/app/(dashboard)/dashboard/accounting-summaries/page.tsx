@@ -121,10 +121,18 @@ export default function AccountingSummariesPage() {
   // Detail trace state
   const [selectedSummary, setSelectedSummary] = useState<Summary | null>(null);
 
-  // Edit mapping state
+  // Edit mapping state (single)
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editAccountCode, setEditAccountCode] = useState('');
   const [savingMapping, setSavingMapping] = useState(false);
+
+  // Batch edit state
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [batchAccountCode, setBatchAccountCode] = useState('');
+  const [savingBatch, setSavingBatch] = useState(false);
+  const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [filterEmployee, setFilterEmployee] = useState<string>('all');
+  const [filterAccountCode, setFilterAccountCode] = useState<string>('all');
 
   // Generate tab state
   interface PeriodInfo {
@@ -195,10 +203,13 @@ export default function AccountingSummariesPage() {
     ? summaries
     : summaries.filter(s => s.summary_id === filterPeriod);
 
-  // Save mapping handler
+  // Save mapping handler (single item)
   const handleSaveMapping = async (itemId: string) => {
     const account = AVAILABLE_ACCOUNTS.find(a => a.code === editAccountCode);
-    if (!account) return;
+    if (!account) {
+      alert(`Invalid account code: ${editAccountCode}`);
+      return;
+    }
 
     setSavingMapping(true);
     try {
@@ -215,16 +226,62 @@ export default function AccountingSummariesPage() {
       if (result.success) {
         setEditingItemId(null);
         setEditAccountCode('');
-        // Refresh data
         await fetchSummaries();
       } else {
-        alert(ts.mappingFailed);
+        alert(`${ts.mappingFailed}: ${result.error || 'Unknown error'}`);
       }
-    } catch {
-      alert(ts.mappingFailed);
+    } catch (err) {
+      alert(`${ts.mappingFailed}: ${err instanceof Error ? err.message : 'Network error'}`);
     } finally {
       setSavingMapping(false);
     }
+  };
+
+  // Batch save handler
+  const handleBatchSave = async () => {
+    if (selectedItemIds.size === 0 || !batchAccountCode) return;
+
+    const account = AVAILABLE_ACCOUNTS.find(a => a.code === batchAccountCode);
+    if (!account) return;
+
+    setSavingBatch(true);
+    setBatchMessage(null);
+    try {
+      const items = Array.from(selectedItemIds).map(itemId => ({
+        item_id: itemId,
+        account_code: account.code,
+        account_name: account.name,
+      }));
+
+      const res = await fetch('/api/internal/update-item-account', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        setBatchMessage(ts.batchSuccess.replace('{count}', String(result.updated_count)));
+        setSelectedItemIds(new Set());
+        setBatchAccountCode('');
+        await fetchSummaries();
+      } else {
+        setBatchMessage(`${ts.mappingFailed}: ${result.error || ''}`);
+      }
+    } catch (err) {
+      setBatchMessage(`${ts.mappingFailed}: ${err instanceof Error ? err.message : 'Network error'}`);
+    } finally {
+      setSavingBatch(false);
+    }
+  };
+
+  // Toggle item selection for batch
+  const toggleItemSelect = (itemId: string) => {
+    setSelectedItemIds(prev => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
   };
 
   // ============================================================================
@@ -541,7 +598,7 @@ export default function AccountingSummariesPage() {
   );
 
   // ============================================================================
-  // Tab: Detail Trace
+  // Tab: Detail Trace (with batch editing)
   // ============================================================================
 
   const renderDetailsTab = () => {
@@ -569,6 +626,25 @@ export default function AccountingSummariesPage() {
       allDetails.push(...item.details);
     }
 
+    // Unique employees and account codes for filters
+    const employees = [...new Set(allDetails.map(d => d.employee_name))].sort();
+    const accountCodes = [...new Set(allDetails.map(d => d.account_code))].sort();
+
+    // Filtered details
+    const filteredDetails = allDetails.filter(d => {
+      if (filterEmployee !== 'all' && d.employee_name !== filterEmployee) return false;
+      if (filterAccountCode !== 'all' && d.account_code !== filterAccountCode) return false;
+      return true;
+    });
+
+    // Select all visible items
+    const selectAllVisible = () => {
+      const ids = filteredDetails.map(d => d.item_id);
+      setSelectedItemIds(new Set(ids));
+    };
+    const deselectAll = () => setSelectedItemIds(new Set());
+    const isAllSelected = filteredDetails.length > 0 && filteredDetails.every(d => selectedItemIds.has(d.item_id));
+
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         {/* Summary selector */}
@@ -578,7 +654,11 @@ export default function AccountingSummariesPage() {
             value={summary.summary_id}
             onChange={(e) => {
               const s = summaries.find(s => s.summary_id === e.target.value);
-              if (s) setSelectedSummary(s);
+              if (s) {
+                setSelectedSummary(s);
+                setSelectedItemIds(new Set());
+                setBatchMessage(null);
+              }
             }}
             style={{
               padding: '0.5rem 0.75rem',
@@ -594,53 +674,142 @@ export default function AccountingSummariesPage() {
           </select>
         </div>
 
-        {/* Summary overview card */}
+        {/* Summary overview cards */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, 1fr)',
           gap: '1rem',
         }}>
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '0.75rem',
-            border: '1px solid #e5e7eb',
-            padding: '1rem',
-          }}>
-            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>{ts.summaryId}</div>
-            <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#2563eb' }}>{summary.summary_id}</div>
-          </div>
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '0.75rem',
-            border: '1px solid #e5e7eb',
-            padding: '1rem',
-          }}>
-            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>{ts.period}</div>
-            <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827' }}>{summary.period_start} ~ {summary.period_end}</div>
-          </div>
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '0.75rem',
-            border: '1px solid #e5e7eb',
-            padding: '1rem',
-          }}>
-            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>{ts.totalRecords}</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>{summary.total_records}</div>
-          </div>
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '0.75rem',
-            border: '1px solid #e5e7eb',
-            padding: '1rem',
-          }}>
-            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>{ts.totalAmount}</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#059669' }}>
-              {formatCurrency(summary.total_amount, summary.currency)}
+          {[
+            { label: ts.summaryId, value: summary.summary_id, color: '#2563eb', size: '0.875rem' },
+            { label: ts.period, value: `${summary.period_start} ~ ${summary.period_end}`, color: '#111827', size: '0.875rem' },
+            { label: ts.totalRecords, value: String(summary.total_records), color: '#111827', size: '1.25rem' },
+            { label: ts.totalAmount, value: formatCurrency(summary.total_amount, summary.currency), color: '#059669', size: '1.25rem' },
+          ].map((card, i) => (
+            <div key={i} style={{
+              backgroundColor: 'white',
+              borderRadius: '0.75rem',
+              border: '1px solid #e5e7eb',
+              padding: '1rem',
+            }}>
+              <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>{card.label}</div>
+              <div style={{ fontSize: card.size, fontWeight: i >= 2 ? 700 : 600, color: card.color }}>{card.value}</div>
             </div>
-          </div>
+          ))}
         </div>
 
-        {/* Account breakdown */}
+        {/* Batch action bar */}
+        <div style={{
+          backgroundColor: selectedItemIds.size > 0 ? '#eff6ff' : '#f9fafb',
+          border: `1px solid ${selectedItemIds.size > 0 ? '#bfdbfe' : '#e5e7eb'}`,
+          borderRadius: '0.75rem',
+          padding: '0.75rem 1.25rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          flexWrap: 'wrap',
+        }}>
+          {/* Filter: Employee */}
+          <label style={{ fontSize: '0.8125rem', color: '#374151', fontWeight: 500 }}>{ts.employee}:</label>
+          <select
+            value={filterEmployee}
+            onChange={(e) => { setFilterEmployee(e.target.value); setSelectedItemIds(new Set()); }}
+            style={{
+              padding: '0.375rem 0.5rem',
+              borderRadius: '0.375rem',
+              border: '1px solid #d1d5db',
+              fontSize: '0.8125rem',
+              backgroundColor: 'white',
+            }}
+          >
+            <option value="all">{ts.filterAll}</option>
+            {employees.map(e => <option key={e} value={e}>{e}</option>)}
+          </select>
+
+          {/* Filter: Current Account Code */}
+          <label style={{ fontSize: '0.8125rem', color: '#374151', fontWeight: 500 }}>{ts.accountCode}:</label>
+          <select
+            value={filterAccountCode}
+            onChange={(e) => { setFilterAccountCode(e.target.value); setSelectedItemIds(new Set()); }}
+            style={{
+              padding: '0.375rem 0.5rem',
+              borderRadius: '0.375rem',
+              border: '1px solid #d1d5db',
+              fontSize: '0.8125rem',
+              backgroundColor: 'white',
+            }}
+          >
+            <option value="all">{ts.filterAll}</option>
+            {accountCodes.map(c => {
+              const acct = AVAILABLE_ACCOUNTS.find(a => a.code === c);
+              return <option key={c} value={c}>{c} {acct ? `- ${acct.name.split(' - ')[1]}` : ''}</option>;
+            })}
+          </select>
+
+          <div style={{ flex: 1 }} />
+
+          {/* Batch selection info and action */}
+          <span style={{ fontSize: '0.8125rem', color: '#6b7280' }}>
+            {ts.batchSelected.replace('{count}', String(selectedItemIds.size))}
+          </span>
+
+          {/* Change to dropdown */}
+          <label style={{ fontSize: '0.8125rem', color: '#374151', fontWeight: 500 }}>{ts.batchChangeTo}:</label>
+          <select
+            value={batchAccountCode}
+            onChange={(e) => setBatchAccountCode(e.target.value)}
+            style={{
+              padding: '0.375rem 0.5rem',
+              borderRadius: '0.375rem',
+              border: '1px solid #d1d5db',
+              fontSize: '0.8125rem',
+              backgroundColor: 'white',
+              minWidth: '200px',
+            }}
+          >
+            <option value="">-- {ts.selectAccount} --</option>
+            {['R&D', 'S&M', 'G&A'].map(g => (
+              <optgroup key={g} label={g}>
+                {AVAILABLE_ACCOUNTS.filter(a => a.group === g).map(a => (
+                  <option key={a.code} value={a.code}>{a.code} - {a.name.split(' - ')[1]}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+
+          <button
+            onClick={handleBatchSave}
+            disabled={selectedItemIds.size === 0 || !batchAccountCode || savingBatch}
+            style={{
+              padding: '0.375rem 1rem',
+              borderRadius: '0.375rem',
+              border: 'none',
+              backgroundColor: selectedItemIds.size > 0 && batchAccountCode && !savingBatch ? '#2563eb' : '#d1d5db',
+              color: 'white',
+              fontSize: '0.8125rem',
+              fontWeight: 500,
+              cursor: selectedItemIds.size > 0 && batchAccountCode && !savingBatch ? 'pointer' : 'default',
+            }}
+          >
+            {savingBatch ? ts.generating : ts.batchApply.replace('{count}', String(selectedItemIds.size))}
+          </button>
+        </div>
+
+        {/* Batch message */}
+        {batchMessage && (
+          <div style={{
+            backgroundColor: batchMessage.includes(ts.mappingFailed) ? '#fef2f2' : '#f0fdf4',
+            border: `1px solid ${batchMessage.includes(ts.mappingFailed) ? '#fecaca' : '#bbf7d0'}`,
+            borderRadius: '0.5rem',
+            padding: '0.5rem 1rem',
+            fontSize: '0.8125rem',
+            color: batchMessage.includes(ts.mappingFailed) ? '#991b1b' : '#166534',
+          }}>
+            {batchMessage}
+          </div>
+        )}
+
+        {/* Detail table */}
         <div style={{
           backgroundColor: 'white',
           borderRadius: '0.75rem',
@@ -648,19 +817,35 @@ export default function AccountingSummariesPage() {
           overflow: 'hidden',
         }}>
           <div style={{
-            padding: '1rem 1.25rem',
+            padding: '0.75rem 1.25rem',
             borderBottom: '1px solid #e5e7eb',
-            fontWeight: 600,
-            fontSize: '0.9375rem',
-            color: '#111827',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
           }}>
-            {ts.originalItems}
+            <span style={{ fontWeight: 600, fontSize: '0.9375rem', color: '#111827' }}>
+              {ts.originalItems} ({filteredDetails.length})
+            </span>
+            <button
+              onClick={isAllSelected ? deselectAll : selectAllVisible}
+              style={{
+                fontSize: '0.8125rem',
+                padding: '0.25rem 0.75rem',
+                borderRadius: '0.375rem',
+                border: '1px solid #d1d5db',
+                backgroundColor: 'white',
+                cursor: 'pointer',
+                color: '#374151',
+              }}
+            >
+              {isAllSelected ? ts.deselectAll : ts.selectAll}
+            </button>
           </div>
 
           {/* Table header */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '80px 1fr 0.8fr 1fr 80px 1.5fr 130px',
+            gridTemplateColumns: '36px 70px 1fr 0.7fr 1fr 70px 1.2fr 160px',
             padding: '0.625rem 1.25rem',
             fontSize: '0.75rem',
             fontWeight: 600,
@@ -670,6 +855,7 @@ export default function AccountingSummariesPage() {
             borderBottom: '1px solid #f3f4f6',
             backgroundColor: '#fafbfc',
           }}>
+            <span></span>
             <span>{ts.accountCode}</span>
             <span>{ts.employee}</span>
             <span>{ts.department}</span>
@@ -680,109 +866,130 @@ export default function AccountingSummariesPage() {
           </div>
 
           {/* Table rows */}
-          {allDetails.map((detail, idx) => (
-            <div key={idx} style={{
-              display: 'grid',
-              gridTemplateColumns: '80px 1fr 0.8fr 1fr 80px 1.5fr 130px',
-              padding: '0.625rem 1.25rem',
-              fontSize: '0.8125rem',
-              borderBottom: '1px solid #f3f4f6',
-              alignItems: 'center',
-            }}>
-              <span style={{
-                fontFamily: 'monospace',
-                fontSize: '0.8125rem',
-                fontWeight: 600,
-                color: '#7c3aed',
-              }}>
-                {detail.account_code}
-              </span>
-              <span style={{ color: '#374151' }}>{detail.employee_name}</span>
-              <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>{detail.department}</span>
-              <span style={{ color: '#6b7280' }}>
-                {CATEGORY_LABELS[detail.category] || detail.category}
-              </span>
-              <span style={{ textAlign: 'right', fontWeight: 500, color: '#111827' }}>
-                {formatCurrency(detail.amount)}
-              </span>
-              <span style={{
-                color: '#6b7280',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}>
-                {detail.description}
-              </span>
-              <div style={{ textAlign: 'center' }}>
-                {editingItemId === detail.item_id ? (
-                  <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', justifyContent: 'center' }}>
-                    <select
-                      value={editAccountCode}
-                      onChange={(e) => setEditAccountCode(e.target.value)}
+          {filteredDetails.map((detail, idx) => {
+            const isSelected = selectedItemIds.has(detail.item_id);
+            return (
+              <div
+                key={`${detail.item_id}-${idx}`}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '36px 70px 1fr 0.7fr 1fr 70px 1.2fr 160px',
+                  padding: '0.5rem 1.25rem',
+                  fontSize: '0.8125rem',
+                  borderBottom: '1px solid #f3f4f6',
+                  alignItems: 'center',
+                  backgroundColor: isSelected ? '#eff6ff' : 'transparent',
+                  cursor: 'pointer',
+                }}
+                onClick={() => toggleItemSelect(detail.item_id)}
+              >
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggleItemSelect(detail.item_id)}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                />
+                <span style={{
+                  fontFamily: 'monospace',
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  color: '#7c3aed',
+                }}>
+                  {detail.account_code}
+                </span>
+                <span style={{ color: '#374151' }}>{detail.employee_name}</span>
+                <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>{detail.department}</span>
+                <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>
+                  {CATEGORY_LABELS[detail.category] || detail.category}
+                </span>
+                <span style={{ textAlign: 'right', fontWeight: 500, color: '#111827' }}>
+                  {formatCurrency(detail.amount)}
+                </span>
+                <span style={{
+                  color: '#6b7280',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontSize: '0.75rem',
+                }}>
+                  {detail.description}
+                </span>
+                <div style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                  {editingItemId === detail.item_id ? (
+                    <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', justifyContent: 'center' }}>
+                      <select
+                        value={editAccountCode}
+                        onChange={(e) => setEditAccountCode(e.target.value)}
+                        style={{
+                          fontSize: '0.75rem',
+                          padding: '0.125rem 0.25rem',
+                          borderRadius: '0.25rem',
+                          border: '1px solid #d1d5db',
+                          width: '75px',
+                        }}
+                      >
+                        <option value="">--</option>
+                        {['R&D', 'S&M', 'G&A'].map(g => (
+                          <optgroup key={g} label={g}>
+                            {AVAILABLE_ACCOUNTS.filter(a => a.group === g).map(a => (
+                              <option key={a.code} value={a.code}>{a.code}</option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => handleSaveMapping(detail.item_id)}
+                        disabled={!editAccountCode || savingMapping}
+                        style={{
+                          fontSize: '0.625rem',
+                          padding: '0.125rem 0.375rem',
+                          borderRadius: '0.25rem',
+                          border: 'none',
+                          backgroundColor: editAccountCode ? '#2563eb' : '#d1d5db',
+                          color: 'white',
+                          cursor: editAccountCode ? 'pointer' : 'default',
+                        }}
+                      >
+                        {savingMapping ? '...' : '✓'}
+                      </button>
+                      <button
+                        onClick={() => { setEditingItemId(null); setEditAccountCode(''); }}
+                        style={{
+                          fontSize: '0.625rem',
+                          padding: '0.125rem 0.375rem',
+                          borderRadius: '0.25rem',
+                          border: '1px solid #d1d5db',
+                          backgroundColor: 'white',
+                          cursor: 'pointer',
+                          color: '#6b7280',
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setEditingItemId(detail.item_id);
+                        setEditAccountCode(detail.account_code);
+                      }}
                       style={{
                         fontSize: '0.75rem',
-                        padding: '0.125rem 0.25rem',
-                        borderRadius: '0.25rem',
-                        border: '1px solid #d1d5db',
-                        width: '75px',
-                      }}
-                    >
-                      <option value="">--</option>
-                      {AVAILABLE_ACCOUNTS.map(a => (
-                        <option key={a.code} value={a.code}>{a.code}</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => handleSaveMapping(detail.item_id)}
-                      disabled={!editAccountCode || savingMapping}
-                      style={{
-                        fontSize: '0.625rem',
-                        padding: '0.125rem 0.375rem',
-                        borderRadius: '0.25rem',
-                        border: 'none',
-                        backgroundColor: editAccountCode ? '#2563eb' : '#d1d5db',
-                        color: 'white',
-                        cursor: editAccountCode ? 'pointer' : 'default',
-                      }}
-                    >
-                      {savingMapping ? '...' : '✓'}
-                    </button>
-                    <button
-                      onClick={() => { setEditingItemId(null); setEditAccountCode(''); }}
-                      style={{
-                        fontSize: '0.625rem',
-                        padding: '0.125rem 0.375rem',
-                        borderRadius: '0.25rem',
-                        border: '1px solid #d1d5db',
-                        backgroundColor: 'white',
-                        cursor: 'pointer',
                         color: '#6b7280',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
                       }}
+                      title={ts.editMapping}
                     >
-                      ✕
+                      {detail.account_code} - {(detail.account_name.split(' - ')[1] || detail.account_name).substring(0, 12)} ✏️
                     </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setEditingItemId(detail.item_id);
-                      setEditAccountCode(detail.account_code);
-                    }}
-                    style={{
-                      fontSize: '0.75rem',
-                      color: '#6b7280',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                    title={ts.editMapping}
-                  >
-                    {detail.account_code} - {detail.account_name.split(' - ')[1] || detail.account_name} ✏️
-                  </button>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
