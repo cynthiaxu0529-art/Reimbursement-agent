@@ -454,6 +454,11 @@ const en: Translations = {
     ruleKeywords: 'Match Keywords',
     ruleAccount: 'GL Account',
     selectAccount: 'Select Account',
+    // Batch edit
+    batchSelected: '{count} selected',
+    batchChangeTo: 'Change to',
+    batchApply: 'Batch Apply ({count})',
+    batchSuccess: 'Successfully updated {count} item(s)',
     // Generate
     tabGenerate: 'Generate',
     generateTitle: 'Generate & Persist Summaries',

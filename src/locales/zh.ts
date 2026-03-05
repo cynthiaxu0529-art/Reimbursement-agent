@@ -452,6 +452,11 @@ const zh = {
     ruleKeywords: '匹配关键词',
     ruleAccount: 'GL 科目',
     selectAccount: '选择科目',
+    // 批量编辑
+    batchSelected: '已选 {count} 项',
+    batchChangeTo: '修改为',
+    batchApply: '批量修改 ({count})',
+    batchSuccess: '成功更新 {count} 条记录',
     // 生成
     tabGenerate: '生成汇总',
     generateTitle: '生成并持久化汇总',
