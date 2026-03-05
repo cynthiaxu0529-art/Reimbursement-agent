@@ -437,6 +437,7 @@ const zh = {
     mappingSaved: '科目映射已更新',
     mappingFailed: '更新失败',
     filterPeriod: '筛选周期',
+    filterAccountCode: '筛选科目',
     filterAll: '全部',
     refreshData: '刷新数据',
     lastSynced: '最后同步',

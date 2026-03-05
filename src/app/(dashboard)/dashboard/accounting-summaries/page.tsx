@@ -117,6 +117,7 @@ export default function AccountingSummariesPage() {
   const [expandedSummaryId, setExpandedSummaryId] = useState<string | null>(null);
   const [expandedAccountCode, setExpandedAccountCode] = useState<string | null>(null);
   const [filterPeriod, setFilterPeriod] = useState<string>('all');
+  const [filterSummaryAccount, setFilterSummaryAccount] = useState<string>('all');
 
   // Detail trace state
   const [selectedSummary, setSelectedSummary] = useState<Summary | null>(null);
@@ -198,10 +199,26 @@ export default function AccountingSummariesPage() {
   // Get unique periods for filter
   const periods = [...new Set(summaries.map(s => s.summary_id))];
 
+  // Unique account codes across all summaries for filter
+  const summaryAccountCodes = [...new Set(
+    summaries.flatMap(s => s.items.map(item => item.account_code))
+  )].sort();
+
   // Filtered summaries
-  const filteredSummaries = filterPeriod === 'all'
-    ? summaries
-    : summaries.filter(s => s.summary_id === filterPeriod);
+  const filteredSummaries = summaries
+    .filter(s => filterPeriod === 'all' || s.summary_id === filterPeriod)
+    .map(s => {
+      if (filterSummaryAccount === 'all') return s;
+      const filteredItems = s.items.filter(item => item.account_code === filterSummaryAccount);
+      if (filteredItems.length === 0) return null;
+      return {
+        ...s,
+        items: filteredItems,
+        total_amount: filteredItems.reduce((sum, item) => sum + item.total_amount, 0),
+        total_records: filteredItems.reduce((sum, item) => sum + item.record_count, 0),
+      };
+    })
+    .filter((s): s is Summary => s !== null);
 
   // Save mapping handler (single item)
   const handleSaveMapping = async (itemId: string) => {
@@ -327,6 +344,27 @@ export default function AccountingSummariesPage() {
           <option value="all">{ts.filterAll}</option>
           {periods.map(p => (
             <option key={p} value={p}>{parsePeriodLabel(p)}</option>
+          ))}
+        </select>
+        <label style={{ fontSize: '0.875rem', fontWeight: 500, color: '#374151' }}>{ts.filterAccountCode}:</label>
+        <select
+          value={filterSummaryAccount}
+          onChange={(e) => setFilterSummaryAccount(e.target.value)}
+          style={{
+            padding: '0.5rem 0.75rem',
+            borderRadius: '0.5rem',
+            border: '1px solid #d1d5db',
+            fontSize: '0.875rem',
+            backgroundColor: 'white',
+          }}
+        >
+          <option value="all">{ts.filterAll}</option>
+          {['R&D', 'S&M', 'G&A'].map(g => (
+            <optgroup key={g} label={g}>
+              {AVAILABLE_ACCOUNTS.filter(a => a.group === g && summaryAccountCodes.includes(a.code)).map(a => (
+                <option key={a.code} value={a.code}>{a.code} - {a.name.split(' - ')[1]}</option>
+              ))}
+            </optgroup>
           ))}
         </select>
         <button
