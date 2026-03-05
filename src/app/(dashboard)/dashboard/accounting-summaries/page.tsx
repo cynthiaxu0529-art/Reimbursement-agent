@@ -453,6 +453,9 @@ export default function AccountingSummariesPage() {
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedSummary(summary);
+                            setFilterAccountCode(item.account_code);
+                            setFilterEmployee('all');
+                            setSelectedItemIds(new Set());
                             setActiveTab('details');
                           }}
                           style={{
