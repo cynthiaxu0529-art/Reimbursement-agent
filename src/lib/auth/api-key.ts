@@ -18,6 +18,7 @@ import { db } from '@/lib/db';
 import { apiKeys, agentAuditLogs, users } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { createHash, randomBytes } from 'crypto';
+import { jwtVerify } from 'jose';
 import { hasScope, getRequiredScope, checkScopeRoleRequirement, type ApiScope } from './scopes';
 import { getUserRoles } from './roles';
 import { checkRateLimit } from '@/lib/rate-limit';
@@ -340,6 +341,81 @@ export function isApiKeyRequest(request: NextRequest): boolean {
     parts[1].startsWith(API_KEY_PREFIX);
 }
 
+/**
+ * 判断请求是否携带 JWT bearer token（由 /api/auth/api-token 签发）
+ */
+function isJwtBearerRequest(request: NextRequest): boolean {
+  const authHeader = request.headers.get('authorization');
+  if (!authHeader) return false;
+  const parts = authHeader.split(' ');
+  return parts.length === 2 &&
+    parts[0].toLowerCase() === 'bearer' &&
+    !parts[1].startsWith(API_KEY_PREFIX); // 非 rk_ 开头的 bearer token
+}
+
+/**
+ * 从 JWT bearer token 验证并返回 AuthContext
+ */
+async function authenticateJwtBearer(
+  request: NextRequest
+): Promise<
+  | { success: true; context: AuthContext }
+  | { success: false; error: string; statusCode: number }
+> {
+  const authHeader = request.headers.get('authorization')!;
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const secret = new TextEncoder().encode(
+      process.env.AUTH_SECRET || 'development-secret-change-in-production'
+    );
+
+    const { payload } = await jwtVerify(token, secret, {
+      issuer: 'reimbursement-agent',
+    });
+
+    if (payload.type !== 'api_token') {
+      return { success: false, error: 'Invalid token type', statusCode: 401 };
+    }
+
+    const userId = payload.sub;
+    if (!userId) {
+      return { success: false, error: 'Invalid token: missing subject', statusCode: 401 };
+    }
+
+    // 查找用户确保仍然存在
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!user) {
+      return { success: false, error: 'User not found', statusCode: 401 };
+    }
+
+    return {
+      success: true,
+      context: {
+        authType: 'session',
+        userId: user.id,
+        tenantId: user.tenantId ?? undefined,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          tenantId: user.tenantId ?? undefined,
+        },
+      },
+    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Token verification failed';
+    if (message.includes('expired')) {
+      return { success: false, error: 'Token expired', statusCode: 401 };
+    }
+    return { success: false, error: 'Invalid token', statusCode: 401 };
+  }
+}
+
 // ============================================================================
 // 审计日志
 // ============================================================================
@@ -419,7 +495,7 @@ export async function authenticate(
   | { success: true; context: AuthContext }
   | { success: false; error: string; statusCode: number }
 > {
-  // 优先尝试 API Key 认证
+  // 优先尝试 API Key 认证（rk_ 前缀）
   if (isApiKeyRequest(request)) {
     const result = await authenticateApiKey(request, requiredScope);
     if (!result.success) {
@@ -464,6 +540,11 @@ export async function authenticate(
     }
 
     return { success: true, context: authContext };
+  }
+
+  // 尝试 JWT bearer token 认证（由 /api/auth/api-token 签发）
+  if (isJwtBearerRequest(request)) {
+    return authenticateJwtBearer(request);
   }
 
   // 回退到 NextAuth Session 认证
