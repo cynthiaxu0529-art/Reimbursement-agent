@@ -117,6 +117,7 @@ export default function AccountingSummariesPage() {
   const [expandedSummaryId, setExpandedSummaryId] = useState<string | null>(null);
   const [expandedAccountCode, setExpandedAccountCode] = useState<string | null>(null);
   const [filterPeriod, setFilterPeriod] = useState<string>('all');
+  const [filterSummaryAccount, setFilterSummaryAccount] = useState<string>('all');
 
   // Detail trace state
   const [selectedSummary, setSelectedSummary] = useState<Summary | null>(null);
@@ -198,10 +199,26 @@ export default function AccountingSummariesPage() {
   // Get unique periods for filter
   const periods = [...new Set(summaries.map(s => s.summary_id))];
 
+  // Unique account codes across all summaries for filter
+  const summaryAccountCodes = [...new Set(
+    summaries.flatMap(s => s.items.map(item => item.account_code))
+  )].sort();
+
   // Filtered summaries
-  const filteredSummaries = filterPeriod === 'all'
-    ? summaries
-    : summaries.filter(s => s.summary_id === filterPeriod);
+  const filteredSummaries = summaries
+    .filter(s => filterPeriod === 'all' || s.summary_id === filterPeriod)
+    .map(s => {
+      if (filterSummaryAccount === 'all') return s;
+      const filteredItems = s.items.filter(item => item.account_code === filterSummaryAccount);
+      if (filteredItems.length === 0) return null;
+      return {
+        ...s,
+        items: filteredItems,
+        total_amount: filteredItems.reduce((sum, item) => sum + item.total_amount, 0),
+        total_records: filteredItems.reduce((sum, item) => sum + item.record_count, 0),
+      };
+    })
+    .filter((s): s is Summary => s !== null);
 
   // Save mapping handler (single item)
   const handleSaveMapping = async (itemId: string) => {
@@ -327,6 +344,27 @@ export default function AccountingSummariesPage() {
           <option value="all">{ts.filterAll}</option>
           {periods.map(p => (
             <option key={p} value={p}>{parsePeriodLabel(p)}</option>
+          ))}
+        </select>
+        <label style={{ fontSize: '0.875rem', fontWeight: 500, color: '#374151' }}>{ts.filterAccountCode}:</label>
+        <select
+          value={filterSummaryAccount}
+          onChange={(e) => setFilterSummaryAccount(e.target.value)}
+          style={{
+            padding: '0.5rem 0.75rem',
+            borderRadius: '0.5rem',
+            border: '1px solid #d1d5db',
+            fontSize: '0.875rem',
+            backgroundColor: 'white',
+          }}
+        >
+          <option value="all">{ts.filterAll}</option>
+          {['R&D', 'S&M', 'G&A'].map(g => (
+            <optgroup key={g} label={g}>
+              {AVAILABLE_ACCOUNTS.filter(a => a.group === g && summaryAccountCodes.includes(a.code)).map(a => (
+                <option key={a.code} value={a.code}>{a.code} - {a.name.split(' - ')[1]}</option>
+              ))}
+            </optgroup>
           ))}
         </select>
         <button
@@ -478,13 +516,14 @@ export default function AccountingSummariesPage() {
                         {/* Detail header */}
                         <div style={{
                           display: 'grid',
-                          gridTemplateColumns: '1fr 0.8fr 1fr 80px 1.5fr 120px',
+                          gridTemplateColumns: '1fr 0.8fr 1fr 100px 1.5fr 120px',
                           padding: '0.5rem 1.25rem 0.5rem 2.5rem',
                           fontSize: '0.75rem',
                           fontWeight: 600,
                           color: '#9ca3af',
                           textTransform: 'uppercase' as const,
                           letterSpacing: '0.05em',
+                          gap: '0.5rem',
                         }}>
                           <span>{ts.employee}</span>
                           <span>{ts.department}</span>
@@ -496,11 +535,12 @@ export default function AccountingSummariesPage() {
                         {item.details.map((detail, idx) => (
                           <div key={idx} style={{
                             display: 'grid',
-                            gridTemplateColumns: '1fr 0.8fr 1fr 80px 1.5fr 120px',
+                            gridTemplateColumns: '1fr 0.8fr 1fr 100px 1.5fr 120px',
                             padding: '0.5rem 1.25rem 0.5rem 2.5rem',
                             fontSize: '0.8125rem',
                             borderTop: '1px solid #f3f4f6',
                             alignItems: 'center',
+                            gap: '0.5rem',
                           }}>
                             <span style={{ color: '#374151' }}>{detail.employee_name}</span>
                             <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>{detail.department}</span>
@@ -848,7 +888,7 @@ export default function AccountingSummariesPage() {
           {/* Table header */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '36px 70px 1fr 0.7fr 1fr 70px 1.2fr 160px',
+            gridTemplateColumns: '36px 70px 1fr 0.7fr 1fr 100px 1.2fr 160px',
             padding: '0.625rem 1.25rem',
             fontSize: '0.75rem',
             fontWeight: 600,
@@ -857,6 +897,7 @@ export default function AccountingSummariesPage() {
             letterSpacing: '0.05em',
             borderBottom: '1px solid #f3f4f6',
             backgroundColor: '#fafbfc',
+            gap: '0.5rem',
           }}>
             <span></span>
             <span>{ts.accountCode}</span>
@@ -876,10 +917,11 @@ export default function AccountingSummariesPage() {
                 key={`${detail.item_id}-${idx}`}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '36px 70px 1fr 0.7fr 1fr 70px 1.2fr 160px',
+                  gridTemplateColumns: '36px 70px 1fr 0.7fr 1fr 100px 1.2fr 160px',
                   padding: '0.5rem 1.25rem',
                   fontSize: '0.8125rem',
                   borderBottom: '1px solid #f3f4f6',
+                  gap: '0.5rem',
                   alignItems: 'center',
                   backgroundColor: isSelected ? '#eff6ff' : 'transparent',
                   cursor: 'pointer',

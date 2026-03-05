@@ -439,6 +439,7 @@ const en: Translations = {
     mappingSaved: 'Account mapping updated',
     mappingFailed: 'Update failed',
     filterPeriod: 'Filter Period',
+    filterAccountCode: 'Filter Account',
     filterAll: 'All',
     refreshData: 'Refresh',
     lastSynced: 'Last Synced',
