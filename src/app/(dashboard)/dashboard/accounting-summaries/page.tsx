@@ -478,13 +478,14 @@ export default function AccountingSummariesPage() {
                         {/* Detail header */}
                         <div style={{
                           display: 'grid',
-                          gridTemplateColumns: '1fr 0.8fr 1fr 80px 1.5fr 120px',
+                          gridTemplateColumns: '1fr 0.8fr 1fr 100px 1.5fr 120px',
                           padding: '0.5rem 1.25rem 0.5rem 2.5rem',
                           fontSize: '0.75rem',
                           fontWeight: 600,
                           color: '#9ca3af',
                           textTransform: 'uppercase' as const,
                           letterSpacing: '0.05em',
+                          gap: '0.5rem',
                         }}>
                           <span>{ts.employee}</span>
                           <span>{ts.department}</span>
@@ -496,11 +497,12 @@ export default function AccountingSummariesPage() {
                         {item.details.map((detail, idx) => (
                           <div key={idx} style={{
                             display: 'grid',
-                            gridTemplateColumns: '1fr 0.8fr 1fr 80px 1.5fr 120px',
+                            gridTemplateColumns: '1fr 0.8fr 1fr 100px 1.5fr 120px',
                             padding: '0.5rem 1.25rem 0.5rem 2.5rem',
                             fontSize: '0.8125rem',
                             borderTop: '1px solid #f3f4f6',
                             alignItems: 'center',
+                            gap: '0.5rem',
                           }}>
                             <span style={{ color: '#374151' }}>{detail.employee_name}</span>
                             <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>{detail.department}</span>
@@ -848,7 +850,7 @@ export default function AccountingSummariesPage() {
           {/* Table header */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '36px 70px 1fr 0.7fr 1fr 70px 1.2fr 160px',
+            gridTemplateColumns: '36px 70px 1fr 0.7fr 1fr 100px 1.2fr 160px',
             padding: '0.625rem 1.25rem',
             fontSize: '0.75rem',
             fontWeight: 600,
@@ -857,6 +859,7 @@ export default function AccountingSummariesPage() {
             letterSpacing: '0.05em',
             borderBottom: '1px solid #f3f4f6',
             backgroundColor: '#fafbfc',
+            gap: '0.5rem',
           }}>
             <span></span>
             <span>{ts.accountCode}</span>
@@ -876,10 +879,11 @@ export default function AccountingSummariesPage() {
                 key={`${detail.item_id}-${idx}`}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '36px 70px 1fr 0.7fr 1fr 70px 1.2fr 160px',
+                  gridTemplateColumns: '36px 70px 1fr 0.7fr 1fr 100px 1.2fr 160px',
                   padding: '0.5rem 1.25rem',
                   fontSize: '0.8125rem',
                   borderBottom: '1px solid #f3f4f6',
+                  gap: '0.5rem',
                   alignItems: 'center',
                   backgroundColor: isSelected ? '#eff6ff' : 'transparent',
                   cursor: 'pointer',
