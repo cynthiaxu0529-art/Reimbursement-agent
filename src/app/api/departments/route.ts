@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, code, description, parentId, managerId, approverIds, sortOrder } = body;
+    const { name, code, description, parentId, managerId, approverIds, sortOrder, costCenter } = body;
 
     if (!name?.trim()) {
       return NextResponse.json({ error: '部门名称不能为空' }, { status: 400 });
@@ -198,6 +198,7 @@ export async function POST(request: NextRequest) {
       name: name.trim(),
       code: code?.trim() || null,
       description: description?.trim() || null,
+      costCenter: costCenter || null,
       parentId: parentId || null,
       managerId: managerId || null,
       approverIds: approverIds || [],

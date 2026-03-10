@@ -104,6 +104,7 @@ export const departments = pgTable('departments', {
   name: text('name').notNull(),
   code: text('code'),                             // 部门编码，如 TECH-001
   description: text('description'),
+  costCenter: text('cost_center'),                // 费用性质：rd=研发费用, sm=销售费用, ga=管理费用（默认）
   parentId: uuid('parent_id'),                    // 上级部门，为空表示顶级部门
   managerId: uuid('manager_id'),                  // 部门负责人
   approverIds: jsonb('approver_ids').default([]), // 部门审批人列表（UUID数组）
@@ -1047,6 +1048,94 @@ export const exchangeRateRules = pgTable('exchange_rate_rules', {
 
   // 审计字段
   createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// ============================================================================
+// Service Account 表（系统间 M2M 认证）
+// ============================================================================
+
+/**
+ * Service Account 表
+ * 用于系统间（如 Accounting Agent ↔ Reimbursement Agent）的 API 认证
+ *
+ * 与 apiKeys 的区别：
+ * - apiKeys 绑定到具体用户，代表用户执行操作
+ * - serviceAccounts 是系统级身份，不绑定用户，通过 permissions 控制访问
+ */
+export const serviceAccounts = pgTable('service_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  serviceName: text('service_name').notNull().unique(),
+  description: text('description'),
+
+  // 认证
+  apiKeyHash: text('api_key_hash').notNull().unique(), // bcrypt hash
+  keyPrefix: text('key_prefix').notNull(),              // 展示用前缀
+
+  // 权限
+  permissions: jsonb('permissions').$type<string[]>().notNull().default([]),
+
+  // 状态
+  isActive: boolean('is_active').notNull().default(true),
+  lastUsedAt: timestamp('last_used_at'),
+  usageCount: integer('usage_count').notNull().default(0),
+
+  // 撤销
+  revokedAt: timestamp('revoked_at'),
+  revokeReason: text('revoke_reason'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// ============================================================================
+// 同步科目表（从 Accounting Agent 同步）
+// ============================================================================
+
+/**
+ * 同步的会计科目表
+ * 从 Accounting Agent 的 /api/external/chart-of-accounts 同步而来
+ */
+export const syncedAccounts = pgTable('synced_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  accountCode: text('account_code').notNull().unique(),
+  accountName: text('account_name').notNull(),
+  accountSubtype: text('account_subtype'),
+
+  syncedAt: timestamp('synced_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// ============================================================================
+// 报销汇总表（供 Accounting Agent 拉取）
+// ============================================================================
+
+/**
+ * 报销汇总记录
+ * 按半月周期 + GL 科目维度汇总已审批报销
+ */
+export const reimbursementSummaries = pgTable('reimbursement_summaries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  summaryId: text('summary_id').notNull().unique(), // REIMB-SUM-YYYYMM-A/B
+  periodStart: timestamp('period_start').notNull(),
+  periodEnd: timestamp('period_end').notNull(),
+
+  // 汇总数据 (JSON)
+  items: jsonb('items').notNull().default([]),
+  totalAmount: real('total_amount').notNull().default(0),
+  totalRecords: integer('total_records').notNull().default(0),
+  currency: text('currency').notNull().default('USD'),
+
+  // 同步状态
+  isSynced: boolean('is_synced').notNull().default(false),
+  syncedAt: timestamp('synced_at'),
+
+  generatedAt: timestamp('generated_at').notNull().defaultNow(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });

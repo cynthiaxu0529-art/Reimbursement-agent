@@ -24,7 +24,7 @@ metadata:
 
 **常见错误**：只配置了 `REIMBURSEMENT_API_KEY` 而没有配置 `REIMBURSEMENT_API_URL`，会导致所有 API 请求失败（地址为空）。请确保两个变量都已正确设置。
 
-获取方式：登录报销系统后台，进入 **设置 → API 密钥** 页面创建密钥，同时记下系统的访问地址作为 `REIMBURSEMENT_API_URL`。
+获取方式：登录报销系统后台，点击侧栏 **API Keys** 页面创建密钥，同时记下系统的访问地址作为 `REIMBURSEMENT_API_URL`。
 
 ## 认证
 
@@ -129,8 +129,10 @@ GET {REIMBURSEMENT_API_URL}/api/reimbursements
           "description": "上海→北京 机票",
           "amount": 1200,
           "currency": "CNY",
+          "amountInBaseCurrency": 165.6,
           "date": "2026-02-15",
-          "vendor": "东方航空"
+          "vendor": "东方航空",
+          "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-flight.jpg"
         }
       ]
     }
@@ -143,6 +145,8 @@ GET {REIMBURSEMENT_API_URL}/api/reimbursements
   }
 }
 ```
+
+**返回字段说明**：每个 item 包含 `receiptUrl`（票据图片地址，可能为 `null`）。Agent 可以通过此字段判断某项费用是否已关联票据，如果为 `null` 则缺少附件，应提醒用户补充上传。
 
 ### 2. 创建报销单
 
@@ -165,7 +169,8 @@ Content-Type: application/json
       "currency": "CNY",
       "date": "2026-02-15",
       "vendor": "东方航空",
-      "location": "上海"
+      "location": "上海",
+      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-flight.jpg"
     },
     {
       "category": "hotel",
@@ -177,7 +182,8 @@ Content-Type: application/json
       "location": "北京",
       "checkInDate": "2026-02-15",
       "checkOutDate": "2026-02-17",
-      "nights": 2
+      "nights": 2,
+      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-hotel.jpg"
     },
     {
       "category": "meal",
@@ -186,7 +192,8 @@ Content-Type: application/json
       "currency": "CNY",
       "date": "2026-02-16",
       "vendor": "全聚德",
-      "location": "北京"
+      "location": "北京",
+      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-meal.jpg"
     }
   ]
 }
@@ -217,7 +224,11 @@ Content-Type: application/json
 }
 ```
 
-**注意**：如果费用超过政策限额，系统会自动调整金额并在 `limitAdjustments` 中说明。请将调整信息告知用户。
+**注意事项：**
+- **必须附带票据（重要）**：每个费用明细的 `receiptUrl` 字段必须填入对应的票据图片 URL。没有附件的报销会被财务驳回。流程是：先调用 `POST /api/upload` 上传票据获取 `url`，然后把该 `url` 填入 items 的 `receiptUrl` 字段。
+- 如果费用超过政策限额，系统会自动调整金额并在 `limitAdjustments` 中说明。请将调整信息告知用户。
+- **汇率自动转换**：`amount` 和 `currency` 是必填项，`exchangeRate` 和 `amountInBaseCurrency` 可以省略。服务端会自动按照管理员设定的汇率将原币金额转换为公司记账本位币。Agent 无需手动计算汇率。
+- **OCR 金额保护**：通过 OCR 识别出的发票原始金额应如实填入 `amount`，不要修改 OCR 识别的金额。
 
 ### 3. 更新报销单
 
@@ -251,6 +262,64 @@ Content-Type: application/json
 - 撤回已提交的报销：`{ "status": "draft" }`
 - 驳回后重新提交：`{ "status": "pending" }`（会清除驳回信息）
 
+### 3a. 修改单个费用明细
+
+```http
+PATCH {REIMBURSEMENT_API_URL}/api/reimbursements/{id}/items/{itemId}
+Content-Type: application/json
+```
+
+仅 `draft` 或 `rejected` 状态的报销单可以编辑。支持局部更新，只需传要修改的字段。
+
+请求体（所有字段均为可选，只传需要修改的）：
+```json
+{
+  "amount": 200,
+  "currency": "CNY",
+  "category": "taxi",
+  "description": "机场打车（修改后）",
+  "vendor": "滴滴出行",
+  "date": "2026-02-16",
+  "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-xxx.jpg"
+}
+```
+
+响应示例：
+```json
+{
+  "success": true,
+  "data": { "id": "itemId", "amount": 200, "..." : "..." },
+  "limitAdjustment": {
+    "wasAdjusted": true,
+    "message": "金额超过每日限额，已从 200 调整为 150"
+  }
+}
+```
+
+**注意**：如果金额超过政策限额，系统会自动调整并在 `limitAdjustment` 中说明。
+
+**与 PUT /api/reimbursements/{id} 的区别**：
+- `PUT` 是**全量替换**所有费用明细（传完整 items 数组），适合批量修改
+- `PATCH` 是**修改单个**费用明细，适合只改一项的场景（更高效）
+
+### 3b. 删除单个费用明细
+
+```http
+DELETE {REIMBURSEMENT_API_URL}/api/reimbursements/{id}/items/{itemId}
+```
+
+仅 `draft` 或 `rejected` 状态的报销单可以编辑。至少需要保留一项费用明细，不能删除最后一项。
+
+响应：
+```json
+{
+  "success": true,
+  "message": "删除成功"
+}
+```
+
+**注意**：删除后报销单总金额会自动重新计算。如需删除整个报销单，请用下方的 DELETE /api/reimbursements/{id}。
+
 ### 4. 删除报销单
 
 ```http
@@ -267,7 +336,7 @@ DELETE {REIMBURSEMENT_API_URL}/api/reimbursements/{id}
 }
 ```
 
-### 5. 上传票据/发票
+### 5. 上传票据（推荐 - 自动 OCR + 汇率转换）
 
 ```http
 POST {REIMBURSEMENT_API_URL}/api/upload
@@ -277,18 +346,48 @@ Content-Type: multipart/form-data
 表单字段：
 - `file` - 图片文件（支持 jpg, png, webp, gif, pdf，最大 10MB）
 
-上传后会返回票据 URL，可以在创建报销时通过 `receiptUrl` 字段关联：
+**Agent 调用时，系统会自动完成以下操作：**
+1. 上传图片到云存储
+2. 自动 OCR 识别发票内容（金额、币种、商家、日期、类别）
+3. 自动按管理员设定的汇率转换为公司本位币
+
+Agent 无需单独调用 OCR，也无需计算汇率，一步到位。
+
+响应示例（Agent 模式）：
 ```json
 {
   "success": true,
   "url": "https://xxx.blob.vercel-storage.com/receipt-xxx.jpg",
   "filename": "receipt.jpg",
   "size": 102400,
-  "type": "image/jpeg"
+  "type": "image/jpeg",
+  "ocr": {
+    "type": "taxi",
+    "category": "taxi",
+    "amount": 45.00,
+    "currency": "CNY",
+    "vendor": "滴滴出行",
+    "date": "2026-02-15",
+    "confidence": 0.95,
+    "exchangeRate": 0.138,
+    "amountInBaseCurrency": 6.21,
+    "baseCurrency": "USD"
+  }
 }
 ```
 
-### 6. OCR 识别发票
+**使用方法**：将 `ocr` 返回的字段直接用于创建报销单的 `items`，其中：
+- `amount` / `currency` → 票面原始金额（系统识别，不可修改）
+- `exchangeRate` / `amountInBaseCurrency` → 系统自动换算的本位币金额
+- `category` / `vendor` / `date` → 直接填入报销明细
+- **`url` → 必须填入 `receiptUrl` 关联票据**（这是返回的顶层 `url` 字段，不是 `ocr` 内的字段）
+
+**完整流程示例（上传 → 创建报销）：**
+1. 调用 `POST /api/upload` 上传每张票据 → 记下返回的 `url` 和 `ocr` 数据
+2. 创建报销时，每个 item 都必须填入 `receiptUrl: "<上传返回的 url>"`
+3. 没有 `receiptUrl` 的报销会被财务驳回，务必确保每项都附带票据
+
+### 6. OCR 识别发票（备用）
 
 ```http
 POST {REIMBURSEMENT_API_URL}/api/ocr
@@ -301,21 +400,7 @@ Content-Type: application/json
 }
 ```
 
-返回发票识别结果，可用于自动填充报销明细：
-```json
-{
-  "success": true,
-  "data": {
-    "type": "taxi",
-    "category": "taxi",
-    "amount": 45.00,
-    "currency": "CNY",
-    "vendor": "滴滴出行",
-    "date": "2026-02-15",
-    "confidence": 0.95
-  }
-}
-```
+**注意**：推荐使用上方的 `POST /api/upload`，上传时自动完成 OCR + 汇率转换。此端点作为备用，适用于已有图片 URL 需要单独识别的场景。Agent 调用时同样会自动附带汇率转换结果。
 
 ### 7. 查看报销政策
 
@@ -396,11 +481,13 @@ GET {REIMBURSEMENT_API_URL}/api/settings/profile
 
 ### 用户："帮我报销这张发票"（附带图片）
 
-1. 上传图片到 /api/upload
-2. 调用 /api/ocr 识别发票内容
-3. 展示识别结果让用户确认
-4. 根据识别结果自动创建报销单（草稿）
+1. 上传图片到 /api/upload（系统自动 OCR + 汇率转换）
+2. 记下返回的 `url`（票据永久链接）和 `ocr` 字段（金额、币种、类别等）
+3. 展示识别结果让用户确认（金额已由系统识别，不可修改）
+4. 创建报销单（草稿），每个 item 的 `receiptUrl` 必须填入步骤 2 的 `url`
 5. 让用户确认后通过 PUT 提交
+
+**重要**：如果忘记填 `receiptUrl`，报销单会没有附件，财务会驳回。
 
 ### 用户："那笔被驳回的报销帮我重新提交"
 
@@ -408,6 +495,20 @@ GET {REIMBURSEMENT_API_URL}/api/settings/profile
 2. 展示驳回原因（rejectReason 字段）
 3. 询问用户是否需要修改
 4. 用 PUT 更新内容并设 status 为 pending 重新提交
+
+### 用户："帮我把那笔报销里的打车费改成 80 元"
+
+1. 调用 GET /api/reimbursements 找到对应报销单和费用明细
+2. 确认要修改的明细项（展示当前金额）
+3. 调用 PATCH /api/reimbursements/{id}/items/{itemId} 修改金额
+4. 如果系统返回 limitAdjustment，告知用户金额被政策调整
+
+### 用户："帮我删掉报销单里的那笔餐费"
+
+1. 调用 GET /api/reimbursements 找到对应报销单
+2. 确认要删除的明细项（展示明细内容）
+3. 调用 DELETE /api/reimbursements/{id}/items/{itemId} 删除
+4. 告知用户删除成功，报销总金额已自动更新
 
 ### 用户："删掉那个草稿报销单"
 

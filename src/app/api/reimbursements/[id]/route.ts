@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users, payments, approvalChain } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, payments, approvalChain, tenants, departments } from '@/lib/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import { createPaymentService } from '@/lib/mcp/fluxpay-client';
 import {
@@ -13,6 +13,11 @@ import {
 import { getUserRoles } from '@/lib/auth/roles';
 import { canViewReimbursement } from '@/lib/department/department-service';
 import { apiError } from '@/lib/api-error';
+import { authenticate, logAgentAction } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
+import { exchangeRateService } from '@/lib/currency/exchange-service';
+import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
+import type { CurrencyType } from '@/types';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -21,6 +26,7 @@ type RouteParams = { params: Promise<{ id: string }> };
 
 /**
  * GET /api/reimbursements/[id] - 获取报销详情
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function GET(
   request: NextRequest,
@@ -34,10 +40,12 @@ export async function GET(
       return apiError('无效的报销单ID', 400);
     }
 
-    const session = await auth();
-    if (!session?.user) {
-      return apiError('未登录', 401);
+    // 统一认证（支持 Session 和 API Key）
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_READ);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
     }
+    const authCtx = authResult.context;
 
     // 先查找报销单（不限制用户，因为审批人也需要查看）
     const reimbursement = await db.query.reimbursements.findFirst({
@@ -60,12 +68,16 @@ export async function GET(
       return apiError('报销单不存在', 404);
     }
 
-    // 检查权限：使用部门级数据隔离
-    const isOwner = reimbursement.userId === session.user.id;
+    // 检查权限：Agent 只能查看自己的报销单
+    const isOwner = reimbursement.userId === authCtx.userId;
+
+    if (authCtx.authType === 'api_key' && !isOwner) {
+      return apiError('Agent 只能查看自己的报销单', 403);
+    }
 
     if (!isOwner) {
       // 不是自己的报销，需要检查部门级权限
-      const isSameTenant = session.user.tenantId && reimbursement.tenantId === session.user.tenantId;
+      const isSameTenant = authCtx.tenantId && reimbursement.tenantId === authCtx.tenantId;
 
       if (!isSameTenant) {
         return apiError('无权查看此报销单', 403);
@@ -73,7 +85,7 @@ export async function GET(
 
       // 获取当前用户完整信息和角色
       const currentUser = await db.query.users.findFirst({
-        where: eq(users.id, session.user.id),
+        where: eq(users.id, authCtx.userId),
       });
 
       if (!currentUser) {
@@ -84,7 +96,7 @@ export async function GET(
 
       // 检查是否有权限查看该报销单（部门级数据隔离）
       const canView = await canViewReimbursement(
-        session.user.id,
+        authCtx.userId,
         reimbursement.userId,
         id,
         reimbursement.tenantId,
@@ -107,7 +119,7 @@ export async function GET(
     // 检查当前用户是否可以审批
     let canApprove = false;
     try {
-      canApprove = await canUserApprove(id, session.user.id);
+      canApprove = await canUserApprove(id, authCtx.userId);
     } catch {
       // 忽略错误
     }
@@ -160,6 +172,7 @@ export async function GET(
 
 /**
  * PUT /api/reimbursements/[id] - 更新报销单
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function PUT(
   request: NextRequest,
@@ -167,16 +180,19 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const session = await auth();
-    if (!session?.user) {
-      return apiError('未登录', 401);
+
+    // 统一认证（支持 Session 和 API Key）
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_UPDATE);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
     }
+    const authCtx = authResult.context;
 
     // 检查报销单是否存在且属于当前用户
     const existing = await db.query.reimbursements.findFirst({
       where: and(
         eq(reimbursements.id, id),
-        eq(reimbursements.userId, session.user.id)
+        eq(reimbursements.userId, authCtx.userId)
       ),
     });
 
@@ -204,13 +220,56 @@ export async function PUT(
       return apiError('只有草稿或已驳回状态的报销单可以编辑', 400, 'INVALID_STATUS_TRANSITION');
     }
 
+    // 获取租户本位币
+    let tenantBaseCurrency = existing.baseCurrency || 'USD';
+    if (existing.tenantId) {
+      const tenantRecord = await db.query.tenants.findFirst({
+        where: eq(tenants.id, existing.tenantId),
+        columns: { baseCurrency: true },
+      });
+      if (tenantRecord?.baseCurrency) {
+        tenantBaseCurrency = tenantRecord.baseCurrency;
+      }
+    }
+
+    // 服务端汇率转换：如果 item 缺少 exchangeRate / amountInBaseCurrency，自动转换
+    if (items && items.length > 0) {
+      for (const item of items) {
+        const itemCurrency = (item.currency || 'CNY') as CurrencyType;
+        const itemAmount = parseFloat(item.amount) || 0;
+
+        if (itemCurrency === tenantBaseCurrency) {
+          item.exchangeRate = item.exchangeRate || 1;
+          item.amountInBaseCurrency = item.amountInBaseCurrency || itemAmount;
+          continue;
+        }
+
+        if (item.exchangeRate && item.amountInBaseCurrency && item.amountInBaseCurrency !== itemAmount) {
+          continue;
+        }
+
+        try {
+          const conversion = await exchangeRateService.convert({
+            amount: itemAmount,
+            fromCurrency: itemCurrency,
+            toCurrency: tenantBaseCurrency as CurrencyType,
+          });
+          item.exchangeRate = conversion.exchangeRate;
+          item.amountInBaseCurrency = conversion.convertedAmount;
+        } catch (err) {
+          console.warn(`Exchange rate conversion failed for ${itemCurrency} → ${tenantBaseCurrency}:`, err);
+          item.amountInBaseCurrency = item.amountInBaseCurrency || itemAmount;
+        }
+      }
+    }
+
     // 计算原币总金额
     const totalAmount = items?.reduce(
       (sum: number, item: any) => sum + (parseFloat(item.amount) || 0),
       0
     ) || existing.totalAmount;
 
-    // 计算美元总金额
+    // 计算本位币总金额
     const usdTotal = totalAmountInBaseCurrency || items?.reduce(
       (sum: number, item: any) => sum + (item.amountInBaseCurrency || parseFloat(item.amount) || 0),
       0
@@ -244,7 +303,7 @@ export async function PUT(
       description: description ?? existing.description,
       totalAmount,
       totalAmountInBaseCurrency: usdTotal,
-      baseCurrency: 'USD',
+      baseCurrency: tenantBaseCurrency,
       status: finalStatus,
       submittedAt: submittedAt,
       updatedAt: new Date(),
@@ -269,19 +328,44 @@ export async function PUT(
         .delete(reimbursementItems)
         .where(eq(reimbursementItems.reimbursementId, id));
 
+      const parseDate = (dateStr: string): Date => {
+        if (!dateStr) return new Date();
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) return d;
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+          return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        }
+        return new Date();
+      };
+
       await db.insert(reimbursementItems).values(
-        items.map((item: any) => ({
-          reimbursementId: id,
-          category: item.category,
-          description: item.description || '',
-          amount: parseFloat(item.amount) || 0,
-          currency: item.currency || 'CNY',
-          amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
-          date: new Date(item.date),
-          location: item.location || null,
-          vendor: item.vendor || null,
-          receiptUrl: item.receiptUrl || null,
-        }))
+        items.map((item: any) => {
+          const itemData: any = {
+            reimbursementId: id,
+            category: item.category,
+            description: item.description || '',
+            amount: parseFloat(item.amount) || 0,
+            currency: item.currency || 'CNY',
+            exchangeRate: item.exchangeRate || null,
+            amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
+            date: new Date(item.date),
+            location: item.location || null,
+            vendor: item.vendor || null,
+            receiptUrl: item.receiptUrl || null,
+          };
+          // Hotel-specific fields
+          if (item.checkInDate) {
+            itemData.checkInDate = parseDate(item.checkInDate);
+          }
+          if (item.checkOutDate) {
+            itemData.checkOutDate = parseDate(item.checkOutDate);
+          }
+          if (item.nights) {
+            itemData.nights = parseInt(item.nights) || null;
+          }
+          return itemData;
+        })
       );
     }
 
@@ -300,7 +384,7 @@ export async function PUT(
         // 生成新的审批链
         generatedChain = await generateApprovalChain({
           reimbursementId: id,
-          userId: session.user.id,
+          userId: authCtx.userId,
           tenantId: existing.tenantId,
           totalAmount: usdTotal,
           categories,
@@ -324,6 +408,7 @@ export async function PUT(
 
 /**
  * DELETE /api/reimbursements/[id] - 删除报销单
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function DELETE(
   request: NextRequest,
@@ -331,16 +416,19 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const session = await auth();
-    if (!session?.user) {
-      return apiError('未登录', 401);
+
+    // 统一认证（支持 Session 和 API Key）
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_CANCEL);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
     }
+    const authCtx = authResult.context;
 
     // 检查报销单是否存在且属于当前用户
     const existing = await db.query.reimbursements.findFirst({
       where: and(
         eq(reimbursements.id, id),
-        eq(reimbursements.userId, session.user.id)
+        eq(reimbursements.userId, authCtx.userId)
       ),
     });
 
@@ -372,6 +460,26 @@ export async function DELETE(
     await db
       .delete(reimbursements)
       .where(eq(reimbursements.id, id));
+
+    // Agent 审计日志
+    if (authCtx.authType === 'api_key' && authCtx.apiKey) {
+      logAgentAction({
+        tenantId: authCtx.tenantId!,
+        apiKeyId: authCtx.apiKey.id,
+        userId: authCtx.userId,
+        action: 'reimbursement:delete',
+        method: 'DELETE',
+        path: `/api/reimbursements/${id}`,
+        statusCode: 200,
+        agentType: authCtx.apiKey.agentType,
+        requestSummary: { reimbursementId: id },
+        responseSummary: { deleted: true },
+        entityType: 'reimbursement',
+        entityId: id,
+        ipAddress: request.headers.get('x-forwarded-for') || undefined,
+        userAgent: request.headers.get('user-agent') || undefined,
+      });
+    }
 
     return NextResponse.json({
       success: true,
@@ -517,6 +625,44 @@ export async function PATCH(
       .set(updateData)
       .where(eq(reimbursements.id, id))
       .returning();
+
+    // 如果审批通过，根据提交人部门的费用性质自动打 account_code 标签
+    if (newStatus === 'approved') {
+      try {
+        // 获取提交人的部门信息（costCenter + 名称）
+        const submitter = await db.query.users.findFirst({
+          where: eq(users.id, existing.userId),
+        });
+        let costCenter: string | null = null;
+        let deptName: string | null = null;
+        if (submitter?.departmentId) {
+          const dept = await db.query.departments.findFirst({
+            where: eq(departments.id, submitter.departmentId),
+          });
+          costCenter = dept?.costCenter || null;
+          deptName = dept?.name || submitter.department || null;
+        } else {
+          deptName = submitter?.department || null;
+        }
+
+        const items = await db.query.reimbursementItems.findMany({
+          where: eq(reimbursementItems.reimbursementId, id),
+        });
+        for (const item of items) {
+          const mapping = await mapExpenseToAccount(item.category, item.description, costCenter, deptName);
+          await db.update(reimbursementItems)
+            .set({
+              coaCode: mapping.accountCode,
+              coaName: mapping.accountName,
+              updatedAt: new Date(),
+            })
+            .where(eq(reimbursementItems.id, item.id));
+        }
+      } catch (err) {
+        console.error('Failed to tag account_code on approval:', err);
+        // 不阻塞审批流程
+      }
+    }
 
     // 如果审批通过，自动发起支付
     let paymentResult = null;
