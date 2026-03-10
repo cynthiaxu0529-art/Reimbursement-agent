@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { tripItineraries, tripItineraryItems, reimbursements } from '@/lib/db/schema';
+import { tripItineraries, tripItineraryItems, reimbursements, users } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
+import { authenticate } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,18 +12,23 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    const authResult = await authenticate(request, API_SCOPES.TRIP_READ);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
+    const { userId } = authResult.context;
 
     const { searchParams } = new URL(request.url);
     const reimbursementId = searchParams.get('reimbursementId');
+    const tripId = searchParams.get('tripId');
 
-    const conditions: any[] = [eq(tripItineraries.userId, session.user.id)];
+    const conditions: any[] = [eq(tripItineraries.userId, userId)];
 
     if (reimbursementId) {
       conditions.push(eq(tripItineraries.reimbursementId, reimbursementId));
+    }
+    if (tripId) {
+      conditions.push(eq(tripItineraries.tripId, tripId));
     }
 
     const list = await db.query.tripItineraries.findMany({
@@ -48,10 +54,11 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    const authResult = await authenticate(request, API_SCOPES.TRIP_CREATE);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
+    const { userId, tenantId } = authResult.context;
 
     const body = await request.json();
     const {
@@ -70,17 +77,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '行程标题不能为空' }, { status: 400 });
     }
 
-    // 获取用户的 tenantId
-    const user = await db.query.users.findFirst({
-      where: eq(
-        (await import('@/lib/db/schema')).users.id,
-        session.user.id
-      ),
-      columns: { tenantId: true },
-    });
+    // 如果 authenticate 已返回 tenantId 则直接用；否则查数据库
+    let resolvedTenantId = tenantId;
+    if (!resolvedTenantId) {
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+        columns: { tenantId: true },
+      });
+      resolvedTenantId = user?.tenantId || undefined;
+    }
 
-    const tenantId = user?.tenantId;
-    if (!tenantId) {
+    if (!resolvedTenantId) {
       return NextResponse.json(
         { error: '请先在设置中创建或加入公司' },
         { status: 400 }
@@ -91,8 +98,8 @@ export async function POST(request: NextRequest) {
     const [itinerary] = await db
       .insert(tripItineraries)
       .values({
-        tenantId,
-        userId: session.user.id,
+        tenantId: resolvedTenantId,
+        userId,
         reimbursementId: reimbursementId || null,
         tripId: tripId || null,
         title,
@@ -132,13 +139,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 如果指定了 reimbursementId，将行程单关联到报销单
+    // 如果指定了 reimbursementId，验证报销单属于当前用户
     if (reimbursementId) {
-      // 验证报销单属于当前用户
       const reimbursement = await db.query.reimbursements.findFirst({
         where: and(
           eq(reimbursements.id, reimbursementId),
-          eq(reimbursements.userId, session.user.id)
+          eq(reimbursements.userId, userId)
         ),
       });
 

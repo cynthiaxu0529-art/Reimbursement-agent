@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { trips, users, tripItineraries } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
+import { authenticate } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,15 +12,16 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    const authResult = await authenticate(request, API_SCOPES.TRIP_READ);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
+    const { userId } = authResult.context;
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
 
-    const conditions: any[] = [eq(trips.userId, session.user.id)];
+    const conditions: any[] = [eq(trips.userId, userId)];
     if (status) {
       conditions.push(eq(trips.status, status as any));
     }
@@ -49,10 +51,11 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    const authResult = await authenticate(request, API_SCOPES.TRIP_CREATE);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
+    const { userId, tenantId } = authResult.context;
 
     const body = await request.json();
     const { title, purpose, destination, startDate, endDate, budget } = body;
@@ -64,13 +67,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 获取用户的 tenantId
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
-      columns: { tenantId: true },
-    });
+    // 如果 authenticate 已返回 tenantId 则直接用；否则查数据库
+    let resolvedTenantId = tenantId;
+    if (!resolvedTenantId) {
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+        columns: { tenantId: true },
+      });
+      resolvedTenantId = user?.tenantId || undefined;
+    }
 
-    if (!user?.tenantId) {
+    if (!resolvedTenantId) {
       return NextResponse.json(
         { error: '请先在设置中创建或加入公司' },
         { status: 400 }
@@ -80,8 +87,8 @@ export async function POST(request: NextRequest) {
     const [trip] = await db
       .insert(trips)
       .values({
-        tenantId: user.tenantId,
-        userId: session.user.id,
+        tenantId: resolvedTenantId,
+        userId,
         title,
         purpose: purpose || null,
         destination: destination || null,
