@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
       amountInBaseCurrency: payment.amount,
       date: departureDate,
       vendor: flight.airline,
-      receiptUrl: attachments?.find((a: any) => a.type === 'e_ticket')?.url || null,
+      receiptUrl: attachments?.find((a: any) => a.type === 'eticket' || a.type === 'e_ticket')?.url || null,
     }).returning();
 
     // === 4. 创建 TripItinerary + Items（精确行程单）===
@@ -190,7 +190,7 @@ export async function POST(request: NextRequest) {
         amount: payment.amount,
         currency: payment.currency,
         reimbursementItemId: reimbursementItem.id,
-        receiptUrl: attachments?.find((a: any) => a.type === 'e_ticket')?.url || null,
+        receiptUrl: attachments?.find((a: any) => a.type === 'eticket' || a.type === 'e_ticket')?.url || null,
         sortOrder: 0,
       },
       // 到达节点
@@ -244,14 +244,18 @@ export async function POST(request: NextRequest) {
     }
 
     // === 6. 构建响应 ===
+    // data 层对齐 flight-booking-service 的 ReimbursementClient 期望:
+    // response.data.data => { reimbursement_id, itinerary_url, status }
+    const baseUrl = request.headers.get('origin') || request.headers.get('x-forwarded-host')
+      ? `https://${request.headers.get('x-forwarded-host')}` : '';
     const responseData = {
       success: true,
-      reimbursement_id: reimbursement.id,
-      trip_id: trip.id,
-      itinerary_id: itinerary.id,
-      itinerary_url: `/api/trip-itineraries/${itinerary.id}`,
-      status: reimbursementStatus,
       data: {
+        reimbursement_id: reimbursement.id,
+        trip_id: trip.id,
+        itinerary_id: itinerary.id,
+        itinerary_url: `${baseUrl}/api/trip-itineraries/${itinerary.id}`,
+        status: reimbursementStatus,
         reimbursement: {
           id: reimbursement.id,
           title: reimbursement.title,
