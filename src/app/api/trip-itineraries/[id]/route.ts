@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { tripItineraries, tripItineraryItems } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { authenticate } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,15 +15,15 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    const authResult = await authenticate(request, API_SCOPES.TRIP_READ);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
 
     const itinerary = await db.query.tripItineraries.findFirst({
       where: and(
         eq(tripItineraries.id, params.id),
-        eq(tripItineraries.userId, session.user.id)
+        eq(tripItineraries.userId, authResult.context.userId)
       ),
       with: {
         items: true,
@@ -51,16 +52,16 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    const authResult = await authenticate(request, API_SCOPES.TRIP_CREATE);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
 
     // 验证行程单属于当前用户
     const existing = await db.query.tripItineraries.findFirst({
       where: and(
         eq(tripItineraries.id, params.id),
-        eq(tripItineraries.userId, session.user.id)
+        eq(tripItineraries.userId, authResult.context.userId)
       ),
     });
 
@@ -161,16 +162,16 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    const authResult = await authenticate(request, API_SCOPES.TRIP_CREATE);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
 
     // 验证行程单属于当前用户
     const existing = await db.query.tripItineraries.findFirst({
       where: and(
         eq(tripItineraries.id, params.id),
-        eq(tripItineraries.userId, session.user.id)
+        eq(tripItineraries.userId, authResult.context.userId)
       ),
     });
 

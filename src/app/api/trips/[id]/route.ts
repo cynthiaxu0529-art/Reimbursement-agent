@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { trips } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { authenticate } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,15 +15,15 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    const authResult = await authenticate(request, API_SCOPES.TRIP_READ);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
 
     const trip = await db.query.trips.findFirst({
       where: and(
         eq(trips.id, params.id),
-        eq(trips.userId, session.user.id)
+        eq(trips.userId, authResult.context.userId)
       ),
       with: {
         itineraries: {
@@ -54,15 +55,15 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    const authResult = await authenticate(request, API_SCOPES.TRIP_CREATE);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
 
     const existing = await db.query.trips.findFirst({
       where: and(
         eq(trips.id, params.id),
-        eq(trips.userId, session.user.id)
+        eq(trips.userId, authResult.context.userId)
       ),
     });
 
@@ -105,15 +106,15 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    const authResult = await authenticate(request, API_SCOPES.TRIP_CREATE);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
 
     const existing = await db.query.trips.findFirst({
       where: and(
         eq(trips.id, params.id),
-        eq(trips.userId, session.user.id)
+        eq(trips.userId, authResult.context.userId)
       ),
     });
 

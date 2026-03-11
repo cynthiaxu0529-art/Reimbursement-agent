@@ -1,6 +1,6 @@
 ---
 name: reimbursement
-description: 企业报销管理 - 帮助用户提交报销、上传发票、查询报销状态、查看政策和分析费用
+description: 企业报销管理 - 帮助用户规划差旅行程、搜索机票酒店、提交报销、上传发票、查询报销状态、查看政策和分析费用
 metadata:
   openclaw:
     requires:
@@ -515,6 +515,348 @@ GET {REIMBURSEMENT_API_URL}/api/settings/profile
 1. 调用 GET /api/reimbursements?status=draft 查找草稿
 2. 确认用户要删除哪一笔
 3. 调用 DELETE /api/reimbursements/{id} 删除
+
+---
+
+# 差旅行程规划
+
+除了报销管理外，你还可以帮助用户**事前规划差旅行程**。完整的工作流程是：
+
+```
+用户描述出差需求（或让你读取日历）
+  ↓
+你搜索机票、酒店信息并给出建议
+  ↓
+用户确认行程方案
+  ↓
+你将行程写入系统（创建 Trip + Itinerary）
+  ↓
+你创建预估报销单并提交审批
+  ↓
+审批通过后，用户出发
+```
+
+## 行程状态流转
+
+### Trip（行程记录）
+```
+planning（规划中）→ ongoing（进行中）→ completed（已完成）
+                                     → cancelled（已取消）
+```
+
+### Trip Itinerary（行程单）
+```
+draft（草稿）→ confirmed（用户确认）
+            → modified（用户修改后）
+```
+
+## 行程规划安全规则
+
+1. **确认后再创建**：在将行程写入系统前，必须先向用户展示完整行程方案并获得确认
+2. **预算敏感**：搜索机票酒店时，优先推荐经济实惠的选项，并标注价格
+3. **政策合规**：创建行程前，先调用 `GET /api/settings/policies` 查看公司差旅政策，确保预估费用在限额内
+4. **日历隐私**：读取用户日历时，只提取会议时间、地点、参会人等必要信息，不要展示无关内容
+
+## 行程管理 API
+
+### 11. 创建行程（Trip）
+
+```http
+POST {REIMBURSEMENT_API_URL}/api/trips
+Content-Type: application/json
+```
+
+请求体：
+```json
+{
+  "title": "北京客户拜访",
+  "purpose": "Q2 商务洽谈",
+  "destination": "北京",
+  "startDate": "2026-03-15",
+  "endDate": "2026-03-17",
+  "budget": {
+    "estimated": 5000,
+    "currency": "CNY",
+    "breakdown": {
+      "flight": 2400,
+      "hotel": 1600,
+      "meal": 600,
+      "transport": 400
+    }
+  }
+}
+```
+
+必填字段：`title`、`startDate`、`endDate`
+
+响应示例：
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "title": "北京客户拜访",
+    "purpose": "Q2 商务洽谈",
+    "destination": "北京",
+    "startDate": "2026-03-15T00:00:00.000Z",
+    "endDate": "2026-03-17T00:00:00.000Z",
+    "status": "planning",
+    "budget": { "..." : "..." }
+  }
+}
+```
+
+需要的 scope：`trip:create`
+
+### 12. 查看行程列表
+
+```http
+GET {REIMBURSEMENT_API_URL}/api/trips
+```
+
+查询参数：
+- `status` - 筛选状态：`planning`、`ongoing`、`completed`、`cancelled`
+
+返回行程列表，每个行程包含关联的行程单（itineraries）和行程明细（items）。
+
+需要的 scope：`trip:read`
+
+### 13. 查看行程详情
+
+```http
+GET {REIMBURSEMENT_API_URL}/api/trips/{id}
+```
+
+返回行程详情，包含：
+- 行程基本信息
+- 关联的所有行程单（itineraries）+ 明细
+- 关联的报销单（reimbursements）
+
+需要的 scope：`trip:read`
+
+### 14. 更新行程
+
+```http
+PUT {REIMBURSEMENT_API_URL}/api/trips/{id}
+Content-Type: application/json
+```
+
+支持部分更新，只传需要修改的字段：
+```json
+{
+  "status": "ongoing",
+  "destination": "北京, 上海"
+}
+```
+
+需要的 scope：`trip:create`
+
+### 15. 创建行程单（Itinerary）
+
+行程单是 Trip 的详细日程安排，包含每天每个时间段的具体活动。
+
+```http
+POST {REIMBURSEMENT_API_URL}/api/trip-itineraries
+Content-Type: application/json
+```
+
+请求体：
+```json
+{
+  "tripId": "关联的行程ID",
+  "title": "上海-北京出差行程",
+  "purpose": "客户拜访",
+  "startDate": "2026-03-15",
+  "endDate": "2026-03-17",
+  "destinations": ["北京"],
+  "status": "draft",
+  "items": [
+    {
+      "date": "2026-03-15",
+      "time": "08:00",
+      "type": "transport",
+      "category": "flight",
+      "title": "上海浦东 → 北京首都 MU5101",
+      "description": "东方航空经济舱",
+      "departure": "上海浦东T1",
+      "arrival": "北京首都T2",
+      "transportNumber": "MU5101",
+      "amount": 1200,
+      "currency": "CNY",
+      "sortOrder": 0
+    },
+    {
+      "date": "2026-03-15",
+      "time": "12:00",
+      "type": "meal",
+      "category": "meal",
+      "title": "午餐",
+      "location": "北京国贸",
+      "amount": 80,
+      "currency": "CNY",
+      "sortOrder": 1
+    },
+    {
+      "date": "2026-03-15",
+      "time": "14:00",
+      "type": "meeting",
+      "title": "与 XX 公司 Q2 商务洽谈",
+      "description": "参会人：张三、李四",
+      "location": "北京国贸大厦 25F",
+      "sortOrder": 2
+    },
+    {
+      "date": "2026-03-15",
+      "time": "18:00",
+      "type": "hotel",
+      "category": "hotel",
+      "title": "入住北京希尔顿酒店",
+      "hotelName": "北京希尔顿酒店",
+      "location": "北京朝阳区",
+      "checkIn": "2026-03-15",
+      "checkOut": "2026-03-17",
+      "amount": 800,
+      "currency": "CNY",
+      "sortOrder": 3
+    },
+    {
+      "date": "2026-03-17",
+      "time": "17:00",
+      "type": "transport",
+      "category": "flight",
+      "title": "北京首都 → 上海浦东 MU5102",
+      "description": "东方航空经济舱",
+      "departure": "北京首都T2",
+      "arrival": "上海浦东T1",
+      "transportNumber": "MU5102",
+      "amount": 1200,
+      "currency": "CNY",
+      "sortOrder": 10
+    }
+  ]
+}
+```
+
+**行程明细 item 字段说明：**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `date` | ✅ | 日期 YYYY-MM-DD |
+| `time` | | 时间 HH:mm |
+| `type` | ✅ | 类型：`transport` / `hotel` / `meal` / `meeting` / `other` |
+| `category` | | 费用类别（与报销类别对应）：`flight` / `train` / `hotel` / `meal` / `taxi` 等 |
+| `title` | ✅ | 节点标题 |
+| `description` | | 详细描述 |
+| `location` | | 地点 |
+| `departure` | | 出发地（交通类） |
+| `arrival` | | 到达地（交通类） |
+| `transportNumber` | | 航班号/车次 |
+| `hotelName` | | 酒店名称 |
+| `checkIn` | | 入住日期（酒店类） |
+| `checkOut` | | 退房日期（酒店类） |
+| `amount` | | 预估金额 |
+| `currency` | | 币种 |
+| `sortOrder` | | 排序号（同日期内排序） |
+
+需要的 scope：`trip:create`
+
+### 16. 查看行程单列表
+
+```http
+GET {REIMBURSEMENT_API_URL}/api/trip-itineraries
+```
+
+查询参数：
+- `tripId` - 按行程筛选
+- `reimbursementId` - 按报销单筛选
+
+需要的 scope：`trip:read`
+
+### 17. 查看行程单详情
+
+```http
+GET {REIMBURSEMENT_API_URL}/api/trip-itineraries/{id}
+```
+
+返回行程单详情及所有明细项（items）。
+
+需要的 scope：`trip:read`
+
+### 18. 更新行程单
+
+```http
+PUT {REIMBURSEMENT_API_URL}/api/trip-itineraries/{id}
+Content-Type: application/json
+```
+
+支持部分更新主信息。如果传了 `items` 数组，会**全量替换**所有明细。
+
+**确认行程单**（用户确认后）：
+```json
+{
+  "status": "confirmed"
+}
+```
+
+**关联报销单**：
+```json
+{
+  "reimbursementId": "报销单ID"
+}
+```
+
+需要的 scope：`trip:create`
+
+### 19. 删除行程单
+
+```http
+DELETE {REIMBURSEMENT_API_URL}/api/trip-itineraries/{id}
+```
+
+级联删除所有明细项。需要的 scope：`trip:create`
+
+---
+
+## 典型对话流程 - 差旅行程规划
+
+### 用户："我下周三到周五要去北京见客户，帮我安排下行程"
+
+1. 确认细节：出发城市、会议时间/地点、预算偏好
+2. 查询公司差旅政策：`GET /api/settings/policies`
+3. 搜索航班和酒店（使用你自己的搜索能力）
+4. 向用户展示 2-3 个方案（经济/舒适），标注价格和政策合规情况
+5. 用户确认后：
+   - 创建 Trip：`POST /api/trips`
+   - 创建 Itinerary：`POST /api/trip-itineraries`（status=draft）
+   - 向用户展示完整行程，请求最终确认
+   - 确认后更新状态：`PUT /api/trip-itineraries/{id}` → status=confirmed
+6. 创建预估报销单：`POST /api/reimbursements`（status=draft），items 中包含机票、酒店等预估费用
+7. 将报销单关联到行程单：`PUT /api/trip-itineraries/{id}` → reimbursementId
+8. 询问是否直接提交审批：`PUT /api/reimbursements/{id}` → status=pending
+
+### 用户："帮我看看日历上下周有什么安排，然后规划出差"
+
+1. 读取用户日历（使用你的日历访问能力），提取：
+   - 会议时间、地点、参会人
+   - 出差城市和日期范围
+2. 根据会议安排，自动推算需要的交通和住宿
+3. 搜索机票和酒店
+4. 生成完整行程方案，展示给用户
+5. 确认后写入系统（同上流程）
+
+### 用户："把我那个北京出差的行程改一下，酒店换成全季"
+
+1. 查询行程：`GET /api/trips?status=planning`
+2. 找到北京出差行程，获取行程单：`GET /api/trip-itineraries?tripId={id}`
+3. 搜索全季酒店价格
+4. 展示修改方案给用户确认
+5. 更新行程单：`PUT /api/trip-itineraries/{id}` 替换酒店相关 item
+
+### 用户："我的北京出差行程批了吗？"
+
+1. 查询行程关联的报销单：`GET /api/trips/{id}`（返回含 reimbursements）
+2. 展示报销单审批状态
+3. 如果被驳回，展示原因并协助修改重新提交
 
 ## 错误处理
 
