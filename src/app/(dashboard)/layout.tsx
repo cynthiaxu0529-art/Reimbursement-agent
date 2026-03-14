@@ -11,6 +11,7 @@ const navItems = {
   settings: { name: '设置', href: '/dashboard/settings', icon: '⚙️' },
   // 员工专属
   myReimbursements: { name: '我的报销', href: '/dashboard/reimbursements', icon: '📄' },
+  advances: { name: '预借款', href: '/dashboard/advances', icon: '💰' },
   trips: { name: '行程', href: '/dashboard/trips', icon: '✈️' },
   chat: { name: 'AI 助手', href: '/dashboard/chat', icon: '💬' },
   // 审批人专属
@@ -60,6 +61,7 @@ function buildNavigation(roles: string[]) {
   // 员工功能（所有人都有）
   if (roles.includes('employee')) {
     addItem(navItems.myReimbursements);
+    addItem(navItems.advances);
     addItem(navItems.trips);
     addItem(navItems.chat);
   }

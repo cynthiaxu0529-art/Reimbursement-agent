@@ -491,6 +491,71 @@ export const policies = pgTable('policies', {
 });
 
 /**
+ * 预借款表
+ * 员工申请预借款，后续提交凭证核销
+ */
+export const advances = pgTable('advances', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id),
+
+  title: text('title').notNull(),
+  description: text('description'),
+  purpose: text('purpose'),                          // 预借款用途
+
+  amount: real('amount').notNull(),
+  currency: text('currency').notNull().default('USD'),
+
+  // 状态: pending(待审批), approved(已批准), paid(已打款), reconciling(核销中), reconciled(已核销), rejected(已拒绝), cancelled(已取消)
+  status: text('status').notNull().default('pending'),
+
+  // 审批
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: timestamp('approved_at'),
+  rejectedBy: uuid('rejected_by').references(() => users.id),
+  rejectedAt: timestamp('rejected_at'),
+  rejectReason: text('reject_reason'),
+
+  // 打款
+  paidAt: timestamp('paid_at'),
+  paymentId: text('payment_id'),                     // 关联支付记录
+
+  // 核销
+  reconciledAmount: real('reconciled_amount').default(0),  // 已核销金额
+  reconciledAt: timestamp('reconciled_at'),
+  reconciliationNote: text('reconciliation_note'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * 预借款核销记录表
+ * 记录预借款与报销单的关联核销
+ */
+export const advanceReconciliations = pgTable('advance_reconciliations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  advanceId: uuid('advance_id')
+    .notNull()
+    .references(() => advances.id),
+  reimbursementId: uuid('reimbursement_id')
+    .notNull()
+    .references(() => reimbursements.id),
+
+  amount: real('amount').notNull(),                  // 核销金额
+  note: text('note'),
+
+  createdBy: uuid('created_by')
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+/**
  * 审计日志表
  */
 export const auditLogs = pgTable('audit_logs', {
@@ -705,6 +770,33 @@ export const invitationsRelations = relations(invitations, ({ one }) => ({
     fields: [invitations.revokedBy],
     references: [users.id],
     relationName: 'revokedInvitations',
+  }),
+}));
+
+export const advancesRelations = relations(advances, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [advances.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [advances.userId],
+    references: [users.id],
+  }),
+  reconciliations: many(advanceReconciliations),
+}));
+
+export const advanceReconciliationsRelations = relations(advanceReconciliations, ({ one }) => ({
+  advance: one(advances, {
+    fields: [advanceReconciliations.advanceId],
+    references: [advances.id],
+  }),
+  reimbursement: one(reimbursements, {
+    fields: [advanceReconciliations.reimbursementId],
+    references: [reimbursements.id],
+  }),
+  createdByUser: one(users, {
+    fields: [advanceReconciliations.createdBy],
+    references: [users.id],
   }),
 }));
 

@@ -67,7 +67,7 @@ const generateFormId = (createdAt: string, id: string): string => {
 
 export default function DisbursementsPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'ready' | 'processing' | 'history'>('ready');
+  const [activeTab, setActiveTab] = useState<'ready' | 'processing' | 'history' | 'advances'>('ready');
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -604,10 +604,25 @@ export default function DisbursementsPage() {
         >
           付款历史
         </button>
+        <button
+          onClick={() => { setActiveTab('advances'); setSelectedIds([]); }}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
+            activeTab === 'advances'
+              ? 'text-amber-600 border-amber-600'
+              : 'text-gray-500 border-transparent hover:text-gray-700'
+          }`}
+        >
+          预借款管理
+        </button>
       </div>
 
+      {/* Advances Tab */}
+      {activeTab === 'advances' && (
+        <AdvancesPanel />
+      )}
+
       {/* Search & Filter */}
-      <div className="flex items-center justify-between mb-4">
+      {activeTab !== 'advances' && (<><div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
@@ -1117,6 +1132,7 @@ export default function DisbursementsPage() {
           </div>
         )}
       </Card>
+      </>)}
 
       {/* Image Preview Modal */}
       {previewImage && (
@@ -1140,6 +1156,190 @@ export default function DisbursementsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 预借款管理面板（嵌入付款处理页面）
+ */
+function AdvancesPanel() {
+  const [advancesList, setAdvancesList] = useState<any[]>([]);
+  const [advLoading, setAdvLoading] = useState(true);
+  const [expandedAdvId, setExpandedAdvId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchAdvances();
+  }, []);
+
+  const fetchAdvances = async () => {
+    setAdvLoading(true);
+    try {
+      const res = await fetch('/api/advances');
+      const data = await res.json();
+      if (data.success) setAdvancesList(data.data);
+    } catch {} finally {
+      setAdvLoading(false);
+    }
+  };
+
+  const handleApprove = async (id: string, action: 'approve' | 'reject') => {
+    if (action === 'reject') {
+      const reason = prompt('请输入拒绝原因');
+      if (reason === null) return;
+      try {
+        await fetch(`/api/advances/${id}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'reject', reason }),
+        });
+        fetchAdvances();
+      } catch {}
+      return;
+    }
+    try {
+      await fetch(`/api/advances/${id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'approve' }),
+      });
+      fetchAdvances();
+    } catch {}
+  };
+
+  const advStatusConfig: Record<string, { label: string; color: string; bg: string }> = {
+    pending: { label: '待审批', color: '#d97706', bg: '#fef3c7' },
+    approved: { label: '已批准', color: '#16a34a', bg: '#dcfce7' },
+    paid: { label: '已打款', color: '#2563eb', bg: '#dbeafe' },
+    reconciling: { label: '核销中', color: '#4f46e5', bg: '#e0e7ff' },
+    reconciled: { label: '已核销', color: '#059669', bg: '#dcfce7' },
+    rejected: { label: '已拒绝', color: '#dc2626', bg: '#fee2e2' },
+    cancelled: { label: '已取消', color: '#6b7280', bg: '#f3f4f6' },
+  };
+
+  // 统计
+  const pendingCount = advancesList.filter(a => a.status === 'pending').length;
+  const pendingAmount = advancesList.filter(a => a.status === 'pending').reduce((s, a) => s + a.amount, 0);
+  const outstandingAmount = advancesList
+    .filter(a => ['approved', 'paid', 'reconciling'].includes(a.status))
+    .reduce((s, a) => s + a.amount - (a.reconciledAmount || 0), 0);
+
+  return (
+    <div>
+      {/* 统计 */}
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <Card className="p-4">
+          <div className="text-xs text-gray-500 mb-1">待审批</div>
+          <div className="text-xl font-bold text-amber-600">{pendingCount} 笔 / ${pendingAmount.toFixed(2)}</div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs text-gray-500 mb-1">待核销余额</div>
+          <div className="text-xl font-bold text-blue-600">${outstandingAmount.toFixed(2)}</div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs text-gray-500 mb-1">总预借款笔数</div>
+          <div className="text-xl font-bold text-gray-700">{advancesList.length}</div>
+        </Card>
+      </div>
+
+      {/* 列表 */}
+      <Card className="overflow-hidden">
+        {advLoading ? (
+          <div className="p-10 text-center text-gray-500">加载中...</div>
+        ) : advancesList.length === 0 ? (
+          <div className="py-16 text-center">
+            <div className="text-4xl mb-3">💰</div>
+            <div className="text-gray-500">暂无预借款记录</div>
+          </div>
+        ) : (
+          <div>
+            {/* Header */}
+            <div className="grid grid-cols-[1fr_120px_100px_120px_120px_100px] gap-2 px-4 py-3 bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase">
+              <span>标题 / 申请人</span>
+              <span>金额</span>
+              <span>状态</span>
+              <span>已核销</span>
+              <span>申请日期</span>
+              <span>操作</span>
+            </div>
+            {advancesList.map(adv => {
+              const sc = advStatusConfig[adv.status] || advStatusConfig.pending;
+              const remaining = adv.amount - (adv.reconciledAmount || 0);
+              return (
+                <div key={adv.id}>
+                  <div
+                    onClick={() => setExpandedAdvId(expandedAdvId === adv.id ? null : adv.id)}
+                    className="grid grid-cols-[1fr_120px_100px_120px_120px_100px] gap-2 px-4 py-3 items-center border-b hover:bg-gray-50 cursor-pointer"
+                  >
+                    <div>
+                      <div className="font-medium text-sm">{adv.title}</div>
+                      {adv.user && <div className="text-xs text-gray-500">{adv.user.name}</div>}
+                    </div>
+                    <div className="font-semibold text-sm">${adv.amount.toFixed(2)}</div>
+                    <div>
+                      <span style={{ backgroundColor: sc.bg, color: sc.color, padding: '2px 8px', borderRadius: '9999px', fontSize: '0.75rem', fontWeight: 500 }}>
+                        {sc.label}
+                      </span>
+                    </div>
+                    <div className="text-sm">
+                      {adv.reconciledAmount > 0 ? (
+                        <span className="text-green-600">${(adv.reconciledAmount || 0).toFixed(2)}</span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {new Date(adv.createdAt).toLocaleDateString('zh-CN')}
+                    </div>
+                    <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                      {adv.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleApprove(adv.id, 'approve')}
+                            className="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600"
+                          >
+                            批准
+                          </button>
+                          <button
+                            onClick={() => handleApprove(adv.id, 'reject')}
+                            className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200"
+                          >
+                            拒绝
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {/* 展开详情 */}
+                  {expandedAdvId === adv.id && (
+                    <div className="px-6 py-4 bg-gray-50 border-b">
+                      {adv.purpose && <div className="text-sm mb-1"><strong>用途：</strong>{adv.purpose}</div>}
+                      {adv.description && <div className="text-sm mb-1 text-gray-600">{adv.description}</div>}
+                      {adv.rejectReason && (
+                        <div className="text-sm text-red-600 mb-1">拒绝原因：{adv.rejectReason}</div>
+                      )}
+                      {remaining > 0.01 && ['approved', 'paid', 'reconciling'].includes(adv.status) && (
+                        <div className="text-sm text-amber-600">待核销余额：${remaining.toFixed(2)}</div>
+                      )}
+                      {adv.reconciliations && adv.reconciliations.length > 0 && (
+                        <div className="mt-2">
+                          <div className="text-xs font-semibold text-gray-500 mb-1">核销记录：</div>
+                          {adv.reconciliations.map((r: any, i: number) => (
+                            <div key={i} className="flex justify-between text-sm py-1 px-2 bg-white rounded mb-1">
+                              <span>{r.reimbursement?.title || r.reimbursementId?.slice(0, 8)}</span>
+                              <span className="text-green-600 font-medium">-${r.amount.toFixed(2)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
