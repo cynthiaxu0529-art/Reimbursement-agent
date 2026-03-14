@@ -42,6 +42,23 @@ export async function POST(
       return NextResponse.json({ error: '预借款不存在' }, { status: 404 });
     }
 
+    // 付款操作：approved → paid
+    if (action === 'pay') {
+      if (advance.status !== 'approved') {
+        return NextResponse.json({ error: '只能对已批准的预借款进行付款' }, { status: 400 });
+      }
+      const updated = await db.update(advances)
+        .set({
+          status: 'paid',
+          paidAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(advances.id, id))
+        .returning();
+
+      return NextResponse.json({ success: true, data: updated[0] });
+    }
+
     if (advance.status !== 'pending') {
       return NextResponse.json({ error: '只能审批待审批状态的预借款' }, { status: 400 });
     }

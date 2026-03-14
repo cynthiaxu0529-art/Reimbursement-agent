@@ -1274,7 +1274,7 @@ function AdvancesPanel() {
     }
   };
 
-  const handleApprove = async (id: string, action: 'approve' | 'reject') => {
+  const handleApprove = async (id: string, action: 'approve' | 'reject' | 'pay') => {
     if (action === 'reject') {
       const reason = prompt('请输入拒绝原因');
       if (reason === null) return;
@@ -1288,11 +1288,14 @@ function AdvancesPanel() {
       } catch {}
       return;
     }
+    if (action === 'pay') {
+      if (!confirm('确认已完成付款？')) return;
+    }
     try {
       await fetch(`/api/advances/${id}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'approve' }),
+        body: JSON.stringify({ action }),
       });
       fetchAdvances();
     } catch {}
@@ -1398,6 +1401,14 @@ function AdvancesPanel() {
                             拒绝
                           </button>
                         </>
+                      )}
+                      {adv.status === 'approved' && (
+                        <button
+                          onClick={() => handleApprove(adv.id, 'pay')}
+                          className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
+                        >
+                          付款
+                        </button>
                       )}
                     </div>
                   </div>
