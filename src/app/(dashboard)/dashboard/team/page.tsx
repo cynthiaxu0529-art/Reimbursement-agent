@@ -277,7 +277,7 @@ export default function TeamPage() {
   };
 
   // 邀请成员
-  const handleInvite = async () => {
+  const handleInvite = async (resend = false) => {
     if (!inviteData.email || !inviteData.name || inviteData.roles.length === 0) return;
     setSaving(true);
     try {
@@ -292,6 +292,7 @@ export default function TeamPage() {
           roles: inviteData.roles,
           setAsDeptManager: inviteData.setAsDeptManager,
           companyName: '您的公司',
+          resend,
         }),
       });
       const result = await response.json();
@@ -304,16 +305,60 @@ export default function TeamPage() {
           department: inviteData.department,
           sentAt: new Date().toISOString().split('T')[0],
         };
-        setPendingInvites([...pendingInvites, newInvite]);
+        // 移除旧的邀请记录（如果是重新发送）
+        if (resend) {
+          setPendingInvites(prev => prev.filter(p => p.email !== inviteData.email));
+        }
+        setPendingInvites(prev => [...prev, newInvite]);
         showMessage(`邀请邮件已成功发送至 ${inviteData.email}`, 'success');
         setShowInviteModal(false);
         setInviteData({ name: '', email: '', department: '', departmentId: '', roles: [], setAsDeptManager: false });
+      } else if (result.existingInvitationId) {
+        // 已有待处理的邀请，询问是否重新发送
+        if (confirm('该邮箱已有待处理的邀请，是否撤销旧邀请并重新发送？')) {
+          handleInvite(true);
+        }
       } else {
         showMessage(result.error || '发送邀请失败，请重试', 'error');
       }
     } catch (error) {
       console.error('Invite error:', error);
       showMessage('网络错误，请检查网络连接后重试', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // 重新发送邀请
+  const handleResendInvite = async (invite: PendingInvite) => {
+    if (!confirm(`确定重新发送邀请给 ${invite.name} (${invite.email})？`)) return;
+    setSaving(true);
+    try {
+      const response = await fetch('/api/invites/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: invite.email,
+          name: invite.name,
+          department: invite.department,
+          roles: invite.roles,
+          resend: true,
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        // 更新发送时间
+        setPendingInvites(prev => prev.map(p =>
+          p.email === invite.email
+            ? { ...p, sentAt: new Date().toISOString().split('T')[0] }
+            : p
+        ));
+        showMessage(`邀请已重新发送至 ${invite.email}`, 'success');
+      } else {
+        showMessage(result.error || '重新发送失败', 'error');
+      }
+    } catch {
+      showMessage('网络错误', 'error');
     } finally {
       setSaving(false);
     }
@@ -679,7 +724,23 @@ export default function TeamPage() {
                         <p style={{ fontSize: '0.75rem', color: '#6b7280' }}>{invite.email} · {invite.department || '未分配部门'}</p>
                       </div>
                     </div>
-                    <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>{invite.sentAt}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>{invite.sentAt}</span>
+                      <button
+                        onClick={() => handleResendInvite(invite)}
+                        style={{
+                          padding: '0.25rem 0.5rem',
+                          fontSize: '0.75rem',
+                          backgroundColor: '#2563eb',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '0.25rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        重新发送
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1222,7 +1283,7 @@ export default function TeamPage() {
                 取消
               </button>
               <button
-                onClick={handleInvite}
+                onClick={() => handleInvite()}
                 disabled={saving || !inviteData.email || !inviteData.name || inviteData.roles.length === 0}
                 style={{
                   padding: '0.5rem 1rem',

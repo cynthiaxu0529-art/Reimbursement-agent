@@ -25,13 +25,41 @@ function RegisterForm() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [tokenValid, setTokenValid] = useState<boolean | null>(null);
+  const [tokenError, setTokenError] = useState('');
 
-  // 如果是邀请链接，预填邮箱
+  // 如果是邀请链接，预填邮箱并验证token
   useEffect(() => {
     if (inviteEmail) {
       setFormData(prev => ({ ...prev, email: decodeURIComponent(inviteEmail) }));
     }
-  }, [inviteEmail]);
+
+    // 验证邀请token
+    if (inviteToken) {
+      validateInviteToken();
+    }
+  }, [inviteEmail, inviteToken]);
+
+  const validateInviteToken = async () => {
+    try {
+      const res = await fetch('/api/invites/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: inviteToken,
+          email: inviteEmail ? decodeURIComponent(inviteEmail) : undefined
+        }),
+      });
+      const data = await res.json();
+      setTokenValid(data.valid);
+      if (!data.valid) {
+        setTokenError(data.error || '邀请链接无效');
+      }
+    } catch {
+      setTokenValid(false);
+      setTokenError('验证邀请链接时出错');
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -139,7 +167,7 @@ function RegisterForm() {
       </div>
 
       {/* Invite Notice */}
-      {isInvited && (
+      {isInvited && tokenValid === true && (
         <div style={{
           backgroundColor: '#ecfdf5',
           border: '1px solid #a7f3d0',
@@ -150,6 +178,22 @@ function RegisterForm() {
         }}>
           <p style={{ color: '#065f46', fontSize: '0.875rem', margin: 0 }}>
             {t.register.invitedNotice}
+          </p>
+        </div>
+      )}
+
+      {/* Token Error */}
+      {isInvited && tokenValid === false && (
+        <div style={{
+          backgroundColor: '#fef2f2',
+          border: '1px solid #fecaca',
+          borderRadius: '0.75rem',
+          padding: '1rem',
+          marginBottom: '1.5rem',
+          textAlign: 'center'
+        }}>
+          <p style={{ color: '#dc2626', fontSize: '0.875rem', margin: 0 }}>
+            {tokenError}
           </p>
         </div>
       )}
@@ -260,11 +304,11 @@ function RegisterForm() {
 
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || (isInvited && tokenValid === false)}
             style={{
               width: '100%',
               padding: '0.75rem 1rem',
-              background: isLoading ? '#9ca3af' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+              background: (isLoading || (isInvited && tokenValid === false)) ? '#9ca3af' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
               color: 'white',
               border: 'none',
               borderRadius: '0.5rem',
