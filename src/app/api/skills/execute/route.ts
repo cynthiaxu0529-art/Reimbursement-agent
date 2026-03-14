@@ -1,21 +1,47 @@
 /**
  * Skill 执行 API
- * 提供预算预警和异常消费检测功能
+ * 提供预算预警、异常消费检测、时效性分析等功能
+ *
+ * 支持两种认证方式：
+ * 1. Session 认证（正常用户访问）
+ * 2. 内部认证（AI工具调用，通过 context.userId/tenantId）
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { users, reimbursements, reimbursementItems, policies } from '@/lib/db/schema';
-import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
+import { eq, and, gte, lte, inArray, sql, desc } from 'drizzle-orm';
 import {
   createSkillManager,
   createBudgetAlertSkill,
   createAnomalyDetectorSkill,
+  createTimelinessAnalysisSkill,
+  getBuiltInSkills,
 } from '@/lib/skills/skill-manager';
 import { SkillTrigger } from '@/types';
+import { getUserRoles, isAdmin, canApprove, canProcessPayment } from '@/lib/auth/roles';
+import { getVisibleUserIds } from '@/lib/department/department-service';
 
-// 技术费用类别
+// 所有费用类别（用于全面分析）
+const ALL_CATEGORIES = [
+  'flight',
+  'train',
+  'hotel',
+  'meal',
+  'taxi',
+  'office_supplies',
+  'ai_token',
+  'cloud_resource',
+  'api_service',
+  'software',
+  'hosting',
+  'domain',
+  'client_entertainment',
+  'other',
+];
+
+// 技术费用类别（用于预算预警）
 const TECH_CATEGORIES = [
   'ai_token',
   'cloud_resource',
@@ -35,24 +61,65 @@ const TECH_CATEGORIES = [
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
-    }
-
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
-    });
-
-    if (!user?.tenantId) {
-      return NextResponse.json({ error: '未关联公司' }, { status: 404 });
-    }
-
     const body = await request.json();
-    const { skillId, params = {} } = body;
+    const { skillId, params = {}, context: bodyContext } = body;
+
+    // 支持两种认证方式
+    let user: any;
+    let userId: string;
+
+    // 检查是否是内部调用（来自 AI 工具执行器）
+    const internalUserId = bodyContext?.userId;
+    const internalTenantId = bodyContext?.tenantId;
+
+    if (internalUserId && internalTenantId) {
+      // 内部调用认证
+      user = await db.query.users.findFirst({
+        where: eq(users.id, internalUserId),
+      });
+
+      if (!user || user.tenantId !== internalTenantId) {
+        return NextResponse.json({ error: '内部认证失败' }, { status: 403 });
+      }
+
+      userId = internalUserId;
+      console.log('[Skills API] Internal auth:', { userId, tenantId: internalTenantId });
+    } else {
+      // 正常的 session 认证
+      const session = await auth();
+      if (!session?.user) {
+        return NextResponse.json({ error: '未登录' }, { status: 401 });
+      }
+
+      user = await db.query.users.findFirst({
+        where: eq(users.id, session.user.id),
+      });
+
+      if (!user?.tenantId) {
+        return NextResponse.json({ error: '未关联公司' }, { status: 404 });
+      }
+
+      userId = session.user.id;
+    }
 
     if (!skillId) {
       return NextResponse.json({ error: '缺少 skillId 参数' }, { status: 400 });
+    }
+
+    // 获取用户角色和权限
+    const userRoles = getUserRoles(user);
+    const scope = params.scope || 'company';
+
+    // 根据权限获取可见用户列表
+    let visibleUserIds: string[] | null = null;
+    if (scope === 'personal') {
+      visibleUserIds = [userId];
+    } else if (scope === 'team' || scope === 'company') {
+      if (!isAdmin(userRoles) && !canApprove(userRoles) && !canProcessPayment(userRoles)) {
+        visibleUserIds = [userId];
+      } else {
+        visibleUserIds = await getVisibleUserIds(userId, user.tenantId, userRoles);
+      }
     }
 
     // 获取当月日期范围
@@ -64,8 +131,21 @@ export async function POST(request: NextRequest) {
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
 
-    // 查询当月技术费用
-    const currentMonthExpenses = await db
+    // 构建基础查询条件
+    const baseConditions: any[] = [
+      eq(reimbursements.tenantId, user.tenantId),
+      inArray(reimbursements.status, ['approved', 'paid', 'pending', 'under_review']),
+    ];
+
+    // 添加权限过滤
+    if (visibleUserIds !== null && visibleUserIds.length > 0) {
+      baseConditions.push(inArray(reimbursements.userId, visibleUserIds));
+    } else if (visibleUserIds !== null && visibleUserIds.length === 0) {
+      baseConditions.push(eq(reimbursements.userId, userId));
+    }
+
+    // 查询当月技术费用（用于预算预警和异常检测）
+    const currentMonthTechExpenses = await db
       .select({
         id: reimbursementItems.id,
         category: reimbursementItems.category,
@@ -76,12 +156,46 @@ export async function POST(request: NextRequest) {
       .from(reimbursementItems)
       .innerJoin(reimbursements, eq(reimbursementItems.reimbursementId, reimbursements.id))
       .where(and(
-        eq(reimbursements.tenantId, user.tenantId),
+        ...baseConditions,
         gte(reimbursementItems.date, startOfMonth),
         lte(reimbursementItems.date, endOfMonth),
         inArray(reimbursementItems.category, TECH_CATEGORIES),
-        inArray(reimbursements.status, ['approved', 'paid', 'pending', 'under_review']),
       ));
+
+    // 查询当月所有费用（用于时效性分析）
+    const currentMonthAllExpenses = await db
+      .select({
+        id: reimbursementItems.id,
+        category: reimbursementItems.category,
+        amount: reimbursementItems.amountInBaseCurrency,
+        vendor: reimbursementItems.vendor,
+        date: reimbursementItems.date,
+        reimbursementId: reimbursementItems.reimbursementId,
+      })
+      .from(reimbursementItems)
+      .innerJoin(reimbursements, eq(reimbursementItems.reimbursementId, reimbursements.id))
+      .where(and(
+        ...baseConditions,
+        gte(reimbursementItems.date, startOfMonth),
+        lte(reimbursementItems.date, endOfMonth),
+      ));
+
+    // 获取报销单的提交日期（用于时效性分析）
+    const reimbursementIds = [...new Set(currentMonthAllExpenses.map(e => e.reimbursementId))];
+    let reimbursementSubmitDates = new Map<string, Date>();
+    if (reimbursementIds.length > 0) {
+      const reimbursementData = await db
+        .select({
+          id: reimbursements.id,
+          submittedAt: reimbursements.submittedAt,
+          createdAt: reimbursements.createdAt,
+        })
+        .from(reimbursements)
+        .where(inArray(reimbursements.id, reimbursementIds));
+      for (const r of reimbursementData) {
+        reimbursementSubmitDates.set(r.id, r.submittedAt || r.createdAt);
+      }
+    }
 
     // 查询上月技术费用总额
     const lastMonthResult = await db
@@ -96,13 +210,17 @@ export async function POST(request: NextRequest) {
         lte(reimbursementItems.date, endOfLastMonth),
         inArray(reimbursementItems.category, TECH_CATEGORIES),
         inArray(reimbursements.status, ['approved', 'paid']),
+        // 同样应用权限过滤
+        ...(visibleUserIds !== null && visibleUserIds.length > 0
+          ? [inArray(reimbursements.userId, visibleUserIds)]
+          : []),
       ));
 
     const lastMonthTotal = Number(lastMonthResult[0]?.total) || 0;
 
-    // 按类别汇总当月费用
+    // 按类别汇总当月技术费用
     const monthlyExpenses: Record<string, number> = {};
-    for (const expense of currentMonthExpenses) {
+    for (const expense of currentMonthTechExpenses) {
       monthlyExpenses[expense.category] = (monthlyExpenses[expense.category] || 0) + expense.amount;
     }
 
@@ -134,17 +252,20 @@ export async function POST(request: NextRequest) {
     }
 
     // 计算历史平均值（用于异常检测）
-    // 简化实现：使用上月数据作为基准
     const historicalAvg: Record<string, { avgAmount: number; stdDev: number }> = {};
     for (const cat of TECH_CATEGORIES) {
-      // 实际应该查询更多历史数据计算真正的平均值
-      // 这里简化为使用上月数据的 1/30 作为日均值
       const monthlyAvg = lastMonthTotal / TECH_CATEGORIES.length;
       historicalAvg[cat] = {
-        avgAmount: monthlyAvg / 10, // 简化：假设每月约10笔费用
+        avgAmount: monthlyAvg / 10,
         stdDev: monthlyAvg / 20,
       };
     }
+
+    // 准备时效性分析数据
+    const timelinessExpenses = currentMonthAllExpenses.map(e => ({
+      ...e,
+      submittedAt: reimbursementSubmitDates.get(e.reimbursementId) || now,
+    }));
 
     // 创建执行上下文
     const context = {
@@ -157,16 +278,21 @@ export async function POST(request: NextRequest) {
       },
       tenant: {
         id: user.tenantId,
-        name: '', // 可以从 tenant 表获取
+        name: '',
         settings: {},
       },
       params: {
         ...params,
         monthlyExpenses,
         budgetLimits,
-        currentExpenses: currentMonthExpenses,
+        currentExpenses: currentMonthTechExpenses,
         historicalAvg,
         lastMonthTotal,
+        // 时效性分析数据
+        expenses: timelinessExpenses,
+      },
+      reimbursement: {
+        submittedAt: now, // 用于时效性分析计算
       },
     };
 
@@ -183,6 +309,12 @@ export async function POST(request: NextRequest) {
       const manager = createSkillManager(user.tenantId, [skill]);
       const results = await manager.executeTrigger(SkillTrigger.ON_CHAT_COMMAND, context as any);
       result = results.get('builtin_anomaly_detector');
+    } else if (skillId === 'builtin_timeliness_analysis') {
+      // 时效性分析 Skill
+      const skill = createTimelinessAnalysisSkill(user.tenantId);
+      const manager = createSkillManager(user.tenantId, [skill]);
+      const results = await manager.executeTrigger(SkillTrigger.ON_CHAT_COMMAND, context as any);
+      result = results.get('builtin_timeliness_analysis');
     } else if (skillId === 'all_tech_analysis') {
       // 执行所有技术费用分析 Skill
       const budgetSkill = createBudgetAlertSkill(user.tenantId);
@@ -198,7 +330,35 @@ export async function POST(request: NextRequest) {
           summary: {
             currentMonthTotal: Object.values(monthlyExpenses).reduce((a, b) => a + b, 0),
             lastMonthTotal,
-            expenseCount: currentMonthExpenses.length,
+            expenseCount: currentMonthTechExpenses.length,
+            period: {
+              start: startOfMonth.toISOString(),
+              end: endOfMonth.toISOString(),
+            },
+          },
+        },
+      };
+
+      return NextResponse.json(result);
+    } else if (skillId === 'all_analysis') {
+      // 执行所有分析 Skill（包括时效性）
+      const budgetSkill = createBudgetAlertSkill(user.tenantId);
+      const anomalySkill = createAnomalyDetectorSkill(user.tenantId);
+      const timelinessSkill = createTimelinessAnalysisSkill(user.tenantId);
+      const manager = createSkillManager(user.tenantId, [budgetSkill, anomalySkill, timelinessSkill]);
+      const results = await manager.executeTrigger(SkillTrigger.ON_CHAT_COMMAND, context as any);
+
+      result = {
+        success: true,
+        data: {
+          budgetAlert: results.get('builtin_budget_alert'),
+          anomalyDetection: results.get('builtin_anomaly_detector'),
+          timeliness: results.get('builtin_timeliness_analysis'),
+          summary: {
+            currentMonthTotal: Object.values(monthlyExpenses).reduce((a, b) => a + b, 0),
+            lastMonthTotal,
+            techExpenseCount: currentMonthTechExpenses.length,
+            totalExpenseCount: currentMonthAllExpenses.length,
             period: {
               start: startOfMonth.toISOString(),
               end: endOfMonth.toISOString(),
@@ -227,6 +387,8 @@ export async function POST(request: NextRequest) {
 /**
  * GET /api/skills/execute
  * 获取可用的 Skill 列表
+ *
+ * 动态返回所有内置 Skills 和自定义 Skills
  */
 export async function GET() {
   try {
@@ -235,30 +397,58 @@ export async function GET() {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
 
-    const skills = [
-      {
-        id: 'builtin_budget_alert',
-        name: '预算预警通知',
-        description: '检测技术费用是否接近或超过月度预算限额',
-        category: 'notification',
-      },
-      {
-        id: 'builtin_anomaly_detector',
-        name: '异常消费检测',
-        description: '检测异常高额的技术费用支出',
-        category: 'validation',
-      },
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+    });
+
+    if (!user?.tenantId) {
+      return NextResponse.json({ error: '未关联公司' }, { status: 404 });
+    }
+
+    // 获取内置 Skills
+    const builtInSkills = getBuiltInSkills(user.tenantId);
+
+    // 格式化为 API 响应格式
+    const skillList = builtInSkills
+      .filter(skill => skill.isActive)
+      .map(skill => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        category: skill.category,
+        isBuiltIn: skill.isBuiltIn,
+        triggers: skill.triggers.map(t => t.type),
+        inputSchema: skill.inputSchema,
+        outputSchema: skill.outputSchema,
+      }));
+
+    // 添加聚合分析选项
+    skillList.push(
       {
         id: 'all_tech_analysis',
         name: '技术费用综合分析',
-        description: '执行所有技术费用相关的分析',
-        category: 'analysis',
+        description: '执行所有技术费用相关的分析（预算预警 + 异常检测）',
+        category: 'analysis' as any,
+        isBuiltIn: true,
+        triggers: ['on_chat_command'],
+        inputSchema: undefined,
+        outputSchema: undefined,
       },
-    ];
+      {
+        id: 'all_analysis',
+        name: '全面费用分析',
+        description: '执行所有费用分析（预算预警 + 异常检测 + 时效性分析）',
+        category: 'analysis' as any,
+        isBuiltIn: true,
+        triggers: ['on_chat_command'],
+        inputSchema: undefined,
+        outputSchema: undefined,
+      }
+    );
 
     return NextResponse.json({
       success: true,
-      data: skills,
+      data: skillList,
     });
   } catch (error) {
     console.error('Get skills error:', error);

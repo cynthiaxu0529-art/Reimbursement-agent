@@ -1,28 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
-
-// 导航项定义（按角色分组，用于合并）
-const navItems = {
-  // 通用
-  dashboard: { name: '仪表盘', href: '/dashboard', icon: '📊' },
-  settings: { name: '设置', href: '/dashboard/settings', icon: '⚙️' },
-  // 员工专属
-  myReimbursements: { name: '我的报销', href: '/dashboard/reimbursements', icon: '📄' },
-  advances: { name: '预借款', href: '/dashboard/advances', icon: '💰' },
-  trips: { name: '行程', href: '/dashboard/trips', icon: '✈️' },
-  chat: { name: 'AI 助手', href: '/dashboard/chat', icon: '💬' },
-  // 审批人专属
-  approvals: { name: '待审批', href: '/dashboard/approvals', icon: '✅' },
-  approvalHistory: { name: '审批历史', href: '/dashboard/approvals/history', icon: '📋' },
-  // 财务专属
-  disbursements: { name: '付款处理', href: '/dashboard/disbursements', icon: '💳' },
-  exchangeRates: { name: '汇率设置', href: '/dashboard/settings/exchange-rates', icon: '💱' },
-  // 管理员专属
-  team: { name: '团队管理', href: '/dashboard/team', icon: '👥' },
-};
+import { signOut } from 'next-auth/react';
+import { useLanguage } from '@/contexts/LanguageContext';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
 
 // 数据库角色到前端角色的映射
 // 注意：super_admin 需要保持独立，因为它有所有权限
@@ -34,21 +17,48 @@ const DB_TO_FRONTEND_ROLE: Record<string, string> = {
   super_admin: 'super_admin',  // 保持独立，不映射到 admin
 };
 
-// 角色显示信息
-const ROLE_INFO: Record<string, { label: string; color: string }> = {
-  employee: { label: '员工', color: '#2563eb' },
-  approver: { label: '审批人', color: '#7c3aed' },
-  finance: { label: '财务', color: '#059669' },
-  admin: { label: '管理员', color: '#dc2626' },
-  super_admin: { label: '超级管理员', color: '#7c2d12' },
+// 角色颜色
+const ROLE_COLORS: Record<string, string> = {
+  employee: '#2563eb',
+  approver: '#7c3aed',
+  finance: '#059669',
+  admin: '#dc2626',
+  super_admin: '#7c2d12',
 };
 
+// 导航项定义（按角色分组，用于合并）
+function getNavItems(t: ReturnType<typeof useLanguage>['t']) {
+  return {
+    // 通用
+    dashboard: { name: t.nav.dashboard, href: '/dashboard', icon: '📊' },
+    settings: { name: t.nav.settings, href: '/dashboard/settings', icon: '⚙️' },
+    // 员工专属
+    myReimbursements: { name: t.nav.myReimbursements, href: '/dashboard/reimbursements', icon: '📄' },
+    advances: { name: t.nav.advances || '预借款', href: '/dashboard/advances', icon: '💰' },
+    trips: { name: t.nav.trips, href: '/dashboard/trips', icon: '✈️' },
+    chat: { name: t.nav.chat, href: '/dashboard/chat', icon: '💬' },
+    // 审批人专属
+    approvals: { name: t.nav.approvals, href: '/dashboard/approvals', icon: '✅' },
+    approvalHistory: { name: t.nav.approvalHistory, href: '/dashboard/approvals/history', icon: '📋' },
+    // 财务专属
+    disbursements: { name: t.nav.disbursements, href: '/dashboard/disbursements', icon: '💳' },
+    exchangeRates: { name: t.nav.exchangeRates, href: '/dashboard/settings/exchange-rates', icon: '💱' },
+    accountingSummaries: { name: t.nav.accountingSummaries, href: '/dashboard/accounting-summaries', icon: '📒' },
+    // API Key（所有人可用）
+    apiKeys: { name: 'API Keys', href: '/dashboard/settings/api-keys', icon: '🔑' },
+    // 管理员专属
+    team: { name: t.nav.team, href: '/dashboard/team', icon: '👥' },
+  };
+}
+
+type NavItem = { name: string; href: string; icon: string };
+
 // 根据角色数组构建导航菜单
-function buildNavigation(roles: string[]) {
-  const nav: typeof navItems[keyof typeof navItems][] = [];
+function buildNavigation(roles: string[], navItems: ReturnType<typeof getNavItems>) {
+  const nav: NavItem[] = [];
   const added = new Set<string>();
 
-  const addItem = (item: typeof navItems[keyof typeof navItems]) => {
+  const addItem = (item: NavItem) => {
     if (!added.has(item.href)) {
       nav.push(item);
       added.add(item.href);
@@ -76,12 +86,16 @@ function buildNavigation(roles: string[]) {
   if (roles.includes('finance') || roles.includes('super_admin')) {
     addItem(navItems.disbursements);
     addItem(navItems.exchangeRates);
+    addItem(navItems.accountingSummaries);
   }
 
   // 管理员功能（admin 或 super_admin 都可以管理团队）
   if (roles.includes('admin') || roles.includes('super_admin')) {
     addItem(navItems.team);
   }
+
+  // API Keys（所有人可用）
+  addItem(navItems.apiKeys);
 
   // 设置始终在最后
   addItem(navItems.settings);
@@ -95,21 +109,39 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [roles, setRoles] = useState<string[]>(['employee']);
   const [loading, setLoading] = useState(true);
+  const [userName, setUserName] = useState<string>('');
+  const [userEmail, setUserEmail] = useState<string>('');
+  const { t } = useLanguage();
 
-  // 初始化：从数据库获取角色数组
+  // 初始化：从数据库获取角色数组和用户信息
   useEffect(() => {
-    const initRoles = async () => {
+    const initUser = async () => {
       try {
-        const response = await fetch('/api/settings/role');
-        const result = await response.json();
-        if (result.success && result.roles) {
-          // 转换数据库角色到前端角色
-          const frontendRoles = result.roles.map((r: string) => DB_TO_FRONTEND_ROLE[r] || r);
-          // 去重
+        // 并行获取角色和用户信息
+        const [roleRes, meRes] = await Promise.all([
+          fetch('/api/settings/role'),
+          fetch('/api/auth/me'),
+        ]);
+
+        // 如果 API 返回 401，说明未认证，跳转登录页
+        if (meRes.status === 401 || roleRes.status === 401) {
+          router.push('/login');
+          return;
+        }
+
+        const roleResult = await roleRes.json();
+        if (roleResult.success && roleResult.roles) {
+          const frontendRoles = roleResult.roles.map((r: string) => DB_TO_FRONTEND_ROLE[r] || r);
           const uniqueRoles = [...new Set(frontendRoles)] as string[];
           setRoles(uniqueRoles);
+        }
+        const meResult = await meRes.json();
+        if (meResult.success && meResult.data) {
+          setUserName(meResult.data.name || '');
+          setUserEmail(meResult.data.email || '');
         }
       } catch {
         setRoles(['employee']);
@@ -117,11 +149,13 @@ export default function DashboardLayout({
         setLoading(false);
       }
     };
-    initRoles();
-  }, []);
+    initUser();
+  }, [router]);
+
+  const navItems = getNavItems(t);
 
   // 根据角色构建导航
-  const navigation = buildNavigation(roles);
+  const navigation = buildNavigation(roles, navItems);
 
   // 获取主要角色（用于显示颜色，按权限优先级排序）
   const primaryRole = roles.includes('super_admin') ? 'super_admin'
@@ -129,10 +163,14 @@ export default function DashboardLayout({
     : roles.includes('finance') ? 'finance'
     : roles.includes('approver') ? 'approver'
     : 'employee';
-  const primaryColor = ROLE_INFO[primaryRole]?.color || '#2563eb';
+  const primaryColor = ROLE_COLORS[primaryRole] || '#2563eb';
 
   // 角色标签显示
-  const roleLabels = roles.map(r => ROLE_INFO[r]?.label).filter(Boolean).join(' / ');
+  const getRoleLabel = (role: string) => {
+    const key = role as keyof typeof t.roles;
+    return t.roles[key] || role;
+  };
+  const roleLabels = roles.map(r => getRoleLabel(r)).filter(Boolean).join(' / ');
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
@@ -167,7 +205,7 @@ export default function DashboardLayout({
           }}>
             <span style={{ color: 'white', fontWeight: 'bold', fontSize: '1rem' }}>R</span>
           </div>
-          <span style={{ fontWeight: 600, fontSize: '1rem', color: '#111827' }}>报销助手</span>
+          <span style={{ fontWeight: 600, fontSize: '1rem', color: '#111827' }}>{t.common.appName}</span>
         </div>
 
         {/* Role Display (多角色显示，不可切换) */}
@@ -180,7 +218,7 @@ export default function DashboardLayout({
               fontSize: '0.875rem'
             }}
           >
-            <div style={{ fontWeight: 500, color: '#374151', marginBottom: '0.25rem' }}>我的角色</div>
+            <div style={{ fontWeight: 500, color: '#374151', marginBottom: '0.25rem' }}>{t.nav.myRoles}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
               {roles.map(r => (
                 <span
@@ -190,14 +228,14 @@ export default function DashboardLayout({
                     alignItems: 'center',
                     gap: '0.25rem',
                     padding: '0.125rem 0.5rem',
-                    backgroundColor: ROLE_INFO[r]?.color + '20',
-                    color: ROLE_INFO[r]?.color,
+                    backgroundColor: (ROLE_COLORS[r] || '#2563eb') + '20',
+                    color: ROLE_COLORS[r] || '#2563eb',
                     borderRadius: '0.25rem',
                     fontSize: '0.75rem',
                     fontWeight: 500,
                   }}
                 >
-                  {ROLE_INFO[r]?.label}
+                  {getRoleLabel(r)}
                 </span>
               ))}
             </div>
@@ -238,25 +276,58 @@ export default function DashboardLayout({
         <div style={{
           padding: '1rem 1.5rem',
           borderTop: '1px solid #e5e7eb',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem'
         }}>
           <div style={{
-            width: '32px',
-            height: '32px',
-            backgroundColor: primaryColor,
-            borderRadius: '50%',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center'
+            gap: '0.75rem',
+            marginBottom: '0.75rem',
           }}>
-            <span style={{ color: 'white', fontSize: '0.875rem', fontWeight: 500 }}>U</span>
+            <div style={{
+              width: '32px',
+              height: '32px',
+              backgroundColor: primaryColor,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <span style={{ color: 'white', fontSize: '0.875rem', fontWeight: 500 }}>
+                {userName ? userName.charAt(0).toUpperCase() : 'U'}
+              </span>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.875rem', fontWeight: 500, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {userName || t.common.user}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={userEmail}>
+                {userEmail || roleLabels}
+              </div>
+            </div>
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.875rem', fontWeight: 500, color: '#111827' }}>用户</div>
-            <div style={{ fontSize: '0.75rem', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{roleLabels}</div>
-          </div>
+          <button
+            onClick={async () => {
+              await signOut({ redirect: false });
+              window.location.href = '/login';
+            }}
+            style={{
+              width: '100%',
+              padding: '0.5rem',
+              backgroundColor: '#f3f4f6',
+              border: '1px solid #e5e7eb',
+              borderRadius: '0.375rem',
+              fontSize: '0.8125rem',
+              color: '#4b5563',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.375rem',
+            }}
+          >
+            {t.common.logout || '退出登录'}
+          </button>
         </div>
       </aside>
 
@@ -275,9 +346,10 @@ export default function DashboardLayout({
           justifyContent: 'space-between'
         }}>
           <h1 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>
-            {navigation.find((n) => pathname === n.href || (n.href !== '/dashboard' && pathname.startsWith(n.href)))?.name || '仪表盘'}
+            {navigation.find((n) => pathname === n.href || (n.href !== '/dashboard' && pathname.startsWith(n.href)))?.name || t.nav.dashboard}
           </h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <LanguageSwitcher />
             {roles.includes('employee') && (
               <Link
                 href="/dashboard/reimbursements/new"
@@ -294,7 +366,7 @@ export default function DashboardLayout({
                   fontWeight: 500
                 }}
               >
-                + 新建报销
+                {t.nav.newReimbursement}
               </Link>
             )}
           </div>

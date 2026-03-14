@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useBaseCurrencyConversion } from '@/hooks/useBaseCurrencyConversion';
 import { CurrencyType } from '@/types';
+import TripItineraryPanel from '@/components/TripItineraryPanel';
 
 const expenseCategories = [
   { value: 'flight', label: '机票', icon: '✈️' },
@@ -101,6 +102,9 @@ export default function NewReimbursementPage() {
     },
   ]);
   const [itemsAutoFilled, setItemsAutoFilled] = useState(false);
+
+  // Trip itinerary (saved after confirmation)
+  const [confirmedItinerary, setConfirmedItinerary] = useState<any>(null);
 
   // 使用本位币转换 Hook（自动处理目标货币，避免方向错误）
   const {
@@ -225,19 +229,32 @@ export default function NewReimbursementPage() {
     }
 
     // 创建新的费用明细项（包含供应商）
+    // 酒店日期处理：OCR 提取的入住/离店日期自动填入
+    const ocrCheckIn = ocrData.checkInDate ? formatDateForInput(ocrData.checkInDate) : undefined;
+    const ocrCheckOut = ocrData.checkOutDate ? formatDateForInput(ocrData.checkOutDate) : undefined;
+    const ocrNights = ocrData.nights || (ocrCheckIn && ocrCheckOut ? calculateNights(ocrCheckIn, ocrCheckOut) : undefined);
+
+    // 酒店描述自动补充天数信息
+    if (category === 'hotel' && ocrCheckIn && ocrCheckOut && ocrNights) {
+      itemDescription = `${itemDescription || '酒店住宿'} (${ocrCheckIn} 至 ${ocrCheckOut}, ${ocrNights}晚)`;
+    }
+
     const newItem: LineItem = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
       description: itemDescription,
       category: category,
       amount: ocrData.amount ? ocrData.amount.toString() : '',
       currency: ocrData.currency || 'CNY',
-      date: ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0],
+      date: ocrCheckIn || (ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0]),
       vendor: ocrData.vendor || '',
       departure: ocrData.departure || '',
       destination: ocrData.destination || '',
       trainNumber: ocrData.trainNumber || '',
       flightNumber: ocrData.flightNumber || '',
       seatClass: ocrData.seatClass || '',
+      checkInDate: ocrCheckIn,
+      checkOutDate: ocrCheckOut,
+      nights: ocrNights,
     };
 
     // 添加新项目到列表（如果第一项是空的则替换，否则添加）
@@ -291,13 +308,22 @@ export default function NewReimbursementPage() {
         console.warn(`OCR 项目汇率警告: ${conversion.error}`);
       }
 
+      // 酒店日期处理：OCR 提取的入住/离店日期自动填入
+      const ocrCheckIn = ocrData.checkInDate ? formatDateForInput(ocrData.checkInDate) : undefined;
+      const ocrCheckOut = ocrData.checkOutDate ? formatDateForInput(ocrData.checkOutDate) : undefined;
+      const ocrNights = ocrData.nights || (ocrCheckIn && ocrCheckOut ? calculateNights(ocrCheckIn, ocrCheckOut) : undefined);
+
+      if (category === 'hotel' && ocrCheckIn && ocrCheckOut && ocrNights) {
+        itemDescription = `${itemDescription || '酒店住宿'} (${ocrCheckIn} 至 ${ocrCheckOut}, ${ocrNights}晚)`;
+      }
+
       newItems.push({
         id: Date.now().toString() + index + Math.random().toString(36).substr(2, 9),
         description: itemDescription,
         category: category,
         amount: ocrData.amount ? ocrData.amount.toString() : '',
         currency: currency,
-        date: ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0],
+        date: ocrCheckIn || (ocrData.date ? formatDateForInput(ocrData.date) : new Date().toISOString().split('T')[0]),
         vendor: ocrData.vendor || '',
         departure: ocrData.departure || '',
         destination: ocrData.destination || '',
@@ -308,6 +334,9 @@ export default function NewReimbursementPage() {
         amountInUSD: conversion?.success ? conversion.amount : undefined,
         receiptUrl: ocrData.receiptUrl || '',
         receiptFileName: ocrData.receiptFileName || '',
+        checkInDate: ocrCheckIn,
+        checkOutDate: ocrCheckOut,
+        nights: ocrNights,
       });
     }
 
@@ -579,6 +608,53 @@ export default function NewReimbursementPage() {
 
       const result = await response.json();
       if (result.success) {
+        const reimbursementId = result.data?.id;
+
+        if (confirmedItinerary && reimbursementId) {
+          // 如果有已确认的行程单，关联到新创建的报销单
+          try {
+            await fetch('/api/trip-itineraries', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...confirmedItinerary,
+                reimbursementId,
+                status: 'confirmed',
+              }),
+            });
+          } catch (itineraryError) {
+            console.error('Failed to save itinerary association:', itineraryError);
+          }
+        } else if (reimbursementId) {
+          // 自动生成差旅行程单（如果包含差旅类别的费用）
+          const TRAVEL_CATEGORIES = ['flight', 'train', 'hotel', 'meal', 'taxi', 'car_rental', 'fuel', 'parking', 'toll'];
+          const hasTravelItems = itemsData.some(item => TRAVEL_CATEGORIES.includes(item.category));
+          if (hasTravelItems) {
+            try {
+              const genRes = await fetch('/api/trip-itineraries/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items: itemsData, description }),
+              });
+              const genResult = await genRes.json();
+              if (genResult.success && genResult.data) {
+                // 保存生成的行程单
+                await fetch('/api/trip-itineraries', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    ...genResult.data,
+                    reimbursementId,
+                    status: 'draft',
+                  }),
+                });
+              }
+            } catch (genError) {
+              console.error('Auto-generate itinerary failed:', genError);
+            }
+          }
+        }
+
         router.push('/dashboard/reimbursements');
       } else {
         const errMsg = result.detail ? `${result.error}\n详情: ${result.detail}` : result.error;
@@ -1246,6 +1322,15 @@ export default function NewReimbursementPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Trip Itinerary Panel - 差旅报销时自动显示 */}
+              <TripItineraryPanel
+                lineItems={lineItems}
+                description={description}
+                onItineraryConfirmed={(itinerary) => {
+                  setConfirmedItinerary(itinerary);
+                }}
+              />
 
               {/* Total and Actions */}
               <div style={{

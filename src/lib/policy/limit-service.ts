@@ -184,6 +184,9 @@ export async function checkItemLimit(
     amountInBaseCurrency: number;  // USD金额
     date: Date;
     location?: string;
+    nights?: number;
+    checkInDate?: string;
+    checkOutDate?: string;
   },
   rules: PolicyRule[]
 ): Promise<LimitCheckResult | null> {
@@ -200,25 +203,42 @@ export async function checkItemLimit(
   const { limit, categories = [], name, message } = applicableRule;
   const itemAmount = item.amountInBaseCurrency;
 
+  // 计算住宿天数：优先使用 nights 字段，其次通过入离店日期计算
+  let effectiveNights = 1;
+  if (item.nights && item.nights > 1) {
+    effectiveNights = item.nights;
+  } else if (item.checkInDate && item.checkOutDate) {
+    const checkIn = new Date(item.checkInDate);
+    const checkOut = new Date(item.checkOutDate);
+    const diffMs = checkOut.getTime() - checkIn.getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays > 1) effectiveNights = diffDays;
+  }
+
   // 根据限额类型进行检查
   if (limit.type === 'per_day') {
+    // 多日住宿的有效限额 = 单日限额 × 天数
+    const effectiveLimit = effectiveNights > 1 ? limit.amount * effectiveNights : limit.amount;
+
     // 每日限额检查
-    // 1. 先检查单笔是否超过每日限额
-    if (itemAmount > limit.amount) {
-      const adjustedAmount = limit.amount;
+    // 1. 先检查单笔是否超过有效限额
+    if (itemAmount > effectiveLimit) {
+      const adjustedAmount = effectiveLimit;
       return {
         isWithinLimit: false,
         limitType: 'per_day',
-        limitAmount: limit.amount,
+        limitAmount: effectiveLimit,
         limitCurrency: limit.currency,
         currentAmount: itemAmount,
         existingAmount: 0,
         totalAmount: itemAmount,
-        remainingAmount: limit.amount,
+        remainingAmount: effectiveLimit,
         adjustedAmount,
         wasAdjusted: true,
         ruleName: name,
-        message: `单笔金额 $${itemAmount.toFixed(2)} 超过每日限额 $${limit.amount}，已调整为 $${adjustedAmount.toFixed(2)}`,
+        message: effectiveNights > 1
+          ? `单笔金额 $${itemAmount.toFixed(2)} 超过 ${effectiveNights} 天限额 $${effectiveLimit}（每日 $${limit.amount}），已调整为 $${adjustedAmount.toFixed(2)}`
+          : `单笔金额 $${itemAmount.toFixed(2)} 超过每日限额 $${limit.amount}，已调整为 $${adjustedAmount.toFixed(2)}`,
         categories,
       };
     }
@@ -226,14 +246,14 @@ export async function checkItemLimit(
     // 2. 查询同一天已有的报销金额
     const existingAmount = await getDailyReimbursedAmount(userId, tenantId, item.date, categories);
     const totalAmount = existingAmount + itemAmount;
-    const remainingAmount = Math.max(0, limit.amount - existingAmount);
+    const remainingAmount = Math.max(0, effectiveLimit - existingAmount);
 
-    if (totalAmount > limit.amount) {
+    if (totalAmount > effectiveLimit) {
       const adjustedAmount = Math.max(0, remainingAmount);
       return {
         isWithinLimit: false,
         limitType: 'per_day',
-        limitAmount: limit.amount,
+        limitAmount: effectiveLimit,
         limitCurrency: limit.currency,
         currentAmount: itemAmount,
         existingAmount,
@@ -242,7 +262,7 @@ export async function checkItemLimit(
         adjustedAmount,
         wasAdjusted: adjustedAmount !== itemAmount,
         ruleName: name,
-        message: `当日已报销 $${existingAmount.toFixed(2)}，本次 $${itemAmount.toFixed(2)}，超过每日限额 $${limit.amount}，已调整为 $${adjustedAmount.toFixed(2)}`,
+        message: `当日已报销 $${existingAmount.toFixed(2)}，本次 $${itemAmount.toFixed(2)}，超过限额 $${effectiveLimit}，已调整为 $${adjustedAmount.toFixed(2)}`,
         categories,
       };
     }
@@ -250,7 +270,7 @@ export async function checkItemLimit(
     return {
       isWithinLimit: true,
       limitType: 'per_day',
-      limitAmount: limit.amount,
+      limitAmount: effectiveLimit,
       limitCurrency: limit.currency,
       currentAmount: itemAmount,
       existingAmount,
@@ -359,6 +379,9 @@ export async function checkItemsLimit(
     amountInBaseCurrency: number;
     date: string;
     location?: string;
+    nights?: number;
+    checkInDate?: string;
+    checkOutDate?: string;
   }>
 ): Promise<BatchLimitCheckResult> {
   const rules = await getTenantPolicyRules(tenantId);
@@ -394,6 +417,18 @@ export async function checkItemsLimit(
 
     const { limit, categories = [], name } = applicableRule;
 
+    // 计算住宿天数：优先使用 nights 字段，其次通过入离店日期计算
+    let effectiveNights = 1;
+    if (item.nights && item.nights > 1) {
+      effectiveNights = item.nights;
+    } else if (item.checkInDate && item.checkOutDate) {
+      const checkIn = new Date(item.checkInDate);
+      const checkOut = new Date(item.checkOutDate);
+      const diffMs = checkOut.getTime() - checkIn.getTime();
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      if (diffDays > 1) effectiveNights = diffDays;
+    }
+
     // 生成累计金额的key
     let accumulatorKey: string;
     let existingDbAmount: number = 0;
@@ -423,7 +458,11 @@ export async function checkItemsLimit(
     }
 
     const currentAccumulated = accumulatedAmounts[accumulatorKey] || 0;
-    const remainingAmount = Math.max(0, limit.amount - currentAccumulated);
+    // 对 per_day 类型，多日住宿的有效限额 = 单日限额 × 天数
+    const effectiveLimit = (limit.type === 'per_day' && effectiveNights > 1)
+      ? limit.amount * effectiveNights
+      : limit.amount;
+    const remainingAmount = Math.max(0, effectiveLimit - currentAccumulated);
     let adjustedAmount = item.amountInBaseCurrency;
     let wasAdjusted = false;
 
@@ -441,7 +480,10 @@ export async function checkItemsLimit(
         wasAdjusted = true;
 
         if (adjustedAmount === 0) {
-          messages.push(`${name}: 已达到${limit.type === 'per_day' ? '每日' : '每月'}限额 $${limit.amount}，本项金额调整为 $0`);
+          const limitDesc = limit.type === 'per_day'
+            ? (effectiveNights > 1 ? `每日限额 $${limit.amount} × ${effectiveNights}天 = $${effectiveLimit}` : `每日限额 $${limit.amount}`)
+            : `每月限额 $${limit.amount}`;
+          messages.push(`${name}: 已达到${limitDesc}，本项金额调整为 $0`);
         } else {
           messages.push(`${name}: 剩余额度 $${remainingAmount.toFixed(2)}，金额从 $${item.amountInBaseCurrency.toFixed(2)} 调整为 $${adjustedAmount.toFixed(2)}`);
         }
@@ -464,12 +506,12 @@ export async function checkItemsLimit(
       checkResult: {
         isWithinLimit: !wasAdjusted,
         limitType: limit.type as 'per_day' | 'per_month' | 'per_item' | 'per_year',
-        limitAmount: limit.amount,
+        limitAmount: effectiveLimit,
         limitCurrency: limit.currency,
         currentAmount: item.amountInBaseCurrency,
         existingAmount: currentAccumulated,
         totalAmount: currentAccumulated + adjustedAmount,
-        remainingAmount: Math.max(0, limit.amount - currentAccumulated - adjustedAmount),
+        remainingAmount: Math.max(0, effectiveLimit - currentAccumulated - adjustedAmount),
         adjustedAmount,
         wasAdjusted,
         ruleName: name,

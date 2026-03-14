@@ -12,6 +12,7 @@ import {
   jsonb,
   uuid,
   pgEnum,
+  index,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
@@ -50,6 +51,12 @@ export const complianceStatusEnum = pgEnum('compliance_status', [
   'passed',
   'warning',
   'failed',
+]);
+
+export const itineraryStatusEnum = pgEnum('itinerary_status', [
+  'draft',          // AI 生成的草稿
+  'confirmed',      // 用户确认
+  'modified',       // 用户修改后
 ]);
 
 export const approvalStepStatusEnum = pgEnum('approval_step_status', [
@@ -97,6 +104,7 @@ export const departments = pgTable('departments', {
   name: text('name').notNull(),
   code: text('code'),                             // 部门编码，如 TECH-001
   description: text('description'),
+  costCenter: text('cost_center'),                // 费用性质：rd=研发费用, sm=销售费用, ga=管理费用（默认）
   parentId: uuid('parent_id'),                    // 上级部门，为空表示顶级部门
   managerId: uuid('manager_id'),                  // 部门负责人
   approverIds: jsonb('approver_ids').default([]), // 部门审批人列表（UUID数组）
@@ -235,6 +243,73 @@ export const trips = pgTable('trips', {
   budgetSource: text('budget_source'),
 
   calendarEventIds: jsonb('calendar_event_ids').default([]),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * 行程单表（从报销内容智能生成的行程）
+ */
+export const tripItineraries = pgTable('trip_itineraries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id),
+  reimbursementId: uuid('reimbursement_id'),         // 关联的报销单（提交后关联）
+  tripId: uuid('trip_id')
+    .references(() => trips.id),                      // 可选：关联已有行程
+
+  title: text('title').notNull(),                     // 行程标题，如"上海-北京出差"
+  purpose: text('purpose'),                           // 出差目的
+  startDate: timestamp('start_date'),                 // 行程开始日期
+  endDate: timestamp('end_date'),                     // 行程结束日期
+  destinations: jsonb('destinations').default([]),     // 目的地列表
+
+  status: itineraryStatusEnum('status').notNull().default('draft'),
+  aiGenerated: boolean('ai_generated').notNull().default(true), // 是否AI生成
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * 行程明细表（行程中的每个节点/事件）
+ */
+export const tripItineraryItems = pgTable('trip_itinerary_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  itineraryId: uuid('itinerary_id')
+    .notNull()
+    .references(() => tripItineraries.id, { onDelete: 'cascade' }),
+
+  date: timestamp('date').notNull(),                   // 日期
+  time: text('time'),                                  // 时间（可选，如 "08:00"）
+  type: text('type').notNull(),                        // 类型: transport, hotel, meal, meeting, other
+  category: text('category'),                          // 对应报销类别: flight, train, hotel, meal, taxi
+  title: text('title').notNull(),                      // 标题，如"北京→上海 G102"
+  description: text('description'),                    // 详细描述
+  location: text('location'),                          // 地点
+
+  // 交通信息
+  departure: text('departure'),                        // 出发地
+  arrival: text('arrival'),                            // 到达地
+  transportNumber: text('transport_number'),            // 车次/航班号
+
+  // 住宿信息
+  hotelName: text('hotel_name'),
+  checkIn: timestamp('check_in'),
+  checkOut: timestamp('check_out'),
+
+  // 费用关联
+  amount: real('amount'),                              // 关联金额
+  currency: text('currency'),                          // 币种
+  reimbursementItemId: uuid('reimbursement_item_id'),  // 关联的报销明细ID
+  receiptUrl: text('receipt_url'),                     // 关联的票据URL
+
+  sortOrder: integer('sort_order').notNull().default(0), // 排序顺序
+
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -679,6 +754,30 @@ export const tripsRelations = relations(trips, ({ one, many }) => ({
     references: [users.id],
   }),
   reimbursements: many(reimbursements),
+  itineraries: many(tripItineraries),
+}));
+
+export const tripItinerariesRelations = relations(tripItineraries, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [tripItineraries.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [tripItineraries.userId],
+    references: [users.id],
+  }),
+  trip: one(trips, {
+    fields: [tripItineraries.tripId],
+    references: [trips.id],
+  }),
+  items: many(tripItineraryItems),
+}));
+
+export const tripItineraryItemsRelations = relations(tripItineraryItems, ({ one }) => ({
+  itinerary: one(tripItineraries, {
+    fields: [tripItineraryItems.itineraryId],
+    references: [tripItineraries.id],
+  }),
 }));
 
 export const reimbursementsRelations = relations(reimbursements, ({ one, many }) => ({
@@ -801,6 +900,150 @@ export const advanceReconciliationsRelations = relations(advanceReconciliations,
 }));
 
 // ============================================================================
+// API Key 表（OpenClaw / M2M 集成）
+// ============================================================================
+
+/**
+ * API Key 表
+ * 支持外部 AI Agent（如 OpenClaw）以用户身份调用 API
+ *
+ * 设计原则：
+ * 1. 每个 API Key 绑定一个用户，代表该用户执行操作
+ * 2. 通过 scopes 控制 Agent 可执行的操作范围
+ * 3. 只存储 key 的 SHA-256 哈希，不存储明文
+ * 4. 支持过期时间和手动撤销
+ * 5. 内置速率限制配置
+ */
+export const apiKeys = pgTable('api_keys', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  // Key 标识
+  name: text('name').notNull(),                      // 用户自定义名称，如 "我的 OpenClaw Agent"
+  keyPrefix: text('key_prefix').notNull(),            // Key 前缀用于展示，如 "rk_a1b2c3..."
+  keyHash: text('key_hash').notNull().unique(),       // SHA-256 哈希值
+
+  // 权限范围
+  scopes: jsonb('scopes').$type<string[]>().notNull().default([]),
+
+  // Agent 元数据
+  agentType: text('agent_type'),                      // 'openclaw' | 'custom' | ...
+  agentMetadata: jsonb('agent_metadata'),             // Agent 的额外信息
+
+  // 速率限制
+  rateLimitPerMinute: integer('rate_limit_per_minute').notNull().default(60),
+  rateLimitPerDay: integer('rate_limit_per_day').notNull().default(1000),
+
+  // 金额限制（Agent 安全防护）
+  maxAmountPerRequest: real('max_amount_per_request'),  // 单次报销最大金额
+  maxAmountPerDay: real('max_amount_per_day'),          // 每日报销最大总金额
+
+  // 状态管理
+  isActive: boolean('is_active').notNull().default(true),
+  expiresAt: timestamp('expires_at'),                   // 可选的过期时间
+  lastUsedAt: timestamp('last_used_at'),
+  usageCount: integer('usage_count').notNull().default(0),
+
+  // 撤销信息
+  revokedAt: timestamp('revoked_at'),
+  revokedBy: uuid('revoked_by').references(() => users.id),
+  revokeReason: text('revoke_reason'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => [
+  // 认证时通过 keyHash 查找（核心热路径）
+  // keyHash 已有 unique 约束会自动创建索引，这里显式声明便于可读性
+  // 按用户列出其 API Keys
+  index('idx_api_keys_user').on(table.userId, table.tenantId),
+]);
+
+/**
+ * Agent 操作审计日志
+ * 记录所有通过 API Key 执行的操作，便于审计和追踪
+ */
+export const agentAuditLogs = pgTable('agent_audit_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  apiKeyId: uuid('api_key_id')
+    .notNull()
+    .references(() => apiKeys.id),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id),
+
+  // 操作信息
+  action: text('action').notNull(),                   // 'reimbursement:create', 'reimbursement:read' 等
+  method: text('method').notNull(),                   // HTTP method: GET, POST, PUT, DELETE
+  path: text('path').notNull(),                       // 请求路径
+  statusCode: integer('status_code'),                 // 响应状态码
+
+  // Agent 信息
+  agentType: text('agent_type'),                      // 'openclaw', 'custom' 等
+  agentVersion: text('agent_version'),                // Agent 版本号
+
+  // 请求/响应摘要
+  requestSummary: jsonb('request_summary'),            // 请求关键参数（脱敏）
+  responseSummary: jsonb('response_summary'),           // 响应摘要
+
+  // 资源信息
+  entityType: text('entity_type'),                     // 'reimbursement', 'receipt' 等
+  entityId: uuid('entity_id'),                         // 关联的资源 ID
+
+  // 元数据
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  durationMs: integer('duration_ms'),                  // 请求耗时
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => [
+  // 按租户+时间倒序查询（管理员全局视图的核心查询路径）
+  index('idx_agent_audit_tenant_created').on(table.tenantId, table.createdAt),
+  // 按 API Key 查询（某个 Key 的操作历史）
+  index('idx_agent_audit_apikey').on(table.apiKeyId, table.createdAt),
+  // 按用户查询（某个用户的所有 Agent 操作）
+  index('idx_agent_audit_user').on(table.userId, table.createdAt),
+  // 按操作类型筛选
+  index('idx_agent_audit_action').on(table.tenantId, table.action, table.createdAt),
+  // 按 Agent 类型筛选
+  index('idx_agent_audit_agent_type').on(table.tenantId, table.agentType, table.createdAt),
+]);
+
+export const apiKeysRelations = relations(apiKeys, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [apiKeys.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [apiKeys.userId],
+    references: [users.id],
+  }),
+  auditLogs: many(agentAuditLogs),
+}));
+
+export const agentAuditLogsRelations = relations(agentAuditLogs, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [agentAuditLogs.tenantId],
+    references: [tenants.id],
+  }),
+  apiKey: one(apiKeys, {
+    fields: [agentAuditLogs.apiKeyId],
+    references: [apiKeys.id],
+  }),
+  user: one(users, {
+    fields: [agentAuditLogs.userId],
+    references: [users.id],
+  }),
+}));
+
+// ============================================================================
 // 汇率相关表
 // ============================================================================
 
@@ -897,6 +1140,94 @@ export const exchangeRateRules = pgTable('exchange_rate_rules', {
 
   // 审计字段
   createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// ============================================================================
+// Service Account 表（系统间 M2M 认证）
+// ============================================================================
+
+/**
+ * Service Account 表
+ * 用于系统间（如 Accounting Agent ↔ Reimbursement Agent）的 API 认证
+ *
+ * 与 apiKeys 的区别：
+ * - apiKeys 绑定到具体用户，代表用户执行操作
+ * - serviceAccounts 是系统级身份，不绑定用户，通过 permissions 控制访问
+ */
+export const serviceAccounts = pgTable('service_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  serviceName: text('service_name').notNull().unique(),
+  description: text('description'),
+
+  // 认证
+  apiKeyHash: text('api_key_hash').notNull().unique(), // bcrypt hash
+  keyPrefix: text('key_prefix').notNull(),              // 展示用前缀
+
+  // 权限
+  permissions: jsonb('permissions').$type<string[]>().notNull().default([]),
+
+  // 状态
+  isActive: boolean('is_active').notNull().default(true),
+  lastUsedAt: timestamp('last_used_at'),
+  usageCount: integer('usage_count').notNull().default(0),
+
+  // 撤销
+  revokedAt: timestamp('revoked_at'),
+  revokeReason: text('revoke_reason'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// ============================================================================
+// 同步科目表（从 Accounting Agent 同步）
+// ============================================================================
+
+/**
+ * 同步的会计科目表
+ * 从 Accounting Agent 的 /api/external/chart-of-accounts 同步而来
+ */
+export const syncedAccounts = pgTable('synced_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  accountCode: text('account_code').notNull().unique(),
+  accountName: text('account_name').notNull(),
+  accountSubtype: text('account_subtype'),
+
+  syncedAt: timestamp('synced_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// ============================================================================
+// 报销汇总表（供 Accounting Agent 拉取）
+// ============================================================================
+
+/**
+ * 报销汇总记录
+ * 按半月周期 + GL 科目维度汇总已审批报销
+ */
+export const reimbursementSummaries = pgTable('reimbursement_summaries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  summaryId: text('summary_id').notNull().unique(), // REIMB-SUM-YYYYMM-A/B
+  periodStart: timestamp('period_start').notNull(),
+  periodEnd: timestamp('period_end').notNull(),
+
+  // 汇总数据 (JSON)
+  items: jsonb('items').notNull().default([]),
+  totalAmount: real('total_amount').notNull().default(0),
+  totalRecords: integer('total_records').notNull().default(0),
+  currency: text('currency').notNull().default('USD'),
+
+  // 同步状态
+  isSynced: boolean('is_synced').notNull().default(false),
+  syncedAt: timestamp('synced_at'),
+
+  generatedAt: timestamp('generated_at').notNull().defaultNow(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });

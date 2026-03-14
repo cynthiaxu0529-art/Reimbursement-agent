@@ -38,6 +38,13 @@ const authConfig = {
           Google({
             clientId: process.env.GOOGLE_CLIENT_ID,
             clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+            authorization: {
+              params: {
+                scope: 'openid email profile https://www.googleapis.com/auth/calendar.readonly',
+                access_type: 'offline',
+                prompt: 'consent',
+              },
+            },
           }),
         ]
       : []),
@@ -90,6 +97,8 @@ const authConfig = {
     async jwt({ token, user }: { token: any; user: any }) {
       if (user) {
         token.id = user.id;
+        token.name = user.name;
+        token.email = user.email;
       }
       return token;
     },
@@ -104,6 +113,8 @@ const authConfig = {
           });
 
           if (dbUser) {
+            session.user.name = dbUser.name;
+            session.user.email = dbUser.email;
             session.user.role = dbUser.role;
             session.user.tenantId = dbUser.tenantId ?? undefined;
           }
@@ -171,3 +182,32 @@ export {
   type Permission,
   type PermissionCheckResult,
 } from './permissions';
+
+// API Key 认证（OpenClaw / M2M 集成）
+export {
+  authenticate,
+  authenticateApiKey,
+  isApiKeyRequest,
+  generateApiKey,
+  hashApiKey,
+  logAgentAction,
+  type AuthContext,
+  type ApiKeyAuthContext,
+  type ApiKeyAuthError,
+} from './api-key';
+
+// Scope 权限控制
+export {
+  API_SCOPES,
+  SCOPE_METADATA,
+  SCOPE_PRESETS,
+  ROUTE_SCOPE_MAP,
+  hasScope,
+  getRequiredScope,
+  validateScopes,
+  checkScopeRoleRequirement,
+  getScopeCategory,
+  getScopesByCategory,
+  type ApiScope,
+  type ScopeMetadata,
+} from './scopes';

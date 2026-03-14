@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users, payments, approvalChain } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, payments, approvalChain, tenants, departments } from '@/lib/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import { createPaymentService } from '@/lib/mcp/fluxpay-client';
 import {
@@ -12,6 +12,12 @@ import {
 } from '@/lib/approval/approval-chain-service';
 import { getUserRoles } from '@/lib/auth/roles';
 import { canViewReimbursement } from '@/lib/department/department-service';
+import { apiError } from '@/lib/api-error';
+import { authenticate, logAgentAction } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
+import { exchangeRateService } from '@/lib/currency/exchange-service';
+import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
+import type { CurrencyType } from '@/types';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
@@ -20,6 +26,7 @@ type RouteParams = { params: Promise<{ id: string }> };
 
 /**
  * GET /api/reimbursements/[id] - 获取报销详情
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function GET(
   request: NextRequest,
@@ -30,13 +37,15 @@ export async function GET(
 
     // 验证 ID 格式
     if (!id || typeof id !== 'string' || id.length < 10) {
-      return NextResponse.json({ error: '无效的报销单ID' }, { status: 400 });
+      return apiError('无效的报销单ID', 400);
     }
 
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+    // 统一认证（支持 Session 和 API Key）
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_READ);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
     }
+    const authCtx = authResult.context;
 
     // 先查找报销单（不限制用户，因为审批人也需要查看）
     const reimbursement = await db.query.reimbursements.findFirst({
@@ -56,34 +65,38 @@ export async function GET(
     });
 
     if (!reimbursement) {
-      return NextResponse.json({ error: '报销单不存在' }, { status: 404 });
+      return apiError('报销单不存在', 404);
     }
 
-    // 检查权限：使用部门级数据隔离
-    const isOwner = reimbursement.userId === session.user.id;
+    // 检查权限：Agent 只能查看自己的报销单
+    const isOwner = reimbursement.userId === authCtx.userId;
+
+    if (authCtx.authType === 'api_key' && !isOwner) {
+      return apiError('Agent 只能查看自己的报销单', 403);
+    }
 
     if (!isOwner) {
       // 不是自己的报销，需要检查部门级权限
-      const isSameTenant = session.user.tenantId && reimbursement.tenantId === session.user.tenantId;
+      const isSameTenant = authCtx.tenantId && reimbursement.tenantId === authCtx.tenantId;
 
       if (!isSameTenant) {
-        return NextResponse.json({ error: '无权查看此报销单' }, { status: 403 });
+        return apiError('无权查看此报销单', 403);
       }
 
       // 获取当前用户完整信息和角色
       const currentUser = await db.query.users.findFirst({
-        where: eq(users.id, session.user.id),
+        where: eq(users.id, authCtx.userId),
       });
 
       if (!currentUser) {
-        return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+        return apiError('用户不存在', 404);
       }
 
       const userRoles = getUserRoles(currentUser);
 
       // 检查是否有权限查看该报销单（部门级数据隔离）
       const canView = await canViewReimbursement(
-        session.user.id,
+        authCtx.userId,
         reimbursement.userId,
         id,
         reimbursement.tenantId,
@@ -91,7 +104,7 @@ export async function GET(
       );
 
       if (!canView) {
-        return NextResponse.json({ error: '无权查看此报销单，该报销不在您管理的部门范围内' }, { status: 403 });
+        return apiError('无权查看此报销单，该报销不在您管理的部门范围内', 403);
       }
     }
 
@@ -106,7 +119,7 @@ export async function GET(
     // 检查当前用户是否可以审批
     let canApprove = false;
     try {
-      canApprove = await canUserApprove(id, session.user.id);
+      canApprove = await canUserApprove(id, authCtx.userId);
     } catch {
       // 忽略错误
     }
@@ -153,15 +166,13 @@ export async function GET(
     });
   } catch (error) {
     console.error('Get reimbursement error:', error);
-    return NextResponse.json(
-      { error: '获取报销详情失败' },
-      { status: 500 }
-    );
+    return apiError('获取报销详情失败', 500);
   }
 }
 
 /**
  * PUT /api/reimbursements/[id] - 更新报销单
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function PUT(
   request: NextRequest,
@@ -169,21 +180,24 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+
+    // 统一认证（支持 Session 和 API Key）
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_UPDATE);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
     }
+    const authCtx = authResult.context;
 
     // 检查报销单是否存在且属于当前用户
     const existing = await db.query.reimbursements.findFirst({
       where: and(
         eq(reimbursements.id, id),
-        eq(reimbursements.userId, session.user.id)
+        eq(reimbursements.userId, authCtx.userId)
       ),
     });
 
     if (!existing) {
-      return NextResponse.json({ error: '报销单不存在' }, { status: 404 });
+      return apiError('报销单不存在', 404);
     }
 
     const body = await request.json();
@@ -199,17 +213,54 @@ export async function PUT(
     // 如果有状态变更请求
     if (newStatus && newStatus !== existing.status) {
       if (!allowedTransitions[existing.status]?.includes(newStatus)) {
-        return NextResponse.json(
-          { error: `无法从 ${existing.status} 状态转换为 ${newStatus}` },
-          { status: 400 }
-        );
+        return apiError(`无法从 ${existing.status} 状态转换为 ${newStatus}`, 400, 'INVALID_STATUS_TRANSITION');
       }
     } else if (existing.status !== 'draft' && existing.status !== 'rejected') {
       // 如果不是状态变更，只有草稿或被驳回状态可以编辑内容
-      return NextResponse.json(
-        { error: '只有草稿或已驳回状态的报销单可以编辑' },
-        { status: 400 }
-      );
+      return apiError('只有草稿或已驳回状态的报销单可以编辑', 400, 'INVALID_STATUS_TRANSITION');
+    }
+
+    // 获取租户本位币
+    let tenantBaseCurrency = existing.baseCurrency || 'USD';
+    if (existing.tenantId) {
+      const tenantRecord = await db.query.tenants.findFirst({
+        where: eq(tenants.id, existing.tenantId),
+        columns: { baseCurrency: true },
+      });
+      if (tenantRecord?.baseCurrency) {
+        tenantBaseCurrency = tenantRecord.baseCurrency;
+      }
+    }
+
+    // 服务端汇率转换：如果 item 缺少 exchangeRate / amountInBaseCurrency，自动转换
+    if (items && items.length > 0) {
+      for (const item of items) {
+        const itemCurrency = (item.currency || 'CNY') as CurrencyType;
+        const itemAmount = parseFloat(item.amount) || 0;
+
+        if (itemCurrency === tenantBaseCurrency) {
+          item.exchangeRate = item.exchangeRate || 1;
+          item.amountInBaseCurrency = item.amountInBaseCurrency || itemAmount;
+          continue;
+        }
+
+        if (item.exchangeRate && item.amountInBaseCurrency && item.amountInBaseCurrency !== itemAmount) {
+          continue;
+        }
+
+        try {
+          const conversion = await exchangeRateService.convert({
+            amount: itemAmount,
+            fromCurrency: itemCurrency,
+            toCurrency: tenantBaseCurrency as CurrencyType,
+          });
+          item.exchangeRate = conversion.exchangeRate;
+          item.amountInBaseCurrency = conversion.convertedAmount;
+        } catch (err) {
+          console.warn(`Exchange rate conversion failed for ${itemCurrency} → ${tenantBaseCurrency}:`, err);
+          item.amountInBaseCurrency = item.amountInBaseCurrency || itemAmount;
+        }
+      }
     }
 
     // 计算原币总金额
@@ -218,7 +269,7 @@ export async function PUT(
       0
     ) || existing.totalAmount;
 
-    // 计算美元总金额
+    // 计算本位币总金额
     const usdTotal = totalAmountInBaseCurrency || items?.reduce(
       (sum: number, item: any) => sum + (item.amountInBaseCurrency || parseFloat(item.amount) || 0),
       0
@@ -252,7 +303,7 @@ export async function PUT(
       description: description ?? existing.description,
       totalAmount,
       totalAmountInBaseCurrency: usdTotal,
-      baseCurrency: 'USD',
+      baseCurrency: tenantBaseCurrency,
       status: finalStatus,
       submittedAt: submittedAt,
       updatedAt: new Date(),
@@ -277,19 +328,44 @@ export async function PUT(
         .delete(reimbursementItems)
         .where(eq(reimbursementItems.reimbursementId, id));
 
+      const parseDate = (dateStr: string): Date => {
+        if (!dateStr) return new Date();
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) return d;
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+          return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        }
+        return new Date();
+      };
+
       await db.insert(reimbursementItems).values(
-        items.map((item: any) => ({
-          reimbursementId: id,
-          category: item.category,
-          description: item.description || '',
-          amount: parseFloat(item.amount) || 0,
-          currency: item.currency || 'CNY',
-          amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
-          date: new Date(item.date),
-          location: item.location || null,
-          vendor: item.vendor || null,
-          receiptUrl: item.receiptUrl || null,
-        }))
+        items.map((item: any) => {
+          const itemData: any = {
+            reimbursementId: id,
+            category: item.category,
+            description: item.description || '',
+            amount: parseFloat(item.amount) || 0,
+            currency: item.currency || 'CNY',
+            exchangeRate: item.exchangeRate || null,
+            amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
+            date: new Date(item.date),
+            location: item.location || null,
+            vendor: item.vendor || null,
+            receiptUrl: item.receiptUrl || null,
+          };
+          // Hotel-specific fields
+          if (item.checkInDate) {
+            itemData.checkInDate = parseDate(item.checkInDate);
+          }
+          if (item.checkOutDate) {
+            itemData.checkOutDate = parseDate(item.checkOutDate);
+          }
+          if (item.nights) {
+            itemData.nights = parseInt(item.nights) || null;
+          }
+          return itemData;
+        })
       );
     }
 
@@ -308,7 +384,7 @@ export async function PUT(
         // 生成新的审批链
         generatedChain = await generateApprovalChain({
           reimbursementId: id,
-          userId: session.user.id,
+          userId: authCtx.userId,
           tenantId: existing.tenantId,
           totalAmount: usdTotal,
           categories,
@@ -326,15 +402,13 @@ export async function PUT(
     });
   } catch (error) {
     console.error('Update reimbursement error:', error);
-    return NextResponse.json(
-      { error: '更新报销单失败' },
-      { status: 500 }
-    );
+    return apiError('更新报销单失败', 500);
   }
 }
 
 /**
  * DELETE /api/reimbursements/[id] - 删除报销单
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function DELETE(
   request: NextRequest,
@@ -342,29 +416,29 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+
+    // 统一认证（支持 Session 和 API Key）
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_CANCEL);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
     }
+    const authCtx = authResult.context;
 
     // 检查报销单是否存在且属于当前用户
     const existing = await db.query.reimbursements.findFirst({
       where: and(
         eq(reimbursements.id, id),
-        eq(reimbursements.userId, session.user.id)
+        eq(reimbursements.userId, authCtx.userId)
       ),
     });
 
     if (!existing) {
-      return NextResponse.json({ error: '报销单不存在' }, { status: 404 });
+      return apiError('报销单不存在', 404);
     }
 
     // 只有草稿和已拒绝状态可以删除
     if (existing.status !== 'draft' && existing.status !== 'rejected') {
-      return NextResponse.json(
-        { error: '只有草稿或已拒绝状态的报销单可以删除' },
-        { status: 400 }
-      );
+      return apiError('只有草稿或已拒绝状态的报销单可以删除', 400, 'INVALID_STATUS_TRANSITION');
     }
 
     // 删除费用明细
@@ -387,16 +461,33 @@ export async function DELETE(
       .delete(reimbursements)
       .where(eq(reimbursements.id, id));
 
+    // Agent 审计日志
+    if (authCtx.authType === 'api_key' && authCtx.apiKey) {
+      logAgentAction({
+        tenantId: authCtx.tenantId!,
+        apiKeyId: authCtx.apiKey.id,
+        userId: authCtx.userId,
+        action: 'reimbursement:delete',
+        method: 'DELETE',
+        path: `/api/reimbursements/${id}`,
+        statusCode: 200,
+        agentType: authCtx.apiKey.agentType,
+        requestSummary: { reimbursementId: id },
+        responseSummary: { deleted: true },
+        entityType: 'reimbursement',
+        entityId: id,
+        ipAddress: request.headers.get('x-forwarded-for') || undefined,
+        userAgent: request.headers.get('user-agent') || undefined,
+      });
+    }
+
     return NextResponse.json({
       success: true,
       message: '删除成功',
     });
   } catch (error) {
     console.error('Delete reimbursement error:', error);
-    return NextResponse.json(
-      { error: '删除报销单失败' },
-      { status: 500 }
-    );
+    return apiError('删除报销单失败', 500);
   }
 }
 
@@ -411,7 +502,7 @@ export async function PATCH(
     const { id } = await params;
     const session = await auth();
     if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+      return apiError('未登录', 401);
     }
 
     const body = await request.json();
@@ -423,12 +514,12 @@ export async function PATCH(
     });
 
     if (!existing) {
-      return NextResponse.json({ error: '报销单不存在' }, { status: 404 });
+      return apiError('报销单不存在', 404);
     }
 
     // 检查权限：必须是同一租户
     if (existing.tenantId !== session.user.tenantId) {
-      return NextResponse.json({ error: '无权操作此报销单' }, { status: 403 });
+      return apiError('无权操作此报销单', 403);
     }
 
     // 获取当前用户完整信息和角色
@@ -437,7 +528,7 @@ export async function PATCH(
     });
 
     if (!currentUser) {
-      return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+      return apiError('用户不存在', 404);
     }
 
     const userRoles = getUserRoles(currentUser);
@@ -452,7 +543,7 @@ export async function PATCH(
     );
 
     if (!canView) {
-      return NextResponse.json({ error: '无权操作此报销单，该报销不在您管理的部门范围内' }, { status: 403 });
+      return apiError('无权操作此报销单，该报销不在您管理的部门范围内', 403);
     }
 
     // 检查是否存在审批链
@@ -495,7 +586,7 @@ export async function PATCH(
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : '审批操作失败';
-        return NextResponse.json({ error: errorMessage }, { status: 400 });
+        return apiError(errorMessage, 400, 'APPROVAL_FAILED');
       }
     }
 
@@ -509,10 +600,7 @@ export async function PATCH(
     };
 
     if (!validTransitions[existing.status]?.includes(newStatus)) {
-      return NextResponse.json(
-        { error: `无法从 ${existing.status} 状态转换为 ${newStatus}` },
-        { status: 400 }
-      );
+      return apiError(`无法从 ${existing.status} 状态转换为 ${newStatus}`, 400, 'INVALID_STATUS_TRANSITION');
     }
 
     // 更新报销单状态
@@ -538,6 +626,44 @@ export async function PATCH(
       .where(eq(reimbursements.id, id))
       .returning();
 
+    // 如果审批通过，根据提交人部门的费用性质自动打 account_code 标签
+    if (newStatus === 'approved') {
+      try {
+        // 获取提交人的部门信息（costCenter + 名称）
+        const submitter = await db.query.users.findFirst({
+          where: eq(users.id, existing.userId),
+        });
+        let costCenter: string | null = null;
+        let deptName: string | null = null;
+        if (submitter?.departmentId) {
+          const dept = await db.query.departments.findFirst({
+            where: eq(departments.id, submitter.departmentId),
+          });
+          costCenter = dept?.costCenter || null;
+          deptName = dept?.name || submitter.department || null;
+        } else {
+          deptName = submitter?.department || null;
+        }
+
+        const items = await db.query.reimbursementItems.findMany({
+          where: eq(reimbursementItems.reimbursementId, id),
+        });
+        for (const item of items) {
+          const mapping = await mapExpenseToAccount(item.category, item.description, costCenter, deptName);
+          await db.update(reimbursementItems)
+            .set({
+              coaCode: mapping.accountCode,
+              coaName: mapping.accountName,
+              updatedAt: new Date(),
+            })
+            .where(eq(reimbursementItems.id, item.id));
+        }
+      } catch (err) {
+        console.error('Failed to tag account_code on approval:', err);
+        // 不阻塞审批流程
+      }
+    }
+
     // 如果审批通过，自动发起支付
     let paymentResult = null;
     if (newStatus === 'approved') {
@@ -551,10 +677,7 @@ export async function PATCH(
     });
   } catch (error) {
     console.error('Update reimbursement status error:', error);
-    return NextResponse.json(
-      { error: '更新报销单状态失败' },
-      { status: 500 }
-    );
+    return apiError('更新报销单状态失败', 500);
   }
 }
 

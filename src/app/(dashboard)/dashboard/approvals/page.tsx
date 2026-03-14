@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 interface ReimbursementItem {
   id: string;
@@ -16,6 +17,10 @@ interface ReimbursementItem {
   receiptUrl?: string;
   receiptFileName?: string;
   vendor?: string;
+  // Hotel specific fields
+  checkInDate?: string;
+  checkOutDate?: string;
+  nights?: number;
   isOfficialInvoice?: boolean;
   documentCountry?: string;
   invoiceValidation?: {
@@ -144,8 +149,35 @@ const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): Risk
       const limitType = rule.limit.type;
 
       if (limitType === 'per_day') {
+        // Hotel items with nights: compare per-night cost against daily limit
+        const hotelItems = item.items?.filter(exp => exp.category === 'hotel' && ruleCategories.includes('hotel') && exp.nights && exp.nights > 0) || [];
+        for (const hotelExp of hotelItems) {
+          const perNightUSD = (hotelExp.amountInBaseCurrency || 0) / (hotelExp.nights || 1);
+          if (perNightUSD > limitAmountUSD) {
+            const overAmount = perNightUSD - limitAmountUSD;
+            const percentage = Math.round((overAmount / limitAmountUSD) * 100);
+            const dateLabel = hotelExp.checkInDate
+              ? `${hotelExp.checkInDate.split('T')[0]}~${(hotelExp.checkOutDate || '').split('T')[0]}`
+              : hotelExp.date?.split('T')[0] || '';
+            alerts.push({
+              id: `risk-hotel-${hotelExp.id}-pernight`,
+              type: 'over_budget',
+              level: percentage > 50 ? 'high' : 'medium',
+              itemId: hotelExp.id,
+              message: `酒店 ${dateLabel}（${hotelExp.nights}晚）每晚 $${perNightUSD.toFixed(0)} 超出每日限额 $${limitAmountUSD}`,
+              standardValue: limitAmountUSD,
+              actualValue: perNightUSD,
+              percentage,
+            });
+          }
+        }
+
+        // Non-hotel items: original per-date grouping logic
         for (const [date, dateItems] of Object.entries(itemsByDate)) {
-          const matchingItems = dateItems.filter(exp => ruleCategories.includes(exp.category));
+          const matchingItems = dateItems.filter(exp =>
+            ruleCategories.includes(exp.category) &&
+            !(exp.category === 'hotel' && exp.nights && exp.nights > 0)
+          );
           if (matchingItems.length === 0) continue;
 
           const dailyTotalUSD = matchingItems.reduce((sum, exp) => {
@@ -195,13 +227,27 @@ const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): Risk
 
   item.items?.forEach((expense) => {
     const catLabel = categoryLabels[expense.category]?.label || expense.category;
+
+    // Hotel items: warn if missing check-in/check-out dates or nights
+    if (expense.category === 'hotel' && (!expense.checkInDate || !expense.checkOutDate || !expense.nights)) {
+      alerts.push({
+        id: `risk-${expense.id}-hotel-dates`,
+        type: 'policy_violation',
+        level: 'medium',
+        itemId: expense.id,
+        message: `酒店住宿缺少入住/离店日期或住宿天数，无法核实每晚费用`,
+      });
+    }
+
     if (!expense.receiptUrl && expense.amount > 100) {
       alerts.push({
         id: `risk-${expense.id}-attachment`,
         type: 'missing_attachment',
-        level: 'low',
+        level: expense.category === 'hotel' ? 'high' : 'low',
         itemId: expense.id,
-        message: `${catLabel}费用缺少发票附件`,
+        message: expense.category === 'hotel'
+          ? `${catLabel}费用缺少发票和详单附件（酒店报销需提交发票及消费详单）`
+          : `${catLabel}费用缺少发票附件`,
       });
       return;
     }
@@ -221,6 +267,27 @@ const analyzeRisksWithPolicies = (item: Reimbursement, policies: Policy[]): Risk
 };
 
 export default function ApprovalsPage() {
+  const { t, language } = useLanguage();
+
+  const localCategoryLabels: Record<string, { label: string; icon: string }> = {
+    flight: { label: t.categories.flight, icon: '✈️' },
+    train: { label: t.categories.train, icon: '🚄' },
+    hotel: { label: t.categories.hotel, icon: '🏨' },
+    meal: { label: t.categories.meal, icon: '🍽️' },
+    taxi: { label: t.categories.taxi, icon: '🚕' },
+    office_supplies: { label: t.categories.office_supplies, icon: '📎' },
+    ai_token: { label: t.categories.ai_token, icon: '🤖' },
+    cloud_resource: { label: t.categories.cloud_resource, icon: '☁️' },
+    client_entertainment: { label: t.categories.client_entertainment, icon: '🤝' },
+    other: { label: t.categories.other, icon: '📦' },
+  };
+
+  const localRiskLevelConfig: Record<string, { icon: string; label: string; bgClass: string; textClass: string; borderClass: string }> = {
+    high: { icon: '🔴', label: t.riskLevels.high, bgClass: 'bg-red-50', textClass: 'text-red-700', borderClass: 'border-red-500' },
+    medium: { icon: '🟡', label: t.riskLevels.medium, bgClass: 'bg-amber-50', textClass: 'text-amber-700', borderClass: 'border-amber-500' },
+    low: { icon: '🟠', label: t.riskLevels.low, bgClass: 'bg-orange-50', textClass: 'text-orange-700', borderClass: 'border-orange-500' },
+  };
+
   const [filter, setFilter] = useState<'all' | 'pending' | 'auto'>('all');
   const [pendingApprovals, setPendingApprovals] = useState<Reimbursement[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<Reimbursement[]>([]);
@@ -356,11 +423,11 @@ export default function ApprovalsPage() {
         setExpandedId(null);
         setComment('');
       } else {
-        alert(result.error || '操作失败');
+        alert(result.error || t.common.operationFailed);
       }
     } catch (error) {
       console.error('Approve error:', error);
-      alert('操作失败');
+      alert(t.common.operationFailed);
     } finally {
       setProcessing(null);
     }
@@ -368,7 +435,7 @@ export default function ApprovalsPage() {
 
   const handleReject = async (id: string, reason: string) => {
     if (!reason) {
-      alert('请输入拒绝原因');
+      alert(t.approvals.enterRejectReason);
       return;
     }
     setProcessing(id);
@@ -390,11 +457,11 @@ export default function ApprovalsPage() {
         setExpandedId(null);
         setComment('');
       } else {
-        alert(result.error || '操作失败');
+        alert(result.error || t.common.operationFailed);
       }
     } catch (error) {
       console.error('Reject error:', error);
-      alert('操作失败');
+      alert(t.common.operationFailed);
     } finally {
       setProcessing(null);
     }
@@ -402,7 +469,7 @@ export default function ApprovalsPage() {
 
   const handleBatchApprove = async () => {
     if (selectedIds.length === 0) return;
-    if (!confirm(`确定要批量批准选中的 ${selectedIds.length} 项报销申请吗？`)) return;
+    if (!confirm(`${t.approvals.confirmBatchApprove}${selectedIds.length}${t.approvals.confirmBatchSuffix}`)) return;
 
     setBatchProcessing(true);
     let successCount = 0;
@@ -413,7 +480,7 @@ export default function ApprovalsPage() {
         const response = await fetch(`/api/reimbursements/${id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'approved', comment: '批量审批通过' }),
+          body: JSON.stringify({ status: 'approved', comment: t.approvals.batchApproveComment }),
         });
         const result = await response.json();
         if (result.success) {
@@ -434,7 +501,7 @@ export default function ApprovalsPage() {
     setPendingApprovals(prev => prev.filter(a => !selectedIds.includes(a.id)));
     setSelectedIds([]);
     setBatchProcessing(false);
-    alert(`批量审批完成：${successCount} 项成功${failCount > 0 ? `，${failCount} 项失败` : ''}`);
+    alert(`${t.approvals.batchComplete}${successCount}${t.approvals.batchSuccess}${failCount > 0 ? `, ${failCount}${t.approvals.batchFailed}` : ''}`);
   };
 
   const toggleSelect = (id: string) => {
@@ -461,7 +528,7 @@ export default function ApprovalsPage() {
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+    return new Date(dateStr).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric' });
   };
 
   const getRiskCount = (item: Reimbursement) => item.riskAlerts?.length || 0;
@@ -475,12 +542,12 @@ export default function ApprovalsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">团队报销审批</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{t.approvals.title}</h1>
           <p className="text-sm text-gray-500 mt-1">
             {stats.pending > 0 ? (
-              <>您有 <span className="text-blue-600 font-medium">{stats.pending} 项待审批</span> 的报销申请</>
+              <>{t.approvals.pendingCount}<span className="text-blue-600 font-medium">{stats.pending}{t.approvals.pendingItems}</span>{t.approvals.pendingSuffix}</>
             ) : (
-              '暂无待审批的报销申请'
+              t.approvals.noPending
             )}
           </p>
         </div>
@@ -492,11 +559,11 @@ export default function ApprovalsPage() {
               className="bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white shadow-md"
             >
               {batchProcessing ? (
-                '处理中...'
+                t.approvals.processingBatch
               ) : (
                 <>
                   <span className="mr-2">☰</span>
-                  批量批准 ({selectedIds.length})
+                  {t.approvals.batchApprove} ({selectedIds.length})
                 </>
               )}
             </Button>
@@ -509,11 +576,11 @@ export default function ApprovalsPage() {
         <Card className="p-5 border-l-4 border-l-amber-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500 mb-1">待审批</p>
+              <p className="text-sm text-gray-500 mb-1">{t.approvals.pendingStat}</p>
               <p className="text-3xl font-bold text-gray-900">{stats.pending}</p>
               {stats.withRisks > 0 && (
                 <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                  <span>⚠️</span> {stats.withRisks} 项有风险提示
+                  <span>⚠️</span> {stats.withRisks}{t.approvals.riskWarning}
                 </p>
               )}
             </div>
@@ -526,11 +593,11 @@ export default function ApprovalsPage() {
         <Card className="p-5 border-l-4 border-l-blue-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500 mb-1">待审批金额</p>
+              <p className="text-sm text-gray-500 mb-1">{t.approvals.pendingAmount}</p>
               <p className="text-3xl font-bold text-gray-900">
                 ${stats.totalRequested.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
-              <p className="text-xs text-green-600 mt-1">本月报销</p>
+              <p className="text-xs text-green-600 mt-1">{t.approvals.thisMonth}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-2xl">
               💰
@@ -541,9 +608,9 @@ export default function ApprovalsPage() {
         <Card className="p-5 border-l-4 border-l-green-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500 mb-1">已处理</p>
+              <p className="text-sm text-gray-500 mb-1">{t.approvals.processed}</p>
               <p className="text-3xl font-bold text-gray-900">{stats.processed}</p>
-              <p className="text-xs text-gray-500 mt-1">历史审批记录</p>
+              <p className="text-xs text-gray-500 mt-1">{t.approvals.historyRecords}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center text-2xl">
               ✅
@@ -562,7 +629,7 @@ export default function ApprovalsPage() {
               : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
           }`}
         >
-          全部请求
+          {t.approvals.allRequests}
         </button>
         <button
           onClick={() => setFilter('pending')}
@@ -572,14 +639,14 @@ export default function ApprovalsPage() {
               : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
           }`}
         >
-          <span>⏳</span> 待处理
+          <span>⏳</span> {t.approvals.pendingProcess}
         </button>
       </div>
 
       {/* Main Content */}
       <Card className="flex-1 overflow-hidden">
         {loading && (
-          <div className="p-10 text-center text-gray-500">加载中...</div>
+          <div className="p-10 text-center text-gray-500">{t.common.loading}</div>
         )}
 
         {!loading && filteredList.length === 0 && (
@@ -587,8 +654,8 @@ export default function ApprovalsPage() {
             <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-4xl">
               ✅
             </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">没有待审批的报销</h3>
-            <p className="text-gray-500">当团队成员提交报销申请后，将会在这里显示</p>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{t.approvals.noPendingApprovals}</h3>
+            <p className="text-gray-500">{t.approvals.pendingWillShow}</p>
           </div>
         )}
 
@@ -604,11 +671,11 @@ export default function ApprovalsPage() {
                   className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
               </div>
-              <div>申请人 / 报销说明</div>
-              <div className="text-right">金额</div>
-              <div className="text-center">状态</div>
-              <div className="text-center">操作</div>
-              <div className="text-center">风险</div>
+              <div>{t.approvals.applicantDesc}</div>
+              <div className="text-right">{t.approvals.amount}</div>
+              <div className="text-center">{t.approvals.status}</div>
+              <div className="text-center">{t.approvals.actionsHeader}</div>
+              <div className="text-center">{t.approvals.risk}</div>
             </div>
 
             {/* List Items */}
@@ -642,13 +709,13 @@ export default function ApprovalsPage() {
                     >
                       {/* Avatar */}
                       <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
-                        {item.submitter?.name?.slice(0, 2) || '用户'}
+                        {item.submitter?.name?.slice(0, 2) || t.common.user}
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="font-semibold text-gray-900">{item.submitter?.name || '用户'}</p>
+                          <p className="font-semibold text-gray-900">{item.submitter?.name || t.common.user}</p>
                           <span className="text-xs text-gray-400">•</span>
-                          <span className="text-xs text-gray-500">{item.items?.length || 0} 项费用</span>
+                          <span className="text-xs text-gray-500">{item.items?.length || 0}{t.approvals.expenseCount}</span>
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
                           <p className="text-sm text-gray-600 truncate">{item.title}</p>
@@ -672,7 +739,7 @@ export default function ApprovalsPage() {
 
                     {/* Status */}
                     <div className="text-center">
-                      <Badge variant="warning">待审批</Badge>
+                      <Badge variant="warning">{t.approvals.pendingStat}</Badge>
                     </div>
 
                     {/* Actions */}
@@ -683,20 +750,20 @@ export default function ApprovalsPage() {
                         disabled={processing === item.id}
                         className="bg-green-600 hover:bg-green-700 text-white text-xs px-3"
                       >
-                        {processing === item.id ? '...' : '批准'}
+                        {processing === item.id ? '...' : t.approvals.approve}
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const reason = prompt('请输入拒绝原因：');
+                          const reason = prompt(t.approvals.enterRejectReason);
                           if (reason) handleReject(item.id, reason);
                         }}
                         disabled={processing === item.id}
                         className="text-red-600 border-red-200 hover:bg-red-50 text-xs px-3"
                       >
-                        拒绝
+                        {t.approvals.reject}
                       </Button>
                     </div>
 
@@ -720,12 +787,12 @@ export default function ApprovalsPage() {
                         {expandedData.riskAlerts && expandedData.riskAlerts.length > 0 && (
                           <div className="mb-5 p-4 bg-red-50 rounded-xl border border-red-200">
                             <h4 className="text-sm font-semibold text-red-700 mb-3 flex items-center gap-2">
-                              ⚠️ 风险提示
+                              {t.approvals.riskAlerts}
                             </h4>
                             <div className="space-y-2">
                               {expandedData.riskAlerts.map((alert) => (
-                                <div key={alert.id} className={`flex items-center gap-2 p-2.5 bg-white rounded-lg border-l-4 ${riskLevelConfig[alert.level].borderClass}`}>
-                                  <span>{riskLevelConfig[alert.level].icon}</span>
+                                <div key={alert.id} className={`flex items-center gap-2 p-2.5 bg-white rounded-lg border-l-4 ${localRiskLevelConfig[alert.level].borderClass}`}>
+                                  <span>{localRiskLevelConfig[alert.level].icon}</span>
                                   <span className="text-sm text-gray-700">{alert.message}</span>
                                 </div>
                               ))}
@@ -737,7 +804,7 @@ export default function ApprovalsPage() {
                         {expandedData.approvalChain && expandedData.approvalChain.length > 0 && (
                           <div className="mb-5 p-4 bg-blue-50 rounded-xl border border-blue-200">
                             <h4 className="text-sm font-semibold text-blue-700 mb-3 flex items-center gap-2">
-                              📋 审批流程
+                              {t.approvals.approvalProcess}
                             </h4>
                             <div className="flex items-center gap-2 flex-wrap">
                               {expandedData.approvalChain.map((step, idx) => {
@@ -777,7 +844,7 @@ export default function ApprovalsPage() {
                               })}
                             </div>
                             {expandedData.canApprove && (
-                              <p className="mt-3 text-sm text-blue-600 font-medium">✨ 当前轮到您审批</p>
+                              <p className="mt-3 text-sm text-blue-600 font-medium">{t.approvals.yourTurnToApprove}</p>
                             )}
                           </div>
                         )}
@@ -786,16 +853,16 @@ export default function ApprovalsPage() {
                         <div className="grid grid-cols-[1fr_280px] gap-5">
                           {/* Line Items */}
                           <div>
-                            <h4 className="text-sm font-semibold text-gray-700 mb-3">费用明细</h4>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-3">{t.approvals.expenseDetails}</h4>
                             <div className="bg-gray-50 rounded-xl overflow-hidden">
                               <div className="grid grid-cols-[1fr_100px_100px_100px] gap-2 px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase border-b">
-                                <div>描述</div>
-                                <div className="text-center">日期</div>
-                                <div className="text-right">金额</div>
-                                <div className="text-right">美元</div>
+                                <div>{t.approvals.descriptionHeader}</div>
+                                <div className="text-center">{t.approvals.dateHeader}</div>
+                                <div className="text-right">{t.approvals.amountHeader}</div>
+                                <div className="text-right">{t.approvals.usdHeader}</div>
                               </div>
                               {expandedData.items?.map((lineItem, idx) => {
-                                const catInfo = categoryLabels[lineItem.category] || categoryLabels.other;
+                                const catInfo = localCategoryLabels[lineItem.category] || localCategoryLabels.other;
                                 const itemUsd = lineItem.amountInBaseCurrency || 0;
                                 const itemCurrency = lineItem.currency || 'CNY';
                                 const itemSymbol = currencySymbols[itemCurrency] || itemCurrency;
@@ -809,10 +876,31 @@ export default function ApprovalsPage() {
                                       <div>
                                         <p className="text-sm font-medium text-gray-900">{lineItem.description || catInfo.label}</p>
                                         {lineItem.vendor && <p className="text-xs text-gray-500">{lineItem.vendor}</p>}
+                                        {lineItem.category === 'hotel' && (lineItem.checkInDate || lineItem.checkOutDate || lineItem.nights) && (
+                                          <div className="flex items-center gap-1.5 mt-1">
+                                            {lineItem.checkInDate && lineItem.checkOutDate && (
+                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-xs text-blue-700">
+                                                {formatDate(lineItem.checkInDate)} ~ {formatDate(lineItem.checkOutDate)}
+                                              </span>
+                                            )}
+                                            {lineItem.nights && (
+                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-50 text-xs text-purple-700">
+                                                {lineItem.nights}{language === 'zh' ? '晚' : (lineItem.nights > 1 ? ' nights' : ' night')}
+                                              </span>
+                                            )}
+                                            {lineItem.nights && lineItem.amountInBaseCurrency ? (
+                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-xs text-gray-600">
+                                                ${(lineItem.amountInBaseCurrency / lineItem.nights).toFixed(0)}/{language === 'zh' ? '晚' : 'night'}
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                        )}
                                       </div>
                                     </div>
                                     <div className="text-center text-sm text-gray-600">
-                                      {formatDate(lineItem.date)}
+                                      {lineItem.category === 'hotel' && lineItem.checkInDate
+                                        ? formatDate(lineItem.checkInDate)
+                                        : formatDate(lineItem.date)}
                                     </div>
                                     <div className="text-right text-sm font-medium text-gray-900">
                                       {itemSymbol}{lineItem.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
@@ -825,7 +913,7 @@ export default function ApprovalsPage() {
                               })}
                               {/* Total */}
                               <div className="grid grid-cols-[1fr_100px_100px_100px] gap-2 px-4 py-3 bg-gray-100 border-t">
-                                <div className="text-sm font-semibold text-gray-700">合计</div>
+                                <div className="text-sm font-semibold text-gray-700">{t.approvals.total}</div>
                                 <div></div>
                                 <div className="text-right text-sm font-semibold text-gray-700">
                                   ¥{expandedData.totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
@@ -839,10 +927,10 @@ export default function ApprovalsPage() {
 
                           {/* Attachments */}
                           <div>
-                            <h4 className="text-sm font-semibold text-gray-700 mb-3">附件凭证</h4>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-3">{t.approvals.attachments}</h4>
                             <div className="space-y-2">
                               {expandedData.items?.filter(i => i.receiptUrl).map((lineItem, idx) => {
-                                const catInfo = categoryLabels[lineItem.category] || categoryLabels.other;
+                                const catInfo = localCategoryLabels[lineItem.category] || localCategoryLabels.other;
                                 return (
                                   <div
                                     key={idx}
@@ -858,7 +946,7 @@ export default function ApprovalsPage() {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <p className="text-sm font-medium text-gray-900 truncate">
-                                        {lineItem.receiptFileName || `${catInfo.label}凭证`}
+                                        {lineItem.receiptFileName || `${catInfo.label} ${t.approvals.receipt}`}
                                       </p>
                                       <p className="text-xs text-gray-500">{catInfo.label}</p>
                                     </div>
@@ -876,7 +964,7 @@ export default function ApprovalsPage() {
                               })}
                               {!expandedData.items?.some(i => i.receiptUrl) && (
                                 <div className="p-4 text-center text-gray-500 text-sm bg-gray-50 rounded-lg">
-                                  暂无附件
+                                  {t.approvals.noAttachments}
                                 </div>
                               )}
                             </div>
@@ -888,18 +976,18 @@ export default function ApprovalsPage() {
                                 disabled={processing === item.id}
                                 className="flex-1 bg-green-600 hover:bg-green-700 text-white"
                               >
-                                {processing === item.id ? '处理中...' : '✓ 批准'}
+                                {processing === item.id ? t.approvals.processingBatch : `✓ ${t.approvals.approve}`}
                               </Button>
                               <Button
                                 variant="outline"
                                 onClick={() => {
-                                  const reason = prompt('请输入拒绝原因：');
+                                  const reason = prompt(t.approvals.enterRejectReason);
                                   if (reason) handleReject(item.id, reason);
                                 }}
                                 disabled={processing === item.id}
                                 className="flex-1 text-red-600 border-red-200 hover:bg-red-50"
                               >
-                                ✕ 拒绝
+                                ✕ {t.approvals.reject}
                               </Button>
                             </div>
                           </div>
@@ -924,7 +1012,7 @@ export default function ApprovalsPage() {
           <div className="relative max-w-[90vw] max-h-[90vh]">
             <img
               src={previewImage}
-              alt="凭证预览"
+              alt={t.reimbursements.receiptPreview}
               className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
             />
             <button

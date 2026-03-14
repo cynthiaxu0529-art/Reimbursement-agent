@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { policies, users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
+import { apiError } from '@/lib/api-error';
 
 // Default policies based on company requirements
 const createDefaultPolicies = (tenantId: string) => [
@@ -90,7 +91,7 @@ export async function GET() {
   try {
     const session = await auth();
     if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+      return apiError('未登录', 401);
     }
 
     const user = await db.query.users.findFirst({
@@ -98,7 +99,7 @@ export async function GET() {
     });
 
     if (!user?.tenantId) {
-      return NextResponse.json({ error: '未关联公司' }, { status: 404 });
+      return apiError('未关联公司', 404, 'NO_TENANT');
     }
 
     // 获取该租户的所有政策
@@ -136,7 +137,7 @@ export async function GET() {
     });
   } catch (error) {
     console.error('Get policies error:', error);
-    return NextResponse.json({ error: '获取政策失败' }, { status: 500 });
+    return apiError('获取政策失败', 500);
   }
 }
 
@@ -147,7 +148,7 @@ export async function POST(request: NextRequest) {
   try {
     const session = await auth();
     if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+      return apiError('未登录', 401);
     }
 
     const user = await db.query.users.findFirst({
@@ -155,19 +156,19 @@ export async function POST(request: NextRequest) {
     });
 
     if (!user?.tenantId) {
-      return NextResponse.json({ error: '未关联公司' }, { status: 404 });
+      return apiError('未关联公司', 404, 'NO_TENANT');
     }
 
     // 检查权限
     if (user.role !== 'admin' && user.role !== 'super_admin' && user.role !== 'finance') {
-      return NextResponse.json({ error: '无权限创建政策' }, { status: 403 });
+      return apiError('无权限创建政策', 403, 'ROLE_INSUFFICIENT');
     }
 
     const body = await request.json();
     const { name, description, isActive, priority, rules } = body;
 
     if (!name) {
-      return NextResponse.json({ error: '政策名称不能为空' }, { status: 400 });
+      return apiError('政策名称不能为空', 400, 'MISSING_REQUIRED_FIELDS');
     }
 
     const newPolicy = await db.insert(policies).values({
@@ -187,6 +188,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Create policy error:', error);
-    return NextResponse.json({ error: '创建政策失败' }, { status: 500 });
+    return apiError('创建政策失败', 500);
   }
 }

@@ -4,17 +4,20 @@ import { useState, Suspense } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { useLanguage } from '@/contexts/LanguageContext';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get('callbackUrl') || '/dashboard';
   const error = searchParams.get('error');
+  const { t } = useLanguage();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState(error ? '登录失败，请重试' : '');
+  const [errorMsg, setErrorMsg] = useState(error ? t.login.loginFailed : '');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,12 +32,12 @@ function LoginForm() {
       });
 
       if (result?.error) {
-        setErrorMsg('邮箱或密码错误');
+        setErrorMsg(t.login.wrongCredentials);
       } else {
         router.push(callbackUrl);
       }
     } catch {
-      setErrorMsg('登录失败，请稍后重试');
+      setErrorMsg(t.login.loginFailedRetry);
     } finally {
       setIsLoading(false);
     }
@@ -50,6 +53,11 @@ function LoginForm() {
       padding: '1rem'
     }}>
       <div style={{ width: '100%', maxWidth: '400px' }}>
+        {/* Language Switcher */}
+        <div style={{ textAlign: 'right', marginBottom: '1rem' }}>
+          <LanguageSwitcher />
+        </div>
+
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <Link href="/" style={{ textDecoration: 'none' }}>
@@ -67,10 +75,10 @@ function LoginForm() {
             </div>
           </Link>
           <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#111827', marginBottom: '0.5rem' }}>
-            欢迎回来
+            {t.login.welcomeBack}
           </h1>
           <p style={{ color: '#6b7280' }}>
-            登录你的账号继续使用
+            {t.login.loginDesc}
           </p>
         </div>
 
@@ -104,7 +112,7 @@ function LoginForm() {
                 color: '#374151',
                 marginBottom: '0.5rem'
               }}>
-                邮箱
+                {t.login.email}
               </label>
               <input
                 type="email"
@@ -132,7 +140,7 @@ function LoginForm() {
                 color: '#374151',
                 marginBottom: '0.5rem'
               }}>
-                密码
+                {t.login.password}
               </label>
               <input
                 type="password"
@@ -167,16 +175,16 @@ function LoginForm() {
                 cursor: isLoading ? 'not-allowed' : 'pointer'
               }}
             >
-              {isLoading ? '登录中...' : '登录'}
+              {isLoading ? t.login.loggingIn : t.login.loginButton}
             </button>
           </form>
         </div>
 
         {/* Register Link */}
         <p style={{ textAlign: 'center', marginTop: '1.5rem', color: '#6b7280' }}>
-          还没有账号？{' '}
+          {t.login.noAccount}{' '}
           <Link href="/register" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>
-            免费注册
+            {t.login.registerFree}
           </Link>
         </p>
       </div>
@@ -194,7 +202,7 @@ export default function LoginPage() {
         justifyContent: 'center',
         backgroundColor: '#f8fafc'
       }}>
-        <p>加载中...</p>
+        <p>Loading...</p>
       </div>
     }>
       <LoginForm />

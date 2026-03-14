@@ -165,7 +165,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     const body = await request.json();
-    const { name, code, description, parentId, managerId, approverIds, sortOrder, isActive } = body;
+    const { name, code, description, parentId, managerId, approverIds, sortOrder, isActive, costCenter } = body;
 
     // 如果更新名称，检查是否重复
     if (name && name !== existing.name) {
@@ -231,6 +231,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (approverIds !== undefined) updateData.approverIds = approverIds;
     if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
     if (isActive !== undefined) updateData.isActive = isActive;
+    if (costCenter !== undefined) updateData.costCenter = costCenter || null;
 
     const [updated] = await db
       .update(departments)

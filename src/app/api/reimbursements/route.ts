@@ -1,24 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users, tenants } from '@/lib/db/schema';
-import { eq, desc, and, or, inArray } from 'drizzle-orm';
+import { reimbursements, reimbursementItems, users, tenants, tripItineraries, tripItineraryItems } from '@/lib/db/schema';
+import { eq, desc, and, or, inArray, sql } from 'drizzle-orm';
 import { getUserRoles, canApprove, canProcessPayment, isAdmin } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
 import { checkItemsLimit } from '@/lib/policy/limit-service';
+import { authenticate, logAgentAction, type AuthContext } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
+import { createChatCompletion, extractTextContent } from '@/lib/ai/openrouter-client';
+import { apiError } from '@/lib/api-error';
+import { getIdempotencyKey, getCachedResponse, cacheResponse } from '@/lib/idempotency';
+import { exchangeRateService } from '@/lib/currency/exchange-service';
+import type { CurrencyType } from '@/types';
 
 // 强制动态渲染，避免构建时预渲染
 export const dynamic = 'force-dynamic';
 
+/** 向响应注入 Rate Limit header（如果有） */
+function withRateHeaders(response: NextResponse, authCtx: AuthContext): NextResponse {
+  if (authCtx.rateLimit) {
+    response.headers.set('X-RateLimit-Limit', String(authCtx.rateLimit.limit));
+    response.headers.set('X-RateLimit-Remaining', String(authCtx.rateLimit.remaining));
+    response.headers.set('X-RateLimit-Reset', String(authCtx.rateLimit.resetAt));
+  }
+  return response;
+}
+
 /**
  * GET /api/reimbursements - 获取报销列表
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+    // 统一认证（自动判断 Session 或 API Key）
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_READ);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
     }
+    const authCtx = authResult.context;
+    const startTime = Date.now();
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
@@ -29,11 +50,11 @@ export async function GET(request: NextRequest) {
 
     // 获取用户实际的数据库角色
     const currentUser = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
+      where: eq(users.id, authCtx.userId),
     });
 
     if (!currentUser) {
-      return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+      return apiError('用户不存在', 404);
     }
 
     // 获取用户的角色数组（支持多角色）
@@ -42,16 +63,19 @@ export async function GET(request: NextRequest) {
     // 构建查询条件
     const conditions: any[] = [];
 
+    // API Key 认证时，Agent 默认只能看绑定用户自己的报销（安全限制）
+    const isAgentRequest = authCtx.authType === 'api_key';
+
     // 验证角色权限并应用部门级数据隔离
-    if (role === 'approver' && currentUser.tenantId) {
+    if (role === 'approver' && currentUser.tenantId && !isAgentRequest) {
       // 检查用户是否有审批权限（admin也可以查看和审批）
       if (!canApprove(userRoles) && !isAdmin(userRoles)) {
-        return NextResponse.json({ error: '无审批权限' }, { status: 403 });
+        return apiError('无审批权限', 403, 'ROLE_INSUFFICIENT');
       }
 
       // 获取用户可以查看的报销提交人ID列表（部门级数据隔离）
       const visibleUserIds = await getVisibleUserIds(
-        session.user.id,
+        authCtx.userId,
         currentUser.tenantId,
         userRoles
       );
@@ -65,26 +89,26 @@ export async function GET(request: NextRequest) {
         conditions.push(inArray(reimbursements.userId, visibleUserIds));
       } else {
         // 没有管理任何部门，只能看自己的
-        conditions.push(eq(reimbursements.userId, session.user.id));
+        conditions.push(eq(reimbursements.userId, authCtx.userId));
       }
 
       // 如果只看自己处理的（批准或驳回）
       if (myApprovals) {
         conditions.push(or(
-          eq(reimbursements.approvedBy, session.user.id),
-          eq(reimbursements.rejectedBy, session.user.id)
+          eq(reimbursements.approvedBy, authCtx.userId),
+          eq(reimbursements.rejectedBy, authCtx.userId)
         ));
       }
-    } else if (role === 'finance' && currentUser.tenantId) {
+    } else if (role === 'finance' && currentUser.tenantId && !isAgentRequest) {
       // 检查用户是否有财务权限
       if (!canProcessPayment(userRoles)) {
-        return NextResponse.json({ error: '无财务权限' }, { status: 403 });
+        return apiError('无财务权限', 403, 'ROLE_INSUFFICIENT');
       }
       // 财务可以看同租户所有报销（需要处理付款）
       conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
     } else {
-      // 员工模式：只看自己的
-      conditions.push(eq(reimbursements.userId, session.user.id));
+      // 员工模式 / Agent 模式：只看自己的
+      conditions.push(eq(reimbursements.userId, authCtx.userId));
     }
 
     // 支持多个状态（逗号分隔）
@@ -103,25 +127,34 @@ export async function GET(request: NextRequest) {
     const isApproverOrFinance = (role === 'approver' && (canApprove(userRoles) || isAdmin(userRoles))) ||
                                  (role === 'finance' && canProcessPayment(userRoles));
 
-    // 查询报销列表
-    const list = await db.query.reimbursements.findMany({
-      where: and(...conditions),
-      orderBy: [desc(reimbursements.createdAt)],
-      limit: pageSize,
-      offset: (page - 1) * pageSize,
-      with: {
-        items: true,
-        user: isApproverOrFinance ? {
-          columns: {
-            id: true,
-            name: true,
-            email: true,
-            avatar: true,
-            department: true,
-          },
-        } : undefined,
-      },
-    });
+    // 并行查询：报销列表 + 总数
+    const whereClause = and(...conditions);
+
+    const [list, countResult] = await Promise.all([
+      db.query.reimbursements.findMany({
+        where: whereClause,
+        orderBy: [desc(reimbursements.createdAt)],
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+        with: {
+          items: true,
+          user: isApproverOrFinance ? {
+            columns: {
+              id: true,
+              name: true,
+              email: true,
+              avatar: true,
+              department: true,
+            },
+          } : undefined,
+        },
+      }),
+      db.select({ count: sql<number>`count(*)::int` })
+        .from(reimbursements)
+        .where(whereClause),
+    ]);
+
+    const total = countResult[0]?.count ?? 0;
 
     // Transform data to include submitter info for approver mode
     const transformedList = list.map((item: any) => ({
@@ -135,51 +168,98 @@ export async function GET(request: NextRequest) {
       user: undefined, // Remove the raw user object
     }));
 
-    return NextResponse.json({
+    const response = {
       success: true,
       data: transformedList,
-      meta: { page, pageSize },
-    });
+      meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+    };
+
+    // Agent 审计日志
+    if (authCtx.authType === 'api_key' && authCtx.apiKey) {
+      logAgentAction({
+        tenantId: authCtx.tenantId!,
+        apiKeyId: authCtx.apiKey.id,
+        userId: authCtx.userId,
+        action: 'reimbursement:read',
+        method: 'GET',
+        path: '/api/reimbursements',
+        statusCode: 200,
+        agentType: authCtx.apiKey.agentType,
+        requestSummary: { status, role, page, pageSize },
+        responseSummary: { count: transformedList.length },
+        entityType: 'reimbursement',
+        ipAddress: request.headers.get('x-forwarded-for') || undefined,
+        userAgent: request.headers.get('user-agent') || undefined,
+        durationMs: Date.now() - startTime,
+      });
+    }
+
+    return withRateHeaders(NextResponse.json(response), authCtx);
   } catch (error) {
     console.error('Get reimbursements error:', error);
-    return NextResponse.json(
-      { error: '获取报销列表失败' },
-      { status: 500 }
-    );
+    return apiError('获取报销列表失败', 500);
   }
 }
 
 /**
  * POST /api/reimbursements - 创建报销单
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+    // 幂等性检查：如果有 Idempotency-Key 且已缓存，直接返回
+    const idempotencyKey = getIdempotencyKey(request);
+    if (idempotencyKey) {
+      const cached = getCachedResponse(idempotencyKey);
+      if (cached) return cached;
     }
+
+    // 统一认证
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_CREATE);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
+    }
+    const authCtx = authResult.context;
+    const startTime = Date.now();
 
     const body = await request.json();
     const { title, description, tripId, items, status: submitStatus, totalAmountInBaseCurrency } = body;
 
     if (!title || !items || items.length === 0) {
-      return NextResponse.json(
-        { error: '请填写标题和至少一项费用' },
-        { status: 400 }
-      );
+      return apiError('请填写标题和至少一项费用', 400, 'MISSING_REQUIRED_FIELDS');
     }
 
     // 检查用户是否有公司
-    if (!session.user.tenantId) {
-      return NextResponse.json(
-        { error: '请先在设置中创建或加入公司，才能提交报销' },
-        { status: 400 }
+    const tenantId = authCtx.tenantId;
+    if (!tenantId) {
+      return apiError('请先在设置中创建或加入公司，才能提交报销', 400, 'NO_TENANT');
+    }
+
+    // Agent 金额限制检查
+    if (authCtx.authType === 'api_key' && authCtx.apiKey?.limits.maxAmountPerRequest) {
+      const requestTotal = items.reduce(
+        (sum: number, item: any) => sum + (parseFloat(item.amount) || 0), 0
       );
+      if (requestTotal > authCtx.apiKey.limits.maxAmountPerRequest) {
+        return apiError(
+          `Agent 单次报销金额超过限制（上限: ${authCtx.apiKey.limits.maxAmountPerRequest}）`,
+          403,
+          'AMOUNT_LIMIT_EXCEEDED',
+        );
+      }
+    }
+
+    // Agent 创建报销时，如果要直接提交（status=pending），需要额外的 submit scope
+    if (authCtx.authType === 'api_key' && submitStatus === 'pending') {
+      const hasSubmitScope = authCtx.apiKey?.scopes.includes(API_SCOPES.REIMBURSEMENT_SUBMIT);
+      if (!hasSubmitScope) {
+        return apiError('Agent 缺少 reimbursement:submit scope，只能创建草稿', 403, 'INSUFFICIENT_SCOPE');
+      }
     }
 
     // 获取租户本位币
     const tenantRecord = await db.query.tenants.findFirst({
-      where: eq(tenants.id, session.user.tenantId),
+      where: eq(tenants.id, tenantId),
       columns: { baseCurrency: true },
     });
     const tenantBaseCurrency = tenantRecord?.baseCurrency || 'USD';
@@ -188,35 +268,64 @@ export async function POST(request: NextRequest) {
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (!item.category) {
-        return NextResponse.json(
-          { error: `第 ${i + 1} 项费用缺少类别` },
-          { status: 400 }
-        );
+        return apiError(`第 ${i + 1} 项费用缺少类别`, 400, 'MISSING_REQUIRED_FIELDS');
       }
       if (!item.amount || isNaN(parseFloat(item.amount))) {
-        return NextResponse.json(
-          { error: `第 ${i + 1} 项费用金额无效` },
-          { status: 400 }
-        );
+        return apiError(`第 ${i + 1} 项费用金额无效`, 400, 'INVALID_AMOUNT');
       }
       if (!item.date) {
-        return NextResponse.json(
-          { error: `第 ${i + 1} 项费用缺少日期` },
-          { status: 400 }
-        );
+        return apiError(`第 ${i + 1} 项费用缺少日期`, 400, 'MISSING_REQUIRED_FIELDS');
+      }
+    }
+
+    // 服务端汇率转换：如果 item 缺少 exchangeRate / amountInBaseCurrency，自动转换
+    // 保证 Agent 提交和手动提交行为一致（前端在客户端做转换，Agent 由服务端补齐）
+    for (const item of items) {
+      const itemCurrency = (item.currency || 'CNY') as CurrencyType;
+      const itemAmount = parseFloat(item.amount) || 0;
+
+      // 如果币种和本位币相同，无需转换
+      if (itemCurrency === tenantBaseCurrency) {
+        item.exchangeRate = item.exchangeRate || 1;
+        item.amountInBaseCurrency = item.amountInBaseCurrency || itemAmount;
+        continue;
+      }
+
+      // 如果前端/Agent 已经提供了有效的 exchangeRate 和 amountInBaseCurrency，直接使用
+      if (item.exchangeRate && item.amountInBaseCurrency && item.amountInBaseCurrency !== itemAmount) {
+        continue;
+      }
+
+      // 否则使用服务端汇率自动转换
+      try {
+        const conversion = await exchangeRateService.convert({
+          amount: itemAmount,
+          fromCurrency: itemCurrency,
+          toCurrency: tenantBaseCurrency as CurrencyType,
+        });
+        item.exchangeRate = conversion.exchangeRate;
+        item.amountInBaseCurrency = conversion.convertedAmount;
+      } catch (err) {
+        console.warn(`Exchange rate conversion failed for ${itemCurrency} → ${tenantBaseCurrency}:`, err);
+        // 回退：使用原始金额（与之前行为一致）
+        item.amountInBaseCurrency = item.amountInBaseCurrency || itemAmount;
       }
     }
 
     // 应用政策限额约束（支持 per_day 和 per_month 类型）
+    // 传入 nights/checkInDate/checkOutDate 以便多日住宿按 每日限额×天数 计算
     const limitResult = await checkItemsLimit(
-      session.user.id,
-      session.user.tenantId,
+      authCtx.userId,
+      tenantId,
       items.map((item: any) => ({
         category: item.category,
         amount: parseFloat(item.amount) || 0,
         amountInBaseCurrency: item.amountInBaseCurrency || parseFloat(item.amount) || 0,
         date: item.date,
         location: item.location,
+        nights: item.nights ? parseInt(item.nights) : undefined,
+        checkInDate: item.checkInDate,
+        checkOutDate: item.checkOutDate,
       }))
     );
 
@@ -253,16 +362,16 @@ export async function POST(request: NextRequest) {
 
     // 构建报销单数据（不包含 undefined 值）
     const reimbursementData: any = {
-      tenantId: session.user.tenantId,
-      userId: session.user.id,
+      tenantId: tenantId,
+      userId: authCtx.userId,
       title,
       description: description || null,
       totalAmount,
       totalAmountInBaseCurrency: usdTotal,
       baseCurrency: tenantBaseCurrency,
       status: submitStatus === 'pending' ? 'pending' : 'draft',
-      autoCollected: false,
-      sourceType: 'manual',
+      autoCollected: authCtx.authType === 'api_key',
+      sourceType: authCtx.authType === 'api_key' ? `agent:${authCtx.apiKey?.agentType || 'api'}` : 'manual',
     };
 
     // 只有当有值时才添加这些字段
@@ -340,16 +449,211 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    return NextResponse.json(responseData);
+    // Agent 审计日志
+    if (authCtx.authType === 'api_key' && authCtx.apiKey) {
+      logAgentAction({
+        tenantId: tenantId,
+        apiKeyId: authCtx.apiKey.id,
+        userId: authCtx.userId,
+        action: submitStatus === 'pending' ? 'reimbursement:submit' : 'reimbursement:create',
+        method: 'POST',
+        path: '/api/reimbursements',
+        statusCode: 200,
+        agentType: authCtx.apiKey.agentType,
+        requestSummary: {
+          title,
+          itemCount: items.length,
+          totalAmount,
+          status: submitStatus || 'draft',
+        },
+        responseSummary: { reimbursementId: reimbursement.id },
+        entityType: 'reimbursement',
+        entityId: reimbursement.id,
+        ipAddress: request.headers.get('x-forwarded-for') || undefined,
+        userAgent: request.headers.get('user-agent') || undefined,
+        durationMs: Date.now() - startTime,
+      });
+    }
+
+    // 自动生成差旅行程单（异步，不阻塞响应）
+    const TRAVEL_CATEGORIES = ['flight', 'train', 'hotel', 'meal', 'taxi', 'car_rental', 'fuel', 'parking', 'toll'];
+    const hasTravelItems = items.some((item: any) => TRAVEL_CATEGORIES.includes(item.category));
+    if (hasTravelItems) {
+      // 异步生成，不阻塞主请求返回
+      generateTripItinerary(
+        tenantId,
+        authCtx.userId,
+        reimbursement.id,
+        title,
+        items
+      ).catch(err => console.error('Auto-generate itinerary failed (non-blocking):', err));
+    }
+
+    const jsonResponse = withRateHeaders(NextResponse.json(responseData), authCtx);
+
+    // 缓存幂等性响应
+    if (idempotencyKey) {
+      cacheResponse(idempotencyKey, jsonResponse).catch(() => {});
+    }
+
+    return jsonResponse;
   } catch (error: any) {
     console.error('Create reimbursement error:', error);
-    // 返回详细的错误信息以便调试
-    return NextResponse.json(
-      {
-        error: `创建失败: ${error?.message || '未知错误'}`,
-        detail: error?.detail || error?.code || null
-      },
-      { status: 500 }
+    return apiError(`创建失败: ${error?.message || '未知错误'}`, 500);
+  }
+}
+
+/**
+ * 自动生成差旅行程单（后台异步执行）
+ * 报销单创建成功后，如果包含差旅类别费用项，自动调用 AI 生成 draft 行程单
+ */
+async function generateTripItinerary(
+  tenantId: string,
+  userId: string,
+  reimbursementId: string,
+  title: string,
+  items: any[]
+) {
+  try {
+    // 构建 AI prompt
+    const itemsSummary = items.map((item: any, index: number) => {
+      const parts = [`第${index + 1}项：`];
+      parts.push(`类别: ${item.category}`);
+      if (item.description) parts.push(`描述: ${item.description}`);
+      if (item.vendor) parts.push(`供应商: ${item.vendor}`);
+      if (item.amount) parts.push(`金额: ${item.currency || 'CNY'} ${item.amount}`);
+      if (item.date) parts.push(`日期: ${item.date}`);
+      if (item.departure) parts.push(`出发地: ${item.departure}`);
+      if (item.destination) parts.push(`目的地: ${item.destination}`);
+      if (item.trainNumber) parts.push(`车次: ${item.trainNumber}`);
+      if (item.flightNumber) parts.push(`航班: ${item.flightNumber}`);
+      if (item.seatClass) parts.push(`座位: ${item.seatClass}`);
+      if (item.checkInDate) parts.push(`入住: ${item.checkInDate}`);
+      if (item.checkOutDate) parts.push(`退房: ${item.checkOutDate}`);
+      return parts.join(', ');
+    }).join('\n');
+
+    const systemPrompt = `你是一个智能行程生成助手。根据用户提交的报销费用明细，智能推断并生成一份完整的差旅行程单。
+
+要求：
+1. 根据交通票据（机票、火车票）的出发地、目的地、日期推断行程路线
+2. 根据酒店入住信息补充住宿安排
+3. 根据餐饮、交通等费用补充日程中的相关活动
+4. 按时间顺序排列行程节点
+5. 为每个节点推断合理的时间（如航班通常早晨，酒店入住通常下午）
+6. 生成一个简洁的行程标题
+
+请严格按照以下 JSON 格式输出，不要输出任何其他内容：
+{
+  "title": "行程标题，如：上海-北京出差",
+  "purpose": "推断的出差目的",
+  "startDate": "YYYY-MM-DD",
+  "endDate": "YYYY-MM-DD",
+  "destinations": ["目的地1", "目的地2"],
+  "items": [
+    {
+      "date": "YYYY-MM-DD",
+      "time": "HH:mm",
+      "type": "transport|hotel|meal|meeting|other",
+      "category": "对应报销类别如flight/train/hotel/meal/taxi",
+      "title": "节点标题",
+      "description": "详细描述",
+      "location": "地点",
+      "departure": "出发地（交通类）",
+      "arrival": "到达地（交通类）",
+      "transportNumber": "车次/航班号",
+      "hotelName": "酒店名称（住宿类）",
+      "checkIn": "YYYY-MM-DD（住宿类）",
+      "checkOut": "YYYY-MM-DD（住宿类）",
+      "amount": 金额数字,
+      "currency": "币种",
+      "sourceItemIndex": 对应报销明细的索引号(从0开始),
+      "sortOrder": 排序号
+    }
+  ]
+}`;
+
+    const userPrompt = `报销说明：${title || '未填写'}
+
+报销费用明细：
+${itemsSummary}
+
+请根据以上信息，推断并生成完整的差旅行程单。`;
+
+    const response = await createChatCompletion(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      { temperature: 0.3, max_tokens: 4096 }
     );
+
+    const content = extractTextContent(response);
+
+    // 解析 AI 返回的 JSON
+    let itinerary;
+    try {
+      const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, content];
+      const jsonStr = jsonMatch[1]?.trim() || content.trim();
+      itinerary = JSON.parse(jsonStr);
+    } catch (parseError) {
+      console.error('[Auto-itinerary] Failed to parse AI response:', content);
+      return;
+    }
+
+    // 保存行程单到数据库（status=draft）
+    const [saved] = await db
+      .insert(tripItineraries)
+      .values({
+        tenantId,
+        userId,
+        reimbursementId,
+        title: itinerary.title || title,
+        purpose: itinerary.purpose || null,
+        startDate: itinerary.startDate ? new Date(itinerary.startDate) : null,
+        endDate: itinerary.endDate ? new Date(itinerary.endDate) : null,
+        destinations: itinerary.destinations || [],
+        status: 'draft',
+        aiGenerated: true,
+      })
+      .returning();
+
+    // 保存行程明细
+    if (itinerary.items && itinerary.items.length > 0) {
+      await db.insert(tripItineraryItems).values(
+        itinerary.items.map((item: any, index: number) => {
+          // 关联报销凭证
+          const sourceIndex = item.sourceItemIndex;
+          const sourceItem = (sourceIndex !== undefined && sourceIndex !== null && items[sourceIndex])
+            ? items[sourceIndex] : null;
+
+          return {
+            itineraryId: saved.id,
+            date: new Date(item.date),
+            time: item.time || null,
+            type: item.type || 'other',
+            category: item.category || null,
+            title: item.title,
+            description: item.description || null,
+            location: item.location || null,
+            departure: item.departure || null,
+            arrival: item.arrival || null,
+            transportNumber: item.transportNumber || null,
+            hotelName: item.hotelName || null,
+            checkIn: item.checkIn ? new Date(item.checkIn) : null,
+            checkOut: item.checkOut ? new Date(item.checkOut) : null,
+            amount: item.amount ? parseFloat(item.amount) : null,
+            currency: item.currency || null,
+            reimbursementItemId: null,
+            receiptUrl: sourceItem?.receiptUrl || null,
+            sortOrder: item.sortOrder ?? index,
+          };
+        })
+      );
+    }
+
+    console.log(`[Auto-itinerary] Generated draft itinerary ${saved.id} for reimbursement ${reimbursementId}`);
+  } catch (error) {
+    console.error('[Auto-itinerary] Generation failed:', error);
   }
 }

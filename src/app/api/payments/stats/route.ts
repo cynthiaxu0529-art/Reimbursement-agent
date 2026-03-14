@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 /**
  * GET /api/payments/stats
  * 获取付款统计数据（财务角色使用）
- * 返回：处理中数量、今日已付数量
+ * 返回：待付款总额、处理中数量、今日已付数量、已付总数
  */
 export async function GET(request: NextRequest) {
   try {
@@ -38,6 +38,20 @@ export async function GET(request: NextRequest) {
     const todayEnd = new Date(todayStart);
     todayEnd.setDate(todayEnd.getDate() + 1);
 
+    // 查询待付款（approved）的报销单数量和总额
+    const pendingResult = await db.select({
+      count: sql<number>`count(*)::int`,
+      total: sql<number>`coalesce(sum(total_amount_in_base_currency), 0)::float`,
+    })
+      .from(reimbursements)
+      .where(and(
+        eq(reimbursements.tenantId, tenantId),
+        eq(reimbursements.status, 'approved')
+      ));
+
+    const pendingCount = pendingResult[0]?.count || 0;
+    const pendingTotal = pendingResult[0]?.total || 0;
+
     // 查询处理中的报销单数量
     const processingResult = await db.select({
       count: sql<number>`count(*)::int`,
@@ -49,6 +63,18 @@ export async function GET(request: NextRequest) {
       ));
 
     const processingCount = processingResult[0]?.count || 0;
+
+    // 查询已付总数
+    const totalPaidResult = await db.select({
+      count: sql<number>`count(*)::int`,
+    })
+      .from(reimbursements)
+      .where(and(
+        eq(reimbursements.tenantId, tenantId),
+        eq(reimbursements.status, 'paid')
+      ));
+
+    const totalPaidCount = totalPaidResult[0]?.count || 0;
 
     // 查询今日已付的报销单数量
     const todayPaidResult = await db.select({
@@ -67,7 +93,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       stats: {
+        pendingCount,
+        pendingTotal,
         processingCount,
+        totalPaidCount,
         todayPaidCount,
       },
     });
