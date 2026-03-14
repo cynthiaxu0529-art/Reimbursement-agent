@@ -1283,7 +1283,7 @@ export default function TeamPage() {
                 取消
               </button>
               <button
-                onClick={handleInvite}
+                onClick={() => handleInvite()}
                 disabled={saving || !inviteData.email || !inviteData.name || inviteData.roles.length === 0}
                 style={{
                   padding: '0.5rem 1rem',
