@@ -34,6 +34,7 @@ function getNavItems(t: ReturnType<typeof useLanguage>['t']) {
     settings: { name: t.nav.settings, href: '/dashboard/settings', icon: '⚙️' },
     // 员工专属
     myReimbursements: { name: t.nav.myReimbursements, href: '/dashboard/reimbursements', icon: '📄' },
+    advances: { name: t.nav.advances, href: '/dashboard/advances', icon: '💰' },
     trips: { name: t.nav.trips, href: '/dashboard/trips', icon: '✈️' },
     chat: { name: t.nav.chat, href: '/dashboard/chat', icon: '💬' },
     // 审批人专属
@@ -70,6 +71,7 @@ function buildNavigation(roles: string[], navItems: ReturnType<typeof getNavItem
   // 员工功能（所有人都有）
   if (roles.includes('employee')) {
     addItem(navItems.myReimbursements);
+    addItem(navItems.advances);
     addItem(navItems.trips);
     addItem(navItems.chat);
   }
