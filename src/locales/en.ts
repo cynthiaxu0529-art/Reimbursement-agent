@@ -28,6 +28,7 @@ const en: Translations = {
     dashboard: 'Dashboard',
     settings: 'Settings',
     myReimbursements: 'My Reimbursements',
+    advances: 'Advances',
     trips: 'Trips',
     chat: 'AI Assistant',
     approvals: 'Pending Approvals',

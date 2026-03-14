@@ -26,6 +26,7 @@ const zh = {
     dashboard: '仪表盘',
     settings: '设置',
     myReimbursements: '我的报销',
+    advances: '预借款',
     trips: '行程',
     chat: 'AI 助手',
     approvals: '待审批',
