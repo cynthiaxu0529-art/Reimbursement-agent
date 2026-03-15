@@ -6,6 +6,11 @@
 import { db } from '@/lib/db';
 import { policies, reimbursements, reimbursementItems } from '@/lib/db/schema';
 import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
+import { ExchangeRateService } from '@/lib/currency/exchange-service';
+import type { CurrencyType } from '@/types';
+
+// 汇率服务实例
+const exchangeRateService = new ExchangeRateService();
 
 // 政策规则类型
 interface PolicyRule {
@@ -369,6 +374,8 @@ export async function checkItemLimit(
 /**
  * 批量检查报销项的限额
  * 处理同一请求中多个费用项的累计计算
+ *
+ * @param tenantBaseCurrency 租户本位币（用于货币转换，确保限额比较时货币一致）
  */
 export async function checkItemsLimit(
   userId: string,
@@ -382,9 +389,13 @@ export async function checkItemsLimit(
     nights?: number;
     checkInDate?: string;
     checkOutDate?: string;
-  }>
+  }>,
+  tenantBaseCurrency: CurrencyType = 'USD'
 ): Promise<BatchLimitCheckResult> {
   const rules = await getTenantPolicyRules(tenantId);
+
+  // 缓存限额货币到租户本位币的汇率（避免重复查询）
+  const limitCurrencyRateCache: Record<string, number> = {};
 
   // 用于追踪同一请求中已经累计的金额
   // key: `${limitType}_${categories.join(',')}_${dateKey}`
@@ -416,6 +427,26 @@ export async function checkItemsLimit(
     }
 
     const { limit, categories = [], name } = applicableRule;
+    const limitCurrency = (limit.currency || 'USD') as CurrencyType;
+
+    // 获取限额货币到租户本位币的汇率（缓存避免重复查询）
+    let limitToBaseCurrencyRate = 1;
+    if (limitCurrency !== tenantBaseCurrency) {
+      const rateKey = `${limitCurrency}_${tenantBaseCurrency}`;
+      if (limitCurrencyRateCache[rateKey] === undefined) {
+        try {
+          const rateInfo = await exchangeRateService.getExchangeRate(limitCurrency, tenantBaseCurrency);
+          limitCurrencyRateCache[rateKey] = rateInfo.rate;
+        } catch (err) {
+          console.warn(`Failed to get exchange rate ${limitCurrency} -> ${tenantBaseCurrency}, using 1:1`, err);
+          limitCurrencyRateCache[rateKey] = 1;
+        }
+      }
+      limitToBaseCurrencyRate = limitCurrencyRateCache[rateKey];
+    }
+
+    // 将限额金额转换为租户本位币（确保与 amountInBaseCurrency 单位一致）
+    const limitAmountInBaseCurrency = limit.amount * limitToBaseCurrencyRate;
 
     // 计算住宿天数：优先使用 nights 字段，其次通过入离店日期计算
     let effectiveNights = 1;
@@ -458,20 +489,23 @@ export async function checkItemsLimit(
     }
 
     const currentAccumulated = accumulatedAmounts[accumulatorKey] || 0;
-    // 对 per_day 类型，多日住宿的有效限额 = 单日限额 × 天数
+    // 对 per_day 类型，多日住宿的有效限额 = 单日限额 × 天数（已转换为租户本位币）
     const effectiveLimit = (limit.type === 'per_day' && effectiveNights > 1)
-      ? limit.amount * effectiveNights
-      : limit.amount;
+      ? limitAmountInBaseCurrency * effectiveNights
+      : limitAmountInBaseCurrency;
     const remainingAmount = Math.max(0, effectiveLimit - currentAccumulated);
     let adjustedAmount = item.amountInBaseCurrency;
     let wasAdjusted = false;
 
+    // 获取货币符号用于消息显示
+    const currencySymbol = tenantBaseCurrency === 'CNY' ? '¥' : '$';
+
     if (limit.type === 'per_item') {
-      // 单笔限额
-      if (item.amountInBaseCurrency > limit.amount) {
-        adjustedAmount = limit.amount;
+      // 单笔限额（使用转换后的限额金额比较）
+      if (item.amountInBaseCurrency > limitAmountInBaseCurrency) {
+        adjustedAmount = limitAmountInBaseCurrency;
         wasAdjusted = true;
-        messages.push(`${name}: 金额 $${item.amountInBaseCurrency.toFixed(2)} 超过单笔限额 $${limit.amount}，已调整为 $${adjustedAmount.toFixed(2)}`);
+        messages.push(`${name}: 金额 ${currencySymbol}${item.amountInBaseCurrency.toFixed(2)} 超过单笔限额 $${limit.amount}（${currencySymbol}${limitAmountInBaseCurrency.toFixed(2)}），已调整为 ${currencySymbol}${adjustedAmount.toFixed(2)}`);
       }
     } else {
       // per_day 或 per_month
@@ -481,11 +515,11 @@ export async function checkItemsLimit(
 
         if (adjustedAmount === 0) {
           const limitDesc = limit.type === 'per_day'
-            ? (effectiveNights > 1 ? `每日限额 $${limit.amount} × ${effectiveNights}天 = $${effectiveLimit}` : `每日限额 $${limit.amount}`)
-            : `每月限额 $${limit.amount}`;
-          messages.push(`${name}: 已达到${limitDesc}，本项金额调整为 $0`);
+            ? (effectiveNights > 1 ? `每日限额 $${limit.amount} × ${effectiveNights}天 = $${limit.amount * effectiveNights}（${currencySymbol}${effectiveLimit.toFixed(2)}）` : `每日限额 $${limit.amount}（${currencySymbol}${limitAmountInBaseCurrency.toFixed(2)}）`)
+            : `每月限额 $${limit.amount}（${currencySymbol}${limitAmountInBaseCurrency.toFixed(2)}）`;
+          messages.push(`${name}: 已达到${limitDesc}，本项金额调整为 ${currencySymbol}0`);
         } else {
-          messages.push(`${name}: 剩余额度 $${remainingAmount.toFixed(2)}，金额从 $${item.amountInBaseCurrency.toFixed(2)} 调整为 $${adjustedAmount.toFixed(2)}`);
+          messages.push(`${name}: 剩余额度 ${currencySymbol}${remainingAmount.toFixed(2)}，金额从 ${currencySymbol}${item.amountInBaseCurrency.toFixed(2)} 调整为 ${currencySymbol}${adjustedAmount.toFixed(2)}`);
         }
       }
 

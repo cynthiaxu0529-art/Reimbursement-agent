@@ -314,6 +314,7 @@ export async function POST(request: NextRequest) {
 
     // 应用政策限额约束（支持 per_day 和 per_month 类型）
     // 传入 nights/checkInDate/checkOutDate 以便多日住宿按 每日限额×天数 计算
+    // 传入 tenantBaseCurrency 确保限额比较时货币一致
     const limitResult = await checkItemsLimit(
       authCtx.userId,
       tenantId,
@@ -326,7 +327,8 @@ export async function POST(request: NextRequest) {
         nights: item.nights ? parseInt(item.nights) : undefined,
         checkInDate: item.checkInDate,
         checkOutDate: item.checkOutDate,
-      }))
+      })),
+      tenantBaseCurrency as CurrencyType
     );
 
     // 使用调整后的金额更新 items
