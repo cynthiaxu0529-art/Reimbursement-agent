@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, tenants } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { checkItemsLimit } from '@/lib/policy/limit-service';
 import { authenticate, logAgentAction } from '@/lib/auth/api-key';
 import { API_SCOPES } from '@/lib/auth/scopes';
 import { apiError } from '@/lib/api-error';
+import type { CurrencyType } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -159,10 +160,19 @@ export async function PATCH(
     const body = await request.json();
     const { receiptUrl, vendor, description, amount, currency, category, date } = body;
 
-    // 获取用户的租户ID
+    // 获取用户的租户ID和租户本位币
     const currentUser = await db.query.users.findFirst({
       where: eq(users.id, authCtx.userId),
     });
+
+    let tenantBaseCurrency: CurrencyType = 'USD';
+    if (currentUser?.tenantId) {
+      const tenantRecord = await db.query.tenants.findFirst({
+        where: eq(tenants.id, currentUser.tenantId),
+        columns: { baseCurrency: true },
+      });
+      tenantBaseCurrency = (tenantRecord?.baseCurrency || 'USD') as CurrencyType;
+    }
 
     // Build update object
     const updateData: Record<string, any> = {
@@ -206,7 +216,8 @@ export async function PATCH(
             nights: nightsToCheck || undefined,
             checkInDate: checkInToCheck ? (typeof checkInToCheck === 'string' ? checkInToCheck : checkInToCheck.toISOString()) : undefined,
             checkOutDate: checkOutToCheck ? (typeof checkOutToCheck === 'string' ? checkOutToCheck : checkOutToCheck.toISOString()) : undefined,
-          }]
+          }],
+          tenantBaseCurrency
         );
 
         if (limitResult.items[0]?.wasAdjusted) {

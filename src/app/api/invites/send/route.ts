@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { email, name, department, departmentId, roles, setAsDeptManager } = body;
+    const { email, name, department, departmentId, roles, setAsDeptManager, resend } = body;
     // 使用数据库中的公司名称
     const companyName = tenantName;
 
@@ -88,15 +88,24 @@ export async function POST(request: NextRequest) {
     if (existingInvitation) {
       // 检查是否过期
       if (new Date() < existingInvitation.expiresAt) {
-        return NextResponse.json({
-          success: false,
-          error: '该邮箱已有待处理的邀请，请等待对方接受或邀请过期后重试'
-        }, { status: 400 });
+        // 如果设置了 resend 参数，撤销旧邀请并重新发送
+        if (resend) {
+          await db.update(invitations)
+            .set({ status: 'revoked', updatedAt: new Date() })
+            .where(eq(invitations.id, existingInvitation.id));
+        } else {
+          return NextResponse.json({
+            success: false,
+            error: '该邮箱已有待处理的邀请，可选择重新发送以撤销旧邀请',
+            existingInvitationId: existingInvitation.id,
+          }, { status: 400 });
+        }
+      } else {
+        // 如果已过期，更新状态
+        await db.update(invitations)
+          .set({ status: 'expired', updatedAt: new Date() })
+          .where(eq(invitations.id, existingInvitation.id));
       }
-      // 如果已过期，更新状态
-      await db.update(invitations)
-        .set({ status: 'expired', updatedAt: new Date() })
-        .where(eq(invitations.id, existingInvitation.id));
     }
 
     // 创建邀请记录
