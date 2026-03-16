@@ -100,9 +100,9 @@ export async function getDailyReimbursedAmount(
   const endOfDay = new Date(date);
   endOfDay.setHours(23, 59, 59, 999);
 
-  // 查询该用户当天已提交的报销单（排除已拒绝的）
+  // 查询该用户当天已提交的报销单（排除已拒绝的和草稿）
   const userReimbursements = await db
-    .select({ id: reimbursements.id })
+    .select({ id: reimbursements.id, status: reimbursements.status })
     .from(reimbursements)
     .where(and(
       eq(reimbursements.userId, userId),
@@ -120,6 +120,8 @@ export async function getDailyReimbursedAmount(
   const items = await db
     .select({
       amount: reimbursementItems.amountInBaseCurrency,
+      reimbursementId: reimbursementItems.reimbursementId,
+      category: reimbursementItems.category,
     })
     .from(reimbursementItems)
     .where(and(
@@ -129,7 +131,25 @@ export async function getDailyReimbursedAmount(
       lte(reimbursementItems.date, endOfDay)
     ));
 
-  return items.reduce((sum, item) => sum + (item.amount || 0), 0);
+  const total = items.reduce((sum, item) => sum + (item.amount || 0), 0);
+
+  // 添加调试日志
+  if (items.length > 0) {
+    console.log('[LimitService] getDailyReimbursedAmount:', {
+      userId,
+      date: date.toISOString().split('T')[0],
+      categories,
+      foundReimbursements: userReimbursements.length,
+      foundItems: items.map(i => ({
+        reimbursementId: i.reimbursementId,
+        category: i.category,
+        amount: i.amount,
+      })),
+      total,
+    });
+  }
+
+  return total;
 }
 
 /**
@@ -499,6 +519,23 @@ export async function checkItemsLimit(
 
     // 获取货币符号用于消息显示
     const currencySymbol = tenantBaseCurrency === 'CNY' ? '¥' : '$';
+
+    // 调试日志：记录限额检查过程
+    console.log('[LimitService] checkItemsLimit:', {
+      category: item.category,
+      date: item.date,
+      ruleName: name,
+      limitType: limit.type,
+      limitAmountUSD: limit.amount,
+      limitAmountInBaseCurrency,
+      tenantBaseCurrency,
+      effectiveNights,
+      effectiveLimit,
+      currentAccumulated,
+      remainingAmount,
+      itemAmount: item.amountInBaseCurrency,
+      willAdjust: item.amountInBaseCurrency > remainingAmount,
+    });
 
     if (limit.type === 'per_item') {
       // 单笔限额（使用转换后的限额金额比较）
