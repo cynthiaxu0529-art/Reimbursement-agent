@@ -136,8 +136,8 @@ export async function POST(request: NextRequest) {
       .set({ tokenHash: hashToken(inviteToken) })
       .where(eq(invitations.id, invitation.id));
 
-    // Build invite URL
-    const baseUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    // Build invite URL (remove trailing slash to avoid double slashes)
+    const baseUrl = (process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
     const inviteUrl = `${baseUrl}/register?invite=${inviteToken}&email=${encodeURIComponent(email)}`;
 
     // Format roles for display
