@@ -73,7 +73,13 @@ export function verifyInviteToken(token: string): InvitationData | null {
       .digest('hex');
 
     if (signature !== expectedSignature) {
-      console.error('Invalid token: signature mismatch');
+      const secretKey = getSecretKey();
+      console.error('Invalid token: signature mismatch', {
+        tokenSignature: signature.substring(0, 8) + '...',
+        expectedSignature: expectedSignature.substring(0, 8) + '...',
+        secretKeyPreview: secretKey.substring(0, 4) + '...' + secretKey.substring(secretKey.length - 4),
+        secretKeyLength: secretKey.length,
+      });
       return null;
     }
 
