@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { invitations, users } from '@/lib/db/schema';
-import { eq, or, ilike } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,12 +17,12 @@ export async function GET(request: NextRequest) {
 
   // 查询邀请记录
   const inviteRecords = await db.query.invitations.findMany({
-    where: ilike(invitations.email, `%${email}%`),
+    where: sql`${invitations.email} ILIKE ${'%' + email + '%'}`,
   });
 
   // 查询用户记录
   const userRecords = await db.query.users.findMany({
-    where: ilike(users.email, `%${email}%`),
+    where: sql`${users.email} ILIKE ${'%' + email + '%'}`,
   });
 
   const now = new Date();
