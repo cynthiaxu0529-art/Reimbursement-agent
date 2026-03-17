@@ -76,11 +76,34 @@ export async function getTenantPolicyRules(tenantId: string): Promise<PolicyRule
   const rules: PolicyRule[] = [];
 
   for (const policy of tenantPolicies) {
-    const policyRules = policy.rules as PolicyRule[] | null;
+    const policyRules = policy.rules as any[] | null;
     if (policyRules) {
-      rules.push(...policyRules);
+      // 兼容处理：将 category（单数）转换为 categories（复数数组）
+      const normalizedRules = policyRules.map(rule => {
+        if (rule.category && !rule.categories) {
+          return {
+            ...rule,
+            categories: [rule.category],
+          };
+        }
+        return rule;
+      });
+      rules.push(...normalizedRules);
     }
   }
+
+  console.log('[LimitService] getTenantPolicyRules:', {
+    tenantId,
+    policyCount: tenantPolicies.length,
+    ruleCount: rules.length,
+    rulesWithLimits: rules.filter(r => r.limit && r.categories).map(r => ({
+      name: r.name,
+      categories: r.categories,
+      limitType: r.limit?.type,
+      limitAmount: r.limit?.amount,
+      limitCurrency: r.limit?.currency,
+    })),
+  });
 
   return rules;
 }
