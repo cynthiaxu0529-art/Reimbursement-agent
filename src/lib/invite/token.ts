@@ -59,7 +59,17 @@ export function verifyInviteToken(token: string): InvitationData | null {
   try {
     // 解码token
     const decoded = Buffer.from(token, 'base64url').toString('utf-8');
-    const [payloadStr, signature] = decoded.split('.');
+
+    // 使用lastIndexOf找到最后一个点（签名分隔符）
+    // 因为JSON payload中可能包含点（如email地址）
+    const lastDotIndex = decoded.lastIndexOf('.');
+    if (lastDotIndex === -1) {
+      console.error('Invalid token format: missing signature separator');
+      return null;
+    }
+
+    const payloadStr = decoded.substring(0, lastDotIndex);
+    const signature = decoded.substring(lastDotIndex + 1);
 
     if (!payloadStr || !signature) {
       console.error('Invalid token format: missing payload or signature');
@@ -73,7 +83,13 @@ export function verifyInviteToken(token: string): InvitationData | null {
       .digest('hex');
 
     if (signature !== expectedSignature) {
-      console.error('Invalid token: signature mismatch');
+      const secretKey = getSecretKey();
+      console.error('Invalid token: signature mismatch', {
+        tokenSignature: signature.substring(0, 8) + '...',
+        expectedSignature: expectedSignature.substring(0, 8) + '...',
+        secretKeyPreview: secretKey.substring(0, 4) + '...' + secretKey.substring(secretKey.length - 4),
+        secretKeyLength: secretKey.length,
+      });
       return null;
     }
 

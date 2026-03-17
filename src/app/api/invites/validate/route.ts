@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 检测token版本
+    console.log('[Invite Validate] Token received:', token.substring(0, 20) + '...', 'length:', token.length);
     const tokenVersion = detectTokenVersion(token);
     console.log('[Invite Validate] Token version:', tokenVersion);
 
