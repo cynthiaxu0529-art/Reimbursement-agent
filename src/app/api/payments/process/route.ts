@@ -157,6 +157,7 @@ export async function POST(request: NextRequest) {
 
     // 检查配置
     if (!payoutService.isConfigured()) {
+      console.error('Fluxa payout not configured. FLUXA_AGENT_ID:', !!process.env.FLUXA_AGENT_ID, 'FLUXA_AGENT_TOKEN:', !!process.env.FLUXA_AGENT_TOKEN);
       return NextResponse.json({
         success: false,
         error: 'Fluxa 钱包未配置',
@@ -165,6 +166,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 发起 Fluxa Payout
+    console.log('[Payment] Initiating payout for reimbursement:', reimbursement.id, 'amount:', amountUSD, 'to:', walletInfo.walletAddress);
     const result = await payoutService.initiateReimbursementPayout(
       reimbursement.id,
       walletInfo.walletAddress,
@@ -234,10 +236,25 @@ export async function POST(request: NextRequest) {
           : '打款请求已创建，请点击审批链接在钱包中完成审批',
       });
     } else {
+      const errorCode = result.error?.code || 'UNKNOWN';
+      const errorMessage = result.error?.message || '创建打款请求失败';
+      console.error('[Payment] Payout creation failed:', errorCode, errorMessage, result.error?.details);
+
+      // 根据错误码提供具体的修复建议
+      let userMessage = errorMessage;
+      if (errorCode === 'JWT_REFRESH_FAILED') {
+        userMessage = 'Fluxa 认证失败，请检查 FLUXA_AGENT_ID 和 FLUXA_AGENT_TOKEN 是否正确';
+      } else if (errorCode === 'NETWORK_ERROR') {
+        userMessage = 'Fluxa 服务连接失败，请检查网络或稍后重试';
+      } else if (errorCode === 'INVALID_ADDRESS') {
+        userMessage = '收款钱包地址格式无效，请联系员工更新钱包地址';
+      }
+
       return NextResponse.json({
         success: false,
-        error: result.error,
-        message: result.error?.message || '创建打款请求失败',
+        error: errorCode,
+        message: userMessage,
+        details: result.error?.details,
       }, { status: 400 });
     }
   } catch (error) {
@@ -245,6 +262,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: false,
       error: '付款处理失败',
+      message: error instanceof Error ? error.message : '服务器内部错误，请查看日志',
       details: error instanceof Error ? error.message : 'Unknown error',
     }, { status: 500 });
   }

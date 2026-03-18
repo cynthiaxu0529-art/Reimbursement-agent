@@ -14,8 +14,8 @@ export const dynamic = 'force-dynamic';
 /** Skill 元数据（JSON 格式，方便程序解析） */
 const SKILL_META = {
   name: 'reimbursement',
-  version: '1.1.0',
-  description: '企业报销管理 - 帮助用户提交报销、上传发票、查询报销状态、查看政策和分析费用',
+  version: '1.2.0',
+  description: '企业报销管理 - 帮助用户规划差旅行程、记录行程单、提交报销、上传发票、查询报销状态、查看政策和分析费用',
   requires: {
     env: ['REIMBURSEMENT_API_KEY', 'REIMBURSEMENT_API_URL'],
   },
@@ -306,6 +306,255 @@ GET {REIMBURSEMENT_API_URL}/api/analytics/expenses
 GET {REIMBURSEMENT_API_URL}/api/settings/profile
 \`\`\`
 
+---
+
+# 差旅行程规划
+
+除了报销管理外，你还可以帮助用户**事前规划差旅行程**并将行程记录到系统中。完整的工作流程是：
+
+\`\`\`
+用户描述出差需求（或在 Telegram 里整理好行程）
+  ↓
+你整理行程信息（航班、酒店、会议等）
+  ↓
+用户确认行程方案
+  ↓
+你将行程写入系统（创建 Trip + Itinerary）
+  ↓
+你创建预估报销单并提交审批
+  ↓
+审批通过后，用户出发
+\`\`\`
+
+## 行程状态流转
+
+### Trip（行程记录）
+\`\`\`
+planning（规划中）→ ongoing（进行中）→ completed（已完成）
+                                     → cancelled（已取消）
+\`\`\`
+
+### Trip Itinerary（行程单）
+\`\`\`
+draft（草稿）→ confirmed（用户确认）
+            → modified（用户修改后）
+\`\`\`
+
+## 行程管理 API
+
+### 11. 创建行程（Trip）
+
+\`\`\`http
+POST {REIMBURSEMENT_API_URL}/api/trips
+Content-Type: application/json
+\`\`\`
+
+请求体：
+\`\`\`json
+{
+  "title": "北京客户拜访",
+  "purpose": "Q2 商务洽谈",
+  "destination": "北京",
+  "startDate": "2026-03-15",
+  "endDate": "2026-03-17",
+  "budget": {
+    "estimated": 5000,
+    "currency": "CNY",
+    "breakdown": {
+      "flight": 2400,
+      "hotel": 1600,
+      "meal": 600,
+      "transport": 400
+    }
+  }
+}
+\`\`\`
+
+必填字段：\`title\`、\`startDate\`、\`endDate\`
+
+需要的 scope：\`trip:create\`
+
+### 12. 查看行程列表
+
+\`\`\`http
+GET {REIMBURSEMENT_API_URL}/api/trips
+\`\`\`
+
+查询参数：
+- \`status\` - 筛选状态：\`planning\`、\`ongoing\`、\`completed\`、\`cancelled\`
+
+需要的 scope：\`trip:read\`
+
+### 13. 查看行程详情
+
+\`\`\`http
+GET {REIMBURSEMENT_API_URL}/api/trips/{id}
+\`\`\`
+
+需要的 scope：\`trip:read\`
+
+### 14. 更新行程
+
+\`\`\`http
+PUT {REIMBURSEMENT_API_URL}/api/trips/{id}
+Content-Type: application/json
+\`\`\`
+
+支持部分更新，只传需要修改的字段：
+\`\`\`json
+{
+  "status": "ongoing",
+  "destination": "北京, 上海"
+}
+\`\`\`
+
+需要的 scope：\`trip:create\`
+
+### 15. 创建行程单（Itinerary）
+
+行程单是 Trip 的详细日程安排，包含每天每个时间段的具体活动。
+
+\`\`\`http
+POST {REIMBURSEMENT_API_URL}/api/trip-itineraries
+Content-Type: application/json
+\`\`\`
+
+请求体：
+\`\`\`json
+{
+  "tripId": "关联的行程ID（可选）",
+  "title": "上海-北京出差行程",
+  "purpose": "客户拜访",
+  "startDate": "2026-03-15",
+  "endDate": "2026-03-17",
+  "destinations": ["北京"],
+  "status": "draft",
+  "items": [
+    {
+      "date": "2026-03-15",
+      "time": "08:00",
+      "type": "transport",
+      "category": "flight",
+      "title": "上海浦东 → 北京首都 MU5101",
+      "description": "东方航空经济舱",
+      "departure": "上海浦东T1",
+      "arrival": "北京首都T2",
+      "transportNumber": "MU5101",
+      "amount": 1200,
+      "currency": "CNY",
+      "sortOrder": 0
+    },
+    {
+      "date": "2026-03-15",
+      "time": "14:00",
+      "type": "meeting",
+      "title": "与 XX 公司 Q2 商务洽谈",
+      "location": "北京国贸大厦 25F",
+      "sortOrder": 2
+    },
+    {
+      "date": "2026-03-15",
+      "time": "18:00",
+      "type": "hotel",
+      "category": "hotel",
+      "title": "入住北京希尔顿酒店",
+      "hotelName": "北京希尔顿酒店",
+      "location": "北京朝阳区",
+      "checkIn": "2026-03-15",
+      "checkOut": "2026-03-17",
+      "amount": 800,
+      "currency": "CNY",
+      "sortOrder": 3
+    }
+  ]
+}
+\`\`\`
+
+**行程明细 item 字段说明：**
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| \`date\` | ✅ | 日期 YYYY-MM-DD |
+| \`time\` | | 时间 HH:mm |
+| \`type\` | ✅ | 类型：\`transport\` / \`hotel\` / \`meal\` / \`meeting\` / \`other\` |
+| \`category\` | | 费用类别：\`flight\` / \`train\` / \`hotel\` / \`meal\` / \`taxi\` 等 |
+| \`title\` | ✅ | 节点标题 |
+| \`description\` | | 详细描述 |
+| \`location\` | | 地点 |
+| \`departure\` | | 出发地（交通类） |
+| \`arrival\` | | 到达地（交通类） |
+| \`transportNumber\` | | 航班号/车次 |
+| \`hotelName\` | | 酒店名称 |
+| \`checkIn\` | | 入住日期 YYYY-MM-DD |
+| \`checkOut\` | | 退房日期 YYYY-MM-DD |
+| \`amount\` | | 预估金额 |
+| \`currency\` | | 币种 |
+| \`sortOrder\` | | 排序号（同日期内排序） |
+
+需要的 scope：\`trip:create\`
+
+### 16. 查看行程单列表
+
+\`\`\`http
+GET {REIMBURSEMENT_API_URL}/api/trip-itineraries
+\`\`\`
+
+查询参数：
+- \`tripId\` - 按行程筛选
+- \`reimbursementId\` - 按报销单筛选
+
+需要的 scope：\`trip:read\`
+
+### 17. 查看行程单详情
+
+\`\`\`http
+GET {REIMBURSEMENT_API_URL}/api/trip-itineraries/{id}
+\`\`\`
+
+需要的 scope：\`trip:read\`
+
+### 18. 更新行程单
+
+\`\`\`http
+PUT {REIMBURSEMENT_API_URL}/api/trip-itineraries/{id}
+Content-Type: application/json
+\`\`\`
+
+支持部分更新。如果传了 \`items\` 数组，会**全量替换**所有明细。
+
+**确认行程单**：\`{ "status": "confirmed" }\`
+**关联报销单**：\`{ "reimbursementId": "报销单ID" }\`
+
+需要的 scope：\`trip:create\`
+
+### 19. 删除行程单
+
+\`\`\`http
+DELETE {REIMBURSEMENT_API_URL}/api/trip-itineraries/{id}
+\`\`\`
+
+级联删除所有明细项。需要的 scope：\`trip:create\`
+
+## 典型对话流程 - 差旅行程规划
+
+### 用户在 Telegram 整理好行程后说："帮我把行程记录到报销系统"
+
+1. 收集用户在聊天中提到的行程信息（日期、航班、酒店、会议等）
+2. 查询公司差旅政策：\`GET /api/settings/policies\`
+3. 整理成结构化行程，展示给用户确认
+4. 创建 Trip：\`POST /api/trips\`
+5. 创建 Itinerary：\`POST /api/trip-itineraries\`（status=draft）
+6. 确认后更新状态：\`PUT /api/trip-itineraries/{id}\` → status=confirmed
+7. 可选：创建预估报销单 \`POST /api/reimbursements\`（status=draft）并关联
+
+### 用户："我下周三到周五要去北京见客户，帮我安排下行程"
+
+1. 确认细节：出发城市、会议时间/地点、预算偏好
+2. 查询公司差旅政策：\`GET /api/settings/policies\`
+3. 生成行程方案，标注价格和政策合规情况
+4. 用户确认后写入系统（创建 Trip + Itinerary）
+5. 创建预估报销单并提交审批
+
 ## 典型对话流程
 
 ### 用户："帮我报销昨天的打车费 45 元"
@@ -409,6 +658,15 @@ export async function GET(request: NextRequest) {
         { method: 'GET', path: '/api/settings/policies', scope: 'policy:read', description: '查看报销政策' },
         { method: 'GET', path: '/api/analytics/expenses', scope: 'analytics:read', description: '查看费用分析' },
         { method: 'GET', path: '/api/settings/profile', scope: 'profile:read', description: '查看个人信息' },
+        { method: 'POST', path: '/api/trips', scope: 'trip:create', description: '创建行程' },
+        { method: 'GET', path: '/api/trips', scope: 'trip:read', description: '查看行程列表' },
+        { method: 'GET', path: '/api/trips/{id}', scope: 'trip:read', description: '查看行程详情' },
+        { method: 'PUT', path: '/api/trips/{id}', scope: 'trip:create', description: '更新行程' },
+        { method: 'POST', path: '/api/trip-itineraries', scope: 'trip:create', description: '创建行程单（含明细）' },
+        { method: 'GET', path: '/api/trip-itineraries', scope: 'trip:read', description: '查看行程单列表' },
+        { method: 'GET', path: '/api/trip-itineraries/{id}', scope: 'trip:read', description: '查看行程单详情' },
+        { method: 'PUT', path: '/api/trip-itineraries/{id}', scope: 'trip:create', description: '更新行程单' },
+        { method: 'DELETE', path: '/api/trip-itineraries/{id}', scope: 'trip:create', description: '删除行程单' },
       ],
       available_scopes: [
         'reimbursement:read', 'reimbursement:create', 'reimbursement:update',
