@@ -593,6 +593,49 @@ DELETE {REIMBURSEMENT_API_URL}/api/trip-itineraries/{id}
 2. 确认用户要删除哪一笔
 3. 调用 DELETE /api/reimbursements/{id} 删除
 
+## 审批提醒
+
+OpenClaw 可以帮助审批人查看待审批的报销单，并通过 Telegram 发送提醒。
+
+### 20. 查看待审批报销单
+
+\`\`\`http
+GET {REIMBURSEMENT_API_URL}/api/approvals/pending
+\`\`\`
+
+返回当前用户（API Key 绑定的用户）作为审批人的待审批报销单列表。
+
+需要的 scope：\`approval:read\`
+
+响应示例：
+\`\`\`json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "title": "3月北京出差报销",
+      "totalAmount": 5200,
+      "baseCurrency": "CNY",
+      "status": "pending",
+      "submittedAt": "2026-03-15T10:00:00Z",
+      "waitingDays": 4,
+      "submitter": { "id": "uuid", "name": "张三", "email": "zhangsan@example.com" },
+      "approvalStep": { "stepOrder": 1, "stepType": "manager", "stepName": "直属上级审批" }
+    }
+  ],
+  "meta": { "total": 1 }
+}
+\`\`\`
+
+### 21. 触发审批提醒（Telegram）
+
+\`\`\`http
+GET {REIMBURSEMENT_API_URL}/api/cron/approval-reminder
+\`\`\`
+
+手动触发一次审批提醒，通过 Telegram 通知所有待审批的审批人。
+
 ## 错误处理
 
 所有错误响应格式：
@@ -667,6 +710,8 @@ export async function GET(request: NextRequest) {
         { method: 'GET', path: '/api/trip-itineraries/{id}', scope: 'trip:read', description: '查看行程单详情' },
         { method: 'PUT', path: '/api/trip-itineraries/{id}', scope: 'trip:create', description: '更新行程单' },
         { method: 'DELETE', path: '/api/trip-itineraries/{id}', scope: 'trip:create', description: '删除行程单' },
+        { method: 'GET', path: '/api/approvals/pending', scope: 'approval:read', description: '查看待审批报销单' },
+        { method: 'GET', path: '/api/cron/approval-reminder', scope: null, description: '触发审批提醒（Telegram）' },
       ],
       available_scopes: [
         'reimbursement:read', 'reimbursement:create', 'reimbursement:update',
@@ -674,6 +719,7 @@ export async function GET(request: NextRequest) {
         'receipt:read', 'receipt:upload',
         'policy:read', 'trip:read', 'trip:create',
         'analytics:read', 'profile:read', 'settings:read',
+        'approval:read',
       ],
       error_codes: [
         { code: 'INVALID_API_KEY', status: 401, description: 'API Key 无效' },

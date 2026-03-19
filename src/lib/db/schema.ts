@@ -134,6 +134,7 @@ export const users = pgTable('users', {
   managerId: uuid('manager_id'),
   bankAccount: jsonb('bank_account'),
   preferences: jsonb('preferences').default({}),
+  telegramChatId: text('telegram_chat_id'),          // Telegram Chat ID，用于发送审批提醒
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
