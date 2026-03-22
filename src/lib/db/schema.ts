@@ -873,13 +873,6 @@ export const invitationsRelations = relations(invitations, ({ one }) => ({
   }),
 }));
 
-export const passwordResetTokensRelations = relations(passwordResetTokens, ({ one }) => ({
-  user: one(users, {
-    fields: [passwordResetTokens.userId],
-    references: [users.id],
-  }),
-}));
-
 export const advancesRelations = relations(advances, ({ one, many }) => ({
   tenant: one(tenants, {
     fields: [advances.tenantId],
@@ -1253,3 +1246,10 @@ export const passwordResetTokens = pgTable('password_reset_tokens', {
   usedAt: timestamp('used_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+export const passwordResetTokensRelations = relations(passwordResetTokens, ({ one }) => ({
+  user: one(users, {
+    fields: [passwordResetTokens.userId],
+    references: [users.id],
+  }),
+}));
