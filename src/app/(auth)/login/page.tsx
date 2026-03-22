@@ -132,7 +132,7 @@ function LoginForm() {
               />
             </div>
 
-            <div style={{ marginBottom: '1.5rem' }}>
+            <div style={{ marginBottom: '0.5rem' }}>
               <label style={{
                 display: 'block',
                 fontSize: '0.875rem',
@@ -158,6 +158,12 @@ function LoginForm() {
                   boxSizing: 'border-box'
                 }}
               />
+            </div>
+
+            <div style={{ textAlign: 'right', marginBottom: '1.5rem' }}>
+              <Link href="/forgot-password" style={{ color: '#2563eb', textDecoration: 'none', fontSize: '0.875rem' }}>
+                {t.login.forgotPassword}
+              </Link>
             </div>
 
             <button
