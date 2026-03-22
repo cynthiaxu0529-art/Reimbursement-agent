@@ -858,6 +858,104 @@ DELETE {REIMBURSEMENT_API_URL}/api/trip-itineraries/{id}
 2. 展示报销单审批状态
 3. 如果被驳回，展示原因并协助修改重新提交
 
+## 审批提醒
+
+OpenClaw 可以帮助审批人查看待审批的报销单，并通过 Telegram 发送提醒。
+
+### 20. 查看待审批报销单
+
+```http
+GET {REIMBURSEMENT_API_URL}/api/approvals/pending
+```
+
+返回当前用户（API Key 绑定的用户）作为审批人的待审批报销单列表。
+
+需要的 scope：`approval:read`
+
+响应示例：
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "title": "3月北京出差报销",
+      "totalAmount": 5200,
+      "totalAmountInBaseCurrency": 720,
+      "baseCurrency": "CNY",
+      "status": "pending",
+      "submittedAt": "2026-03-15T10:00:00Z",
+      "waitingDays": 4,
+      "submitter": {
+        "id": "uuid",
+        "name": "张三",
+        "email": "zhangsan@example.com"
+      },
+      "approvalStep": {
+        "stepOrder": 1,
+        "stepType": "manager",
+        "stepName": "直属上级审批",
+        "assignedAt": "2026-03-15T10:00:00Z"
+      }
+    }
+  ],
+  "meta": { "total": 1 }
+}
+```
+
+### 21. 触发审批提醒（Telegram）
+
+```http
+GET {REIMBURSEMENT_API_URL}/api/cron/approval-reminder
+```
+
+手动触发一次审批提醒，系统会查找所有待审批的报销单，并通过 Telegram 通知对应的审批人。
+
+**前置条件：**
+- 服务器已配置 `TELEGRAM_BOT_TOKEN`
+- 审批人的用户资料中已绑定 `telegramChatId`
+
+认证方式：`Authorization: Bearer <CRON_SECRET>` 或 API Key
+
+响应示例：
+```json
+{
+  "success": true,
+  "message": "已发送 2 条审批提醒",
+  "notified": 2,
+  "totalPending": 5,
+  "details": [
+    {
+      "approverId": "uuid",
+      "approverName": "李经理",
+      "pendingCount": 3,
+      "sent": true
+    },
+    {
+      "approverId": "uuid",
+      "approverName": "王总监",
+      "pendingCount": 2,
+      "sent": true
+    }
+  ]
+}
+```
+
+## 典型对话流程 - 审批提醒
+
+### 用户："帮我看看有没有待审批的报销单"
+
+1. 调用 `GET /api/approvals/pending` 查询待审批列表
+2. 格式化展示：报销标题、提交人、金额、等待天数
+3. 提示用户可以前往系统审批
+
+### 用户："提醒一下审批人赶紧审批"
+
+1. 调用 `GET /api/cron/approval-reminder` 触发 Telegram 提醒
+2. 告知用户提醒已发送，展示发送结果
+
+---
+
 ## 错误处理
 
 所有错误响应格式：
