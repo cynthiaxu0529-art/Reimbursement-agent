@@ -155,6 +155,37 @@ const en: Translations = {
     loginFailedRetry: 'Login failed, please try again later',
     noAccount: "Don't have an account?",
     registerFree: 'Sign Up Free',
+    forgotPassword: 'Forgot password?',
+  },
+
+  // Forgot password page
+  forgotPassword: {
+    title: 'Forgot Password',
+    desc: 'Enter your email to receive a reset link',
+    email: 'Email',
+    sendButton: 'Send Reset Link',
+    sending: 'Sending...',
+    sendFailed: 'Failed to send, please try again later',
+    emailSent: 'Reset link sent!',
+    checkInbox: 'Please check your email inbox (and spam folder) for the reset link. The link expires in 1 hour.',
+    backToLogin: 'Back to Login',
+  },
+
+  // Reset password page
+  resetPassword: {
+    title: 'Reset Password',
+    desc: 'Enter your new password',
+    newPassword: 'New Password',
+    confirmPassword: 'Confirm Password',
+    resetButton: 'Reset Password',
+    resetting: 'Resetting...',
+    resetFailed: 'Reset failed, please try again later',
+    success: 'Password reset successfully!',
+    redirecting: 'Redirecting to login page...',
+    invalidLink: 'Invalid or missing reset link',
+    requestNew: 'Request a new reset link',
+    minLength: 'Password must be at least 8 characters',
+    mismatch: 'Passwords do not match',
   },
 
   // Register page

@@ -153,6 +153,37 @@ const zh = {
     loginFailedRetry: '登录失败，请稍后重试',
     noAccount: '还没有账号？',
     registerFree: '免费注册',
+    forgotPassword: '忘记密码？',
+  },
+
+  // Forgot password page
+  forgotPassword: {
+    title: '忘记密码',
+    desc: '输入你的邮箱，我们将发送重置链接',
+    email: '邮箱',
+    sendButton: '发送重置链接',
+    sending: '发送中...',
+    sendFailed: '发送失败，请稍后重试',
+    emailSent: '重置链接已发送！',
+    checkInbox: '请查看你的邮箱收件箱（和垃圾邮件文件夹）中的重置链接。链接有效期为 1 小时。',
+    backToLogin: '返回登录',
+  },
+
+  // Reset password page
+  resetPassword: {
+    title: '重置密码',
+    desc: '输入你的新密码',
+    newPassword: '新密码',
+    confirmPassword: '确认密码',
+    resetButton: '重置密码',
+    resetting: '重置中...',
+    resetFailed: '重置失败，请稍后重试',
+    success: '密码已成功重置！',
+    redirecting: '正在跳转到登录页面...',
+    invalidLink: '重置链接无效或缺失',
+    requestNew: '重新申请重置链接',
+    minLength: '密码至少需要 8 个字符',
+    mismatch: '两次输入的密码不一致',
   },
 
   // Register page
