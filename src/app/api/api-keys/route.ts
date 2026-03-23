@@ -13,7 +13,7 @@ import { db } from '@/lib/db';
 import { apiKeys, users } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { generateApiKey, hashApiKey } from '@/lib/auth/api-key';
-import { validateScopes, SCOPE_PRESETS, getScopesByCategory } from '@/lib/auth/scopes';
+import { validateScopes, filterScopesByRole, SCOPE_PRESETS, getScopesByCategory } from '@/lib/auth/scopes';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,12 +62,16 @@ export async function GET(request: NextRequest) {
     // 也返回可用的 scope 信息，方便前端 / Agent 展示
     const scopeCategories = getScopesByCategory();
 
+    // 返回当前用户角色，前端根据角色过滤可选权限
+    const userRoles = currentUser.roles || [currentUser.role || 'employee'];
+
     return NextResponse.json({
       success: true,
       data: keys,
       meta: {
         scopePresets: SCOPE_PRESETS,
         scopeCategories,
+        userRoles,
       },
     });
   } catch (error) {
@@ -134,6 +138,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: `无效的 scope: ${scopeValidation.invalid.join(', ')}` },
         { status: 400 }
+      );
+    }
+
+    // 验证用户角色是否允许使用这些 scopes
+    const userRoles = currentUser.roles || [currentUser.role || 'employee'];
+    const { denied } = filterScopesByRole(scopes, userRoles);
+    if (denied.length > 0) {
+      return NextResponse.json(
+        { error: `您的角色不允许使用以下权限: ${denied.join(', ')}` },
+        { status: 403 }
       );
     }
 

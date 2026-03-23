@@ -121,6 +121,25 @@ const SCOPE_PRESETS = {
   },
 };
 
+// Scope 到所需角色的映射（与后端 SCOPE_METADATA.requiredRoles 一致）
+const SCOPE_REQUIRED_ROLES: Record<string, string[]> = {
+  'approval:read': ['manager', 'admin', 'super_admin'],
+  'approval:approve': ['manager', 'super_admin'],
+  'payment:read': ['finance', 'super_admin'],
+  'payment:process': ['finance', 'super_admin'],
+  'accounting_summary:read': ['finance', 'admin', 'super_admin'],
+  'accounting_summary:generate': ['finance', 'admin', 'super_admin'],
+  'account_mapping:read': ['finance', 'admin', 'super_admin'],
+  'account_mapping:update': ['finance', 'super_admin'],
+};
+
+/** 检查用户角色是否允许使用该 scope */
+function isScopeAllowed(scope: string, userRoles: string[]): boolean {
+  const required = SCOPE_REQUIRED_ROLES[scope];
+  if (!required || required.length === 0) return true;
+  return userRoles.some(role => required.includes(role));
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -131,6 +150,7 @@ export default function ApiKeysPage() {
 
   // State
   const [keys, setKeys] = useState<ApiKeyItem[]>([]);
+  const [userRoles, setUserRoles] = useState<string[]>(['employee']);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -169,6 +189,9 @@ export default function ApiKeysPage() {
       const data = await res.json();
       if (data.success) {
         setKeys(data.data);
+        if (data.meta?.userRoles) {
+          setUserRoles(data.meta.userRoles);
+        }
       }
     } catch {
       setError(t.fetchError);
@@ -414,8 +437,10 @@ export default function ApiKeysPage() {
             {/* Scope Presets */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">{t.scopePreset}</label>
-              <div className="flex gap-2">
-                {Object.entries(SCOPE_PRESETS).map(([key, preset]) => (
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(SCOPE_PRESETS)
+                  .filter(([, preset]) => preset.scopes.every(s => isScopeAllowed(s, userRoles)))
+                  .map(([key, preset]) => (
                   <Button
                     key={key}
                     variant="outline"
@@ -435,13 +460,16 @@ export default function ApiKeysPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">{t.scopes}</label>
               <div className="space-y-3">
-                {SCOPE_GROUPS.map(group => (
+                {SCOPE_GROUPS.map(group => {
+                  const allowedScopes = group.scopes.filter(s => isScopeAllowed(s.value, userRoles));
+                  if (allowedScopes.length === 0) return null;
+                  return (
                   <div key={group.label.en}>
                     <div className="text-xs font-medium text-gray-500 uppercase mb-1.5">
                       {group.label[language]}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {group.scopes.map(scope => (
+                      {allowedScopes.map(scope => (
                         <label
                           key={scope.value}
                           className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs cursor-pointer border transition-colors ${
@@ -472,7 +500,8 @@ export default function ApiKeysPage() {
                       ))}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -626,8 +655,10 @@ export default function ApiKeysPage() {
                     {/* Edit Scope Presets */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">{t.scopePreset}</label>
-                      <div className="flex gap-2">
-                        {Object.entries(SCOPE_PRESETS).map(([presetKey, preset]) => (
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(SCOPE_PRESETS)
+                          .filter(([, preset]) => preset.scopes.every(s => isScopeAllowed(s, userRoles)))
+                          .map(([presetKey, preset]) => (
                           <Button
                             key={presetKey}
                             variant="outline"
@@ -647,13 +678,16 @@ export default function ApiKeysPage() {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">{t.scopes}</label>
                       <div className="space-y-3">
-                        {SCOPE_GROUPS.map(group => (
+                        {SCOPE_GROUPS.map(group => {
+                          const allowedScopes = group.scopes.filter(s => isScopeAllowed(s.value, userRoles));
+                          if (allowedScopes.length === 0) return null;
+                          return (
                           <div key={group.label.en}>
                             <div className="text-xs font-medium text-gray-500 uppercase mb-1.5">
                               {group.label[language]}
                             </div>
                             <div className="flex flex-wrap gap-2">
-                              {group.scopes.map(scope => (
+                              {allowedScopes.map(scope => (
                                 <label
                                   key={scope.value}
                                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs cursor-pointer border transition-colors ${
@@ -684,7 +718,8 @@ export default function ApiKeysPage() {
                               ))}
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
 

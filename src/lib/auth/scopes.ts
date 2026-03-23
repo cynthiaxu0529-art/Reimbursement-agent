@@ -402,6 +402,31 @@ export function validateScopes(scopes: string[]): { valid: boolean; invalid: str
 }
 
 /**
+ * 检查用户角色是否允许使用指定的 scopes
+ * 返回不允许的 scope 列表
+ */
+export function filterScopesByRole(scopes: string[], userRoles: string[]): {
+  allowed: string[];
+  denied: string[];
+} {
+  const allowed: string[] = [];
+  const denied: string[] = [];
+
+  for (const scope of scopes) {
+    const metadata = SCOPE_METADATA[scope as ApiScope];
+    if (!metadata?.requiredRoles || metadata.requiredRoles.length === 0) {
+      allowed.push(scope);
+    } else if (userRoles.some(role => metadata.requiredRoles!.includes(role))) {
+      allowed.push(scope);
+    } else {
+      denied.push(scope);
+    }
+  }
+
+  return { allowed, denied };
+}
+
+/**
  * 检查 scope 是否需要特定的用户角色
  * 返回 true 表示角色满足要求
  */
