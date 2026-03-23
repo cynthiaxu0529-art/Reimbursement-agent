@@ -18,13 +18,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 查找用户（无论是否存在都返回成功，防止枚举攻击）
-    const user = await db.query.users.findFirst({
-      where: eq(users.email, email.toLowerCase().trim()),
-    });
+    // 所有数据库和邮件操作都在内部 try-catch 中，确保始终返回成功（防止枚举攻击）
+    try {
+      const user = await db.query.users.findFirst({
+        where: eq(users.email, email.toLowerCase().trim()),
+      });
 
-    if (user && user.passwordHash) {
-      try {
+      if (user && user.passwordHash) {
         // 生成随机 token
         const token = crypto.randomBytes(32).toString('hex');
         const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
@@ -66,13 +66,13 @@ export async function POST(request: NextRequest) {
             </div>
           `,
         });
-      } catch (innerError) {
-        // 记录错误但仍返回成功，防止枚举攻击
-        console.error('Failed to send reset email:', innerError);
       }
+    } catch (innerError) {
+      // 记录错误但仍返回成功，防止枚举攻击
+      console.error('Failed to process reset request:', innerError);
     }
 
-    // 无论用户是否存在或发送是否成功，都返回成功（防止邮箱枚举）
+    // 无论用户是否存在、数据库是否正常、邮件是否发送成功，都返回成功（防止邮箱枚举）
     return NextResponse.json({
       success: true,
       message: '如果该邮箱已注册，重置链接已发送到你的邮箱',
