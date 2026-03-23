@@ -862,6 +862,15 @@ DELETE {REIMBURSEMENT_API_URL}/api/trip-itineraries/{id}
 
 OpenClaw 可以帮助审批人查看待审批的报销单，并通过 Telegram 发送提醒。
 
+**所需权限**：审批相关操作需要以下 scope 和角色：
+
+| Scope | 说明 | 所需角色 |
+|-------|------|----------|
+| `approval:read` | 查看待审批报销单 | manager, admin, super_admin |
+| `approval:approve` | 批准/驳回报销单 | manager, super_admin |
+
+创建 API Key 时，可选择「审批管理」预设一键配置以上权限。
+
 ### 20. 查看待审批报销单
 
 ```http
@@ -902,6 +911,32 @@ GET {REIMBURSEMENT_API_URL}/api/approvals/pending
   "meta": { "total": 1 }
 }
 ```
+
+### 20a. 定时轮询待审批报销单（推荐）
+
+```http
+GET {REIMBURSEMENT_API_URL}/api/approvals/pending-poll
+```
+
+功能与 `GET /api/approvals/pending` 相同，但专为 OpenClaw 定时抓取设计。
+
+**频率限制**：同一 API Key **每小时最多请求 1 次**。超频会返回 429：
+```json
+{
+  "success": false,
+  "error": "轮询频率限制：每小时最多 1 次。请 3420 秒后重试。",
+  "error_code": "POLL_RATE_LIMITED",
+  "retry_after_seconds": 3420
+}
+```
+
+响应 header 包含 `Retry-After` 字段（秒数），请据此安排下次轮询。
+
+成功响应额外包含 `meta.next_poll_allowed_at`（ISO 时间），标明下次可请求的时间。
+
+需要的 scope：`approval:read`
+
+**推荐用法**：OpenClaw 设置定时任务，每小时调用一次此端点，有新的待审批报销时通过 Telegram 通知审批人。
 
 ### 21. 触发审批提醒（Telegram）
 
@@ -984,4 +1019,5 @@ GET {REIMBURSEMENT_API_URL}/api/cron/approval-reminder
 | 400 | - | 请求参数错误 | 根据 message 字段提示用户修正 |
 | 404 | - | 资源不存在 | 确认 ID 是否正确 |
 | 429 | `RATE_LIMITED` | 请求过于频繁 | 读取 `Retry-After` 响应头，等待后重试 |
+| 429 | `POLL_RATE_LIMITED` | 轮询频率超限（每小时 1 次） | 读取 `retry_after_seconds` 或 `Retry-After` 头，等待后重试 |
 | 500 | - | 服务器错误 | 建议稍后重试 |

@@ -597,6 +597,15 @@ DELETE {REIMBURSEMENT_API_URL}/api/trip-itineraries/{id}
 
 OpenClaw 可以帮助审批人查看待审批的报销单，并通过 Telegram 发送提醒。
 
+**所需权限**：审批相关操作需要以下 scope 和角色：
+
+| Scope | 说明 | 所需角色 |
+|-------|------|----------|
+| \`approval:read\` | 查看待审批报销单 | manager, admin, super_admin |
+| \`approval:approve\` | 批准/驳回报销单 | manager, super_admin |
+
+创建 API Key 时，可选择「审批管理」预设一键配置以上权限。
+
 ### 20. 查看待审批报销单
 
 \`\`\`http
@@ -627,6 +636,19 @@ GET {REIMBURSEMENT_API_URL}/api/approvals/pending
   "meta": { "total": 1 }
 }
 \`\`\`
+
+### 20a. 定时轮询待审批报销单（推荐）
+
+\`\`\`http
+GET {REIMBURSEMENT_API_URL}/api/approvals/pending-poll
+\`\`\`
+
+功能与 \`GET /api/approvals/pending\` 相同，但专为 OpenClaw 定时抓取设计。
+
+**频率限制**：同一 API Key **每小时最多请求 1 次**。超频返回 429 + \`Retry-After\` header。
+响应额外包含 \`meta.next_poll_allowed_at\`（下次可请求时间）。
+
+需要的 scope：\`approval:read\`
 
 ### 21. 触发审批提醒（Telegram）
 
@@ -664,6 +686,7 @@ GET {REIMBURSEMENT_API_URL}/api/cron/approval-reminder
 | 400 | - | 请求参数错误 | 根据 message 字段提示用户修正 |
 | 404 | - | 资源不存在 | 确认 ID 是否正确 |
 | 429 | \`RATE_LIMITED\` | 请求过于频繁 | 读取 \`Retry-After\` 响应头，等待后重试 |
+| 429 | \`POLL_RATE_LIMITED\` | 轮询频率超限（每小时 1 次） | 读取 \`retry_after_seconds\` 或 \`Retry-After\` 头，等待后重试 |
 | 500 | - | 服务器错误 | 建议稍后重试 |
 `;
 }
@@ -711,6 +734,7 @@ export async function GET(request: NextRequest) {
         { method: 'PUT', path: '/api/trip-itineraries/{id}', scope: 'trip:create', description: '更新行程单' },
         { method: 'DELETE', path: '/api/trip-itineraries/{id}', scope: 'trip:create', description: '删除行程单' },
         { method: 'GET', path: '/api/approvals/pending', scope: 'approval:read', description: '查看待审批报销单' },
+        { method: 'GET', path: '/api/approvals/pending-poll', scope: 'approval:read', description: '定时轮询待审批（每小时限 1 次）' },
         { method: 'GET', path: '/api/cron/approval-reminder', scope: null, description: '触发审批提醒（Telegram）' },
       ],
       available_scopes: [
@@ -719,7 +743,7 @@ export async function GET(request: NextRequest) {
         'receipt:read', 'receipt:upload',
         'policy:read', 'trip:read', 'trip:create',
         'analytics:read', 'profile:read', 'settings:read',
-        'approval:read',
+        'approval:read', 'approval:approve',
       ],
       error_codes: [
         { code: 'INVALID_API_KEY', status: 401, description: 'API Key 无效' },
@@ -729,6 +753,7 @@ export async function GET(request: NextRequest) {
         { code: 'INSUFFICIENT_SCOPE', status: 403, description: '权限不足' },
         { code: 'ROLE_INSUFFICIENT', status: 403, description: '用户角色不够' },
         { code: 'RATE_LIMITED', status: 429, description: '请求过于频繁' },
+        { code: 'POLL_RATE_LIMITED', status: 429, description: '轮询频率超限（每小时 1 次）' },
       ],
     });
   }
