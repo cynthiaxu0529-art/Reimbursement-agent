@@ -1,0 +1,16 @@
+{
+  "skills": [
+    {
+      "name": "reimbursement",
+      "version": "1.2.0",
+      "description": "企业报销管理 - 帮助用户规划差旅行程、提交报销、上传发票、查询报销状态、查看政策和分析费用",
+      "url": "/skill.md",
+      "requires": {
+        "env": [
+          "REIMBURSEMENT_API_KEY",
+          "REIMBURSEMENT_API_URL"
+        ]
+      }
+    }
+  ]
+}

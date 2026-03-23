@@ -1,10 +1,10 @@
 /**
- * 公开的 OpenClaw Skill 端点
+ * 公开的 OpenClaw Skill 端点（兼容旧地址）
  *
  * GET /api/openclaw/skill - 返回 SKILL.md 内容（无需认证）
  *
- * 这个端点是公开的，OpenClaw agent 可以直接抓取来了解如何调用报销系统 API。
- * 不包含任何敏感信息（API Key、内部架构等），只有 API 使用说明。
+ * 标准地址已迁移到静态文件 /skill.md，此端点保留向后兼容。
+ * 发现入口：/.well-known/skills/index.json
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -20,7 +20,7 @@ const SKILL_META = {
     env: ['REIMBURSEMENT_API_KEY', 'REIMBURSEMENT_API_URL'],
   },
   setup_url: '/dashboard/settings/api-keys',
-  docs_url: '/api/openclaw/skill',
+  docs_url: '/skill.md',
 };
 
 /** 动态生成 SKILL.md，把当前服务的真实 URL 嵌入 */
