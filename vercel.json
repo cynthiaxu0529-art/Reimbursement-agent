@@ -1,6 +1,6 @@
 {
   "framework": "nextjs",
-  "buildCommand": "npm run build",
+  "buildCommand": "node scripts/migrate.js && npm run build",
   "outputDirectory": ".next",
   "crons": [
     {
