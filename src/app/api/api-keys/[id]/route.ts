@@ -11,7 +11,7 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { apiKeys, agentAuditLogs, users } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { validateScopes } from '@/lib/auth/scopes';
+import { validateScopes, filterScopesByRole } from '@/lib/auth/scopes';
 
 export const dynamic = 'force-dynamic';
 
@@ -144,6 +144,20 @@ export async function PATCH(
           { status: 400 }
         );
       }
+
+      // 验证用户角色是否允许使用这些 scopes
+      const currentUser = await db.query.users.findFirst({
+        where: eq(users.id, session.user.id),
+      });
+      const userRoles = currentUser?.roles || [currentUser?.role || 'employee'];
+      const { denied } = filterScopesByRole(body.scopes, userRoles);
+      if (denied.length > 0) {
+        return NextResponse.json(
+          { error: `您的角色不允许使用以下权限: ${denied.join(', ')}` },
+          { status: 403 }
+        );
+      }
+
       updates.scopes = body.scopes;
     }
 

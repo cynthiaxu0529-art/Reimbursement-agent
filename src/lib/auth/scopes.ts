@@ -254,6 +254,15 @@ export const SCOPE_PRESETS = {
     API_SCOPES.PROFILE_READ,
   ],
 
+  /** 审批管理：查看待审批 + 执行审批（供 OpenClaw 等 Agent 管理审批流程） */
+  APPROVAL_MANAGER: [
+    API_SCOPES.APPROVAL_READ,
+    API_SCOPES.APPROVAL_APPROVE,
+    API_SCOPES.REIMBURSEMENT_READ,
+    API_SCOPES.RECEIPT_READ,
+    API_SCOPES.PROFILE_READ,
+  ],
+
   /** Accounting Agent：读取记账汇总 + 科目映射 + 触发生成（供外部会计系统拉取数据） */
   ACCOUNTING_AGENT: [
     API_SCOPES.ACCOUNTING_SUMMARY_READ,
@@ -321,6 +330,12 @@ export const ROUTE_SCOPE_MAP: Record<string, { method: string; scope: ApiScope }
   '/api/settings/profile': [
     { method: 'GET', scope: API_SCOPES.PROFILE_READ },
   ],
+  '/api/approvals/pending': [
+    { method: 'GET', scope: API_SCOPES.APPROVAL_READ },
+  ],
+  '/api/approvals/pending-poll': [
+    { method: 'GET', scope: API_SCOPES.APPROVAL_READ },
+  ],
   '/api/reimbursement-summaries': [
     { method: 'GET', scope: API_SCOPES.ACCOUNTING_SUMMARY_READ },
   ],
@@ -384,6 +399,31 @@ export function validateScopes(scopes: string[]): { valid: boolean; invalid: str
     valid: invalid.length === 0,
     invalid,
   };
+}
+
+/**
+ * 检查用户角色是否允许使用指定的 scopes
+ * 返回不允许的 scope 列表
+ */
+export function filterScopesByRole(scopes: string[], userRoles: string[]): {
+  allowed: string[];
+  denied: string[];
+} {
+  const allowed: string[] = [];
+  const denied: string[] = [];
+
+  for (const scope of scopes) {
+    const metadata = SCOPE_METADATA[scope as ApiScope];
+    if (!metadata?.requiredRoles || metadata.requiredRoles.length === 0) {
+      allowed.push(scope);
+    } else if (userRoles.some(role => metadata.requiredRoles!.includes(role))) {
+      allowed.push(scope);
+    } else {
+      denied.push(scope);
+    }
+  }
+
+  return { allowed, denied };
 }
 
 /**

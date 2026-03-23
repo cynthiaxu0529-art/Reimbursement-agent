@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
         const resetUrl = `${baseUrl}/reset-password?token=${token}`;
 
         // 发送邮件
-        await sendEmail({
+        const emailResult = await sendEmail({
           to: user.email,
           subject: '重置密码 / Reset Your Password',
           html: `
@@ -66,6 +66,12 @@ export async function POST(request: NextRequest) {
             </div>
           `,
         });
+
+        if (emailResult.success) {
+          console.log('[forgot-password] Email sent successfully to:', user.email);
+        } else {
+          console.error('[forgot-password] Email failed:', emailResult.error);
+        }
       }
     } catch (innerError) {
       // 记录错误但仍返回成功，防止枚举攻击
