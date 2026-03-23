@@ -28,17 +28,11 @@ async function main() {
       idle_timeout: 5,
     });
 
-    const migrationFiles = [
-      '0007_add_password_reset_tokens.sql',
-      '0008_add_telegram_chat_id.sql',
-    ];
+    const migrationFile = path.join(__dirname, '..', 'drizzle', '0007_add_password_reset_tokens.sql');
+    const migrationSql = fs.readFileSync(migrationFile, 'utf-8');
 
-    for (const file of migrationFiles) {
-      const migrationFile = path.join(__dirname, '..', 'drizzle', file);
-      const migrationSql = fs.readFileSync(migrationFile, 'utf-8');
-      console.log(`[migrate] Running ${file}...`);
-      await sql.unsafe(migrationSql);
-    }
+    console.log('[migrate] Running password_reset_tokens migration...');
+    await sql.unsafe(migrationSql);
     console.log('[migrate] Done.');
   } catch (err) {
     console.error('[migrate] Error:', err.message);
