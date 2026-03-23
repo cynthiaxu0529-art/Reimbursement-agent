@@ -1,6 +1,6 @@
 {
   "framework": "nextjs",
-  "buildCommand": "npx drizzle-kit push && npm run build",
+  "buildCommand": "npx drizzle-kit push --force && npm run build",
   "outputDirectory": ".next",
   "crons": [
     {
