@@ -52,6 +52,20 @@ const SCOPE_GROUPS = [
     ],
   },
   {
+    label: { zh: '审批管理', en: 'Approvals' },
+    scopes: [
+      { value: 'approval:read', label: { zh: '查看待审批', en: 'View pending approvals' } },
+      { value: 'approval:approve', label: { zh: '执行审批', en: 'Approve/Reject' } },
+    ],
+  },
+  {
+    label: { zh: '付款管理', en: 'Payments' },
+    scopes: [
+      { value: 'payment:read', label: { zh: '查看付款', en: 'View payments' } },
+      { value: 'payment:process', label: { zh: '处理付款', en: 'Process payments' } },
+    ],
+  },
+  {
     label: { zh: '记账与会计', en: 'Accounting' },
     scopes: [
       { value: 'accounting_summary:read', label: { zh: '查看记账汇总', en: 'View accounting summaries' } },
@@ -95,6 +109,14 @@ const SCOPE_PRESETS = {
       'accounting_summary:read', 'account_mapping:read',
       'reimbursement:read', 'receipt:read',
       'analytics:read', 'settings:read',
+    ],
+  },
+  approval_manager: {
+    label: { zh: '审批管理', en: 'Approval Manager' },
+    scopes: [
+      'approval:read', 'approval:approve',
+      'reimbursement:read', 'receipt:read',
+      'profile:read',
     ],
   },
 };
