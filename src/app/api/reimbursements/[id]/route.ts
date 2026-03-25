@@ -322,10 +322,7 @@ export async function PUT(
       .where(eq(reimbursements.id, id))
       .returning();
 
-    // 跟踪缺失凭证的 items（用于响应警告）
-    let missingReceiptItems: string[] = [];
-
-    // 如果有新的费用明细，删除旧的并创建新的
+    // 如果有新的费用明细，先做校验，再删除旧的并创建新的
     if (items && items.length > 0) {
       // 保留旧 items 的 receiptUrl，用于在新 items 缺失时自动回填
       const oldItems = await db.query.reimbursementItems.findMany({
@@ -334,12 +331,49 @@ export async function PUT(
       const oldReceiptMap = new Map<string, string>();
       for (const old of oldItems) {
         if (old.receiptUrl) {
-          // 按 category+amount+date 组合做模糊匹配 key
           const key = `${old.category}_${old.amount}_${old.date?.toISOString?.()?.split('T')[0] || ''}`;
           oldReceiptMap.set(key, old.receiptUrl);
         }
       }
 
+      // 预检查：尝试回填 receiptUrl 后，仍然缺失的 items
+      const missingReceiptItems: string[] = [];
+      for (const item of items) {
+        let hasReceipt = !!item.receiptUrl;
+        if (!hasReceipt) {
+          const matchKey = `${item.category}_${parseFloat(item.amount) || 0}_${item.date?.split?.('T')[0] || item.date || ''}`;
+          hasReceipt = oldReceiptMap.has(matchKey);
+        }
+        if (!hasReceipt) {
+          missingReceiptItems.push(`${item.category}: ${item.description || item.amount}`);
+        }
+      }
+      if (missingReceiptItems.length > 0) {
+        return apiError(
+          `以下费用项缺少凭证附件（receiptUrl），请先上传凭证再提交：${missingReceiptItems.join('、')}`,
+          400,
+          'MISSING_RECEIPT',
+        );
+      }
+
+      // 检查重复费用项
+      const itemKeys = items.map((item: any) =>
+        `${item.category}_${parseFloat(item.amount) || 0}_${item.date}`
+      );
+      const duplicateKeys = itemKeys.filter((key: string, idx: number) => itemKeys.indexOf(key) !== idx);
+      if (duplicateKeys.length > 0) {
+        const dupes = [...new Set(duplicateKeys)].map((k: string) => {
+          const parts = k.split('_');
+          return `${parts[0]}: ${parts[1]} (${parts[2]})`;
+        });
+        return apiError(
+          `发现重复费用项（类别+金额+日期相同），请确认是否误传：${dupes.join('、')}`,
+          400,
+          'DUPLICATE_ITEMS',
+        );
+      }
+
+      // 校验通过，执行替换
       await db
         .delete(reimbursementItems)
         .where(eq(reimbursementItems.reimbursementId, id));
@@ -424,22 +458,11 @@ export async function PUT(
       }
     }
 
-    const response: Record<string, unknown> = {
+    return NextResponse.json({
       success: true,
       data: updated,
       approvalChain: generatedChain,
-    };
-
-    // 如果有缺失凭证的 items，返回警告
-    if (missingReceiptItems.length > 0) {
-      response.warnings = [{
-        type: 'MISSING_RECEIPT',
-        message: `以下费用项缺少凭证附件（receiptUrl），可能被财务驳回：${missingReceiptItems.join('、')}`,
-        items: missingReceiptItems,
-      }];
-    }
-
-    return NextResponse.json(response);
+    });
   } catch (error) {
     console.error('Update reimbursement error:', error);
     return apiError('更新报销单失败', 500);

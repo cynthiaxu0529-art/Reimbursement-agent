@@ -353,6 +353,35 @@ export async function POST(request: NextRequest) {
       };
     });
 
+    // 检查缺失凭证的 items — 缺凭证直接拒绝创建
+    const missingReceiptItems = adjustedItems
+      .filter((item: any) => !item.receiptUrl)
+      .map((item: any) => `${item.category}: ${item.description || item.amount}`);
+    if (missingReceiptItems.length > 0) {
+      return apiError(
+        `以下费用项缺少凭证附件（receiptUrl），请先上传凭证再提交：${missingReceiptItems.join('、')}`,
+        400,
+        'MISSING_RECEIPT',
+      );
+    }
+
+    // 检查重复费用项（同一报销单内 category+amount+date 相同）
+    const itemKeys = adjustedItems.map((item: any) =>
+      `${item.category}_${parseFloat(item.amount) || 0}_${item.date}`
+    );
+    const duplicateKeys = itemKeys.filter((key: string, idx: number) => itemKeys.indexOf(key) !== idx);
+    if (duplicateKeys.length > 0) {
+      const dupes = [...new Set(duplicateKeys)].map((k: string) => {
+        const parts = k.split('_');
+        return `${parts[0]}: ${parts[1]} (${parts[2]})`;
+      });
+      return apiError(
+        `发现重复费用项（类别+金额+日期相同），请确认是否误传：${dupes.join('、')}`,
+        400,
+        'DUPLICATE_ITEMS',
+      );
+    }
+
     // 计算原币总金额（使用调整后的金额）
     const totalAmount = adjustedItems.reduce(
       (sum: number, item: any) => sum + (parseFloat(item.amount) || 0),
@@ -439,25 +468,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 检查缺失凭证的 items
-    const missingReceiptItems = items
-      .filter((item: any) => !item.receiptUrl)
-      .map((item: any) => `${item.category}: ${item.description || item.amount}`);
-
     // 构建返回数据，包含限额调整信息
     const responseData: any = {
       success: true,
       data: reimbursement,
     };
-
-    // 如果有缺失凭证的 items，返回警告
-    if (missingReceiptItems.length > 0) {
-      responseData.warnings = [{
-        type: 'MISSING_RECEIPT',
-        message: `以下费用项缺少凭证附件（receiptUrl），可能被财务驳回：${missingReceiptItems.join('、')}`,
-        items: missingReceiptItems,
-      }];
-    }
 
     // 如果有金额被调整，返回提示信息
     if (limitResult.totalAdjusted > 0) {
