@@ -68,9 +68,10 @@ API 基础地址：\`{REIMBURSEMENT_API_URL}\`（当前服务地址：${baseUrl}
 2. **金额核实**：如果用户提供的票据金额与口述金额不一致，主动提醒
 3. **政策合规**：提交前先查询政策确认是否超限
 4. **不要猜测**：如果用户没有提供必要信息（金额、类别、日期），请追问而不是猜测
-5. **凭证必须关联（最重要）**：每个费用明细的 \`receiptUrl\` 字段**必须**填入对应上传返回的 \`url\`。没有凭证的费用项会被财务驳回。**绝对不能**创建 \`receiptUrl\` 为空的费用项
-6. **使用原币金额**：创建报销时，\`amount\` 和 \`currency\` 必须使用票据上的**原始币种和原始金额**（如 CNY 662），**不要**使用 OCR 返回的 \`amountInBaseCurrency\`（已转换的本位币金额）。汇率转换由服务端自动完成
-7. **不要手动计算汇率**：Agent 不应自行换算汇率。服务端会根据管理员设定的月初固定汇率自动转换
+5. **凭证必须关联（最重要）**：每个费用明细的 \`receiptUrl\` 字段**必须**填入对应上传返回的 \`url\`。没有凭证的费用项会被财务驳回
+6. **同时填写原币和本位币金额**：每个 item 必须同时填写 \`amount\`+\`currency\`（原始票面值）和 \`exchangeRate\`+\`amountInBaseCurrency\`（用公司汇率表计算）。不要用 OCR 返回的 \`amountInBaseCurrency\`
+7. **汇率必须来自公司汇率表**：使用 \`GET /api/exchange-rates?target={本位币}\` 返回的汇率计算 \`amountInBaseCurrency\`，不要用 OCR 汇率
+8. **政策限额以本位币（USD）为准**：限额规则、审批、支付都以 \`amountInBaseCurrency\` 为判断标准，Agent 提交前必须用美元金额与政策限额对比
 
 ## 必须执行的初始化步骤
 
@@ -241,10 +242,11 @@ Content-Type: application/json
 - \`"status": "pending"\` - 直接提交审批（需要 \`reimbursement:submit\` scope）
 
 **注意事项：**
-- **⚠️ 必须附带票据（最重要）**：每个 item 的 \`receiptUrl\` **必须**填入上传返回的 \`url\`。没有凭证的费用项会被财务驳回。
-- **⚠️ amount 和 currency 必须是原始票面值**：\`amount\` 填 OCR 识别的原始金额（如 \`662\`），\`currency\` 填票据上的原始币种（如 \`CNY\`）。**不要**填入已转换的本位币金额。\`exchangeRate\` 和 \`amountInBaseCurrency\` **不要填**，服务端自动转换。
-- 如果费用超过政策限额，会包含 \`limitAdjustments\` 字段说明调整详情，请告知用户。
-- **OCR 金额保护**：通过 OCR 识别出的发票原始金额应如实填入 \`amount\`，不要修改。
+- **⚠️ 必须附带票据**：每个 item 的 \`receiptUrl\` **必须**填入上传返回的 \`url\`
+- **⚠️ 同时填写原币和本位币**：\`amount\`+\`currency\`（原始票面值）+ \`exchangeRate\`+\`amountInBaseCurrency\`（公司汇率表计算）
+- **⚠️ 政策对比用美元**：限额、审批、支付都以 \`amountInBaseCurrency\` 为准
+- 如果超限，系统会自动调整并在 \`limitAdjustments\` 中说明
+- **OCR 金额保护**：OCR 识别的原始金额如实填入 \`amount\`，不要修改
 
 ### 3. 更新报销单
 
@@ -280,11 +282,12 @@ Content-Type: multipart/form-data
 Agent 调用时，系统自动完成：上传 → OCR 识别 → 汇率转换。
 
 **⚠️ 关键：正确使用 OCR 返回值**
-- \`ocr.amount\` + \`ocr.currency\` → 填入报销 item 的 \`amount\` 和 \`currency\`（原始票面值）
+- \`ocr.amount\` + \`ocr.currency\` → 填入 \`amount\` 和 \`currency\`（原始票面值）
 - 顶层 \`url\` → **必须**填入 \`receiptUrl\`（凭证附件地址）
-- \`ocr.amountInBaseCurrency\` / \`ocr.exchangeRate\` → **仅供参考展示，不要填入报销单**
-- ❌ 错误：\`{ "amount": 91.36, "currency": "USD" }\`（用了转换后的值）
-- ✅ 正确：\`{ "amount": 662, "currency": "CNY", "receiptUrl": "..." }\`（原始票面值+凭证）
+- 用**公司汇率表**（非 OCR 汇率）计算 \`exchangeRate\` 和 \`amountInBaseCurrency\`
+- ❌ 错误：\`{ "amount": 91.36, "currency": "USD" }\`（把转换值当原始值）
+- ❌ 错误：\`{ "amount": 662, "currency": "CNY" }\`（缺少本位币金额）
+- ✅ 正确：\`{ "amount": 662, "currency": "CNY", "exchangeRate": 0.138, "amountInBaseCurrency": 91.36, "receiptUrl": "..." }\`
 
 ### 6. OCR 识别发票（备用）
 
@@ -318,7 +321,7 @@ GET {REIMBURSEMENT_API_URL}/api/exchange-rates?target={本位币}
 \`\`\`
 
 返回管理员设定的当月固定汇率。初始化时必须调用。\`source\` 为 \`monthly_manual\` 的是管理员手动设定的汇率。
-创建报销时**不要自己填入汇率值**，服务端会自动使用这些汇率转换。
+创建报销时，用此汇率计算每个 item 的 \`exchangeRate\` 和 \`amountInBaseCurrency\`。政策限额对比也用此汇率换算后的美元金额。
 
 ### 9. 查看费用分析
 
