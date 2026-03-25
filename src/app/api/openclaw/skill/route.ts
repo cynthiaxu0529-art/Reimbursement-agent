@@ -206,30 +206,39 @@ Content-Type: application/json
       "description": "上海→北京 机票",
       "amount": 1200,
       "currency": "CNY",
+      "exchangeRate": 0.1380,
+      "amountInBaseCurrency": 165.60,
       "date": "2026-02-15",
       "vendor": "东方航空",
-      "location": "上海"
+      "location": "上海",
+      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-flight.jpg"
     },
     {
       "category": "hotel",
       "description": "北京希尔顿酒店 2晚",
       "amount": 1600,
       "currency": "CNY",
+      "exchangeRate": 0.1380,
+      "amountInBaseCurrency": 220.80,
       "date": "2026-02-15",
       "vendor": "希尔顿酒店",
       "location": "北京",
       "checkInDate": "2026-02-15",
       "checkOutDate": "2026-02-17",
-      "nights": 2
+      "nights": 2,
+      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-hotel.jpg"
     },
     {
       "category": "meal",
       "description": "客户午餐",
       "amount": 350,
       "currency": "CNY",
+      "exchangeRate": 0.1380,
+      "amountInBaseCurrency": 48.30,
       "date": "2026-02-16",
       "vendor": "全聚德",
-      "location": "北京"
+      "location": "北京",
+      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-meal.jpg"
     }
   ]
 }
@@ -247,6 +256,7 @@ Content-Type: application/json
 - **⚠️ 政策对比用美元**：限额、审批、支付都以 \`amountInBaseCurrency\` 为准
 - 如果超限，系统会自动调整并在 \`limitAdjustments\` 中说明
 - **OCR 金额保护**：OCR 识别的原始金额如实填入 \`amount\`，不要修改
+- **🏨 酒店必须传入住天数**：酒店类别**必须**填入 \`checkInDate\`、\`checkOutDate\`、\`nights\`（从 OCR 获取）。缺失时系统按 1 晚算限额（$100），多晚住宿会被错误截断。2 晚应为 $200 限额。
 
 ### 3. 更新报销单
 
@@ -285,9 +295,12 @@ Agent 调用时，系统自动完成：上传 → OCR 识别 → 汇率转换。
 - \`ocr.amount\` + \`ocr.currency\` → 填入 \`amount\` 和 \`currency\`（原始票面值）
 - 顶层 \`url\` → **必须**填入 \`receiptUrl\`（凭证附件地址）
 - 用**公司汇率表**（非 OCR 汇率）计算 \`exchangeRate\` 和 \`amountInBaseCurrency\`
+- 🏨 酒店票据：\`ocr.checkInDate\`、\`ocr.checkOutDate\`、\`ocr.nights\` → **必须**填入对应字段（影响多晚限额计算）
 - ❌ 错误：\`{ "amount": 91.36, "currency": "USD" }\`（把转换值当原始值）
 - ❌ 错误：\`{ "amount": 662, "currency": "CNY" }\`（缺少本位币金额）
+- ❌ 错误：酒店不传 \`nights\`/\`checkInDate\`/\`checkOutDate\`（系统按 1 晚算限额，多晚被截断）
 - ✅ 正确：\`{ "amount": 662, "currency": "CNY", "exchangeRate": 0.138, "amountInBaseCurrency": 91.36, "receiptUrl": "..." }\`
+- ✅ 正确（酒店）：\`{ ..., "checkInDate": "2026-02-15", "checkOutDate": "2026-02-17", "nights": 2 }\`
 
 ### 6. OCR 识别发票（备用）
 

@@ -227,6 +227,8 @@ Content-Type: application/json
       "description": "上海→北京 机票",
       "amount": 1200,
       "currency": "CNY",
+      "exchangeRate": 0.1380,
+      "amountInBaseCurrency": 165.60,
       "date": "2026-02-15",
       "vendor": "东方航空",
       "location": "上海",
@@ -237,6 +239,8 @@ Content-Type: application/json
       "description": "北京希尔顿酒店 2晚",
       "amount": 1600,
       "currency": "CNY",
+      "exchangeRate": 0.1380,
+      "amountInBaseCurrency": 220.80,
       "date": "2026-02-15",
       "vendor": "希尔顿酒店",
       "location": "北京",
@@ -250,6 +254,8 @@ Content-Type: application/json
       "description": "客户午餐",
       "amount": 350,
       "currency": "CNY",
+      "exchangeRate": 0.1380,
+      "amountInBaseCurrency": 48.30,
       "date": "2026-02-16",
       "vendor": "全聚德",
       "location": "北京",
@@ -294,6 +300,7 @@ Content-Type: application/json
 - **⚠️ 政策对比用美元金额**：系统的限额规则（如酒店每日 $100）、审批阈值、支付判断都以 `amountInBaseCurrency` 为准。Agent 提交前应自行用美元金额检查是否超限。
 - 如果费用超过政策限额，系统会自动调整金额并在 `limitAdjustments` 中说明。请将调整信息告知用户。
 - **OCR 金额保护**：通过 OCR 识别出的发票原始金额应如实填入 `amount`，不要修改 OCR 识别的金额。
+- **🏨 酒店必须传入住天数**：酒店类别的费用项**必须**同时填入 `checkInDate`、`checkOutDate`、`nights`（从 OCR 返回值中获取）。如果缺失这些字段，系统会按 **1 晚**计算每日限额，导致多晚住宿被错误截断。例如：2 晚酒店不传 `nights`，限额只算 $100（而非 $200），金额会被错误调整。
 
 ### 3. 更新报销单
 
@@ -428,7 +435,7 @@ Content-Type: multipart/form-data
 - 凭证格式特殊，OCR 识别不准确
 - 只需要上传附件获取 URL
 
-响应示例（模式 A - Agent 自动 OCR）：
+响应示例（模式 A - 火车票 OCR）：
 ```json
 {
   "success": true,
@@ -454,6 +461,32 @@ Content-Type: multipart/form-data
 }
 ```
 
+响应示例（模式 A - 酒店票据 OCR）：
+```json
+{
+  "success": true,
+  "url": "https://xxx.blob.vercel-storage.com/receipt-hotel.jpg",
+  "filename": "hotel-receipt.jpg",
+  "size": 204800,
+  "type": "image/jpeg",
+  "ocr": {
+    "type": "hotel_receipt",
+    "category": "hotel",
+    "amount": 1200.00,
+    "currency": "CNY",
+    "vendor": "希尔顿酒店",
+    "date": "2026-02-15",
+    "confidence": 0.92,
+    "checkInDate": "2026-02-15",
+    "checkOutDate": "2026-02-17",
+    "nights": 2,
+    "exchangeRate": 0.138,
+    "amountInBaseCurrency": 165.60,
+    "baseCurrency": "USD"
+  }
+}
+```
+
 **⚠️ 关键：正确使用 OCR 返回值创建报销**
 
 | OCR 返回字段 | 用途 | 填入报销 item 的字段 |
@@ -466,12 +499,22 @@ Content-Type: multipart/form-data
 | `ocr.date` | 日期 | `date` |
 | `ocr.departure` | 出发地 | `description` 中描述 |
 | `ocr.destination` | 目的地 | `description` 中描述 |
+| `ocr.checkInDate` | 酒店入住日期 | `checkInDate`（**酒店必填**） |
+| `ocr.checkOutDate` | 酒店离店日期 | `checkOutDate`（**酒店必填**） |
+| `ocr.nights` | 住宿晚数 | `nights`（**酒店必填**） |
 | `ocr.exchangeRate` | ⚠️ OCR 估算的汇率 | **不要使用**，改用公司汇率表 |
 | `ocr.amountInBaseCurrency` | ⚠️ OCR 估算的本位币 | **不要使用**，自己用公司汇率算 |
 
 Agent 还需自行填写（根据公司汇率表计算）：
 - `exchangeRate` = 公司汇率表中该币种到本位币的汇率
 - `amountInBaseCurrency` = `amount` × `exchangeRate`
+
+**🏨 酒店住宿特别说明**：
+- 酒店票据的 OCR 会返回 `checkInDate`、`checkOutDate`、`nights` 三个字段
+- **必须**将这三个字段填入报销 item，否则系统会按 1 晚计算限额
+- 每日限额（如 $100/天）会乘以住宿天数：2 晚 = $200 限额，3 晚 = $300 限额
+- 政策对比示例：2 晚酒店 ¥1200 CNY → $165.60 USD，限额 $100×2=$200，未超限
+- 如果不传 `nights`/`checkInDate`/`checkOutDate`，系统默认按 1 晚 $100 限额判断，$165.60 会被判定超限并截断为 $100
 
 **❌ 错误做法 1**（把转换后金额当原始金额，汇率=1.0000）：
 ```json
