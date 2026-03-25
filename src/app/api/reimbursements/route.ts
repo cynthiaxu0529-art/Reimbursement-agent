@@ -439,11 +439,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 检查缺失凭证的 items
+    const missingReceiptItems = items
+      .filter((item: any) => !item.receiptUrl)
+      .map((item: any) => `${item.category}: ${item.description || item.amount}`);
+
     // 构建返回数据，包含限额调整信息
     const responseData: any = {
       success: true,
       data: reimbursement,
     };
+
+    // 如果有缺失凭证的 items，返回警告
+    if (missingReceiptItems.length > 0) {
+      responseData.warnings = [{
+        type: 'MISSING_RECEIPT',
+        message: `以下费用项缺少凭证附件（receiptUrl），可能被财务驳回：${missingReceiptItems.join('、')}`,
+        items: missingReceiptItems,
+      }];
+    }
 
     // 如果有金额被调整，返回提示信息
     if (limitResult.totalAdjusted > 0) {

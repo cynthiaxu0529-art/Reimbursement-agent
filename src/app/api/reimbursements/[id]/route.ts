@@ -322,8 +322,24 @@ export async function PUT(
       .where(eq(reimbursements.id, id))
       .returning();
 
+    // 跟踪缺失凭证的 items（用于响应警告）
+    let missingReceiptItems: string[] = [];
+
     // 如果有新的费用明细，删除旧的并创建新的
     if (items && items.length > 0) {
+      // 保留旧 items 的 receiptUrl，用于在新 items 缺失时自动回填
+      const oldItems = await db.query.reimbursementItems.findMany({
+        where: eq(reimbursementItems.reimbursementId, id),
+      });
+      const oldReceiptMap = new Map<string, string>();
+      for (const old of oldItems) {
+        if (old.receiptUrl) {
+          // 按 category+amount+date 组合做模糊匹配 key
+          const key = `${old.category}_${old.amount}_${old.date?.toISOString?.()?.split('T')[0] || ''}`;
+          oldReceiptMap.set(key, old.receiptUrl);
+        }
+      }
+
       await db
         .delete(reimbursementItems)
         .where(eq(reimbursementItems.reimbursementId, id));
@@ -341,6 +357,19 @@ export async function PUT(
 
       await db.insert(reimbursementItems).values(
         items.map((item: any) => {
+          // 如果新 item 没有 receiptUrl，尝试从旧 items 中回填
+          let receiptUrl = item.receiptUrl || null;
+          if (!receiptUrl) {
+            const matchKey = `${item.category}_${parseFloat(item.amount) || 0}_${item.date?.split?.('T')[0] || item.date || ''}`;
+            receiptUrl = oldReceiptMap.get(matchKey) || null;
+            if (receiptUrl) {
+              console.log(`[PUT] Auto-recovered receiptUrl for item: ${item.category} ${item.amount} ${item.date}`);
+            }
+          }
+          if (!receiptUrl) {
+            missingReceiptItems.push(`${item.category}: ${item.description || item.amount}`);
+          }
+
           const itemData: any = {
             reimbursementId: id,
             category: item.category,
@@ -352,7 +381,7 @@ export async function PUT(
             date: new Date(item.date),
             location: item.location || null,
             vendor: item.vendor || null,
-            receiptUrl: item.receiptUrl || null,
+            receiptUrl,
           };
           // Hotel-specific fields
           if (item.checkInDate) {
@@ -395,11 +424,22 @@ export async function PUT(
       }
     }
 
-    return NextResponse.json({
+    const response: Record<string, unknown> = {
       success: true,
       data: updated,
       approvalChain: generatedChain,
-    });
+    };
+
+    // 如果有缺失凭证的 items，返回警告
+    if (missingReceiptItems.length > 0) {
+      response.warnings = [{
+        type: 'MISSING_RECEIPT',
+        message: `以下费用项缺少凭证附件（receiptUrl），可能被财务驳回：${missingReceiptItems.join('、')}`,
+        items: missingReceiptItems,
+      }];
+    }
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error('Update reimbursement error:', error);
     return apiError('更新报销单失败', 500);
