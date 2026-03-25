@@ -716,12 +716,13 @@ async function triggerPayment(reimbursement: any, userId: string) {
       };
     }
 
-    // 创建支付请求（FluxPay Base 链）
+    // 创建支付请求（FluxPay Base 链）— 使用本位币金额
     const paymentService = createPaymentService();
+    const paymentAmount = reimbursement.totalAmountInBaseCurrency || reimbursement.totalAmount;
     const result = await paymentService.processReimbursementPayment(
       reimbursement.id,
       userId,
-      reimbursement.totalAmount,
+      paymentAmount,
       reimbursement.baseCurrency || 'USD', // FluxPay on Base uses stablecoins
       {
         name: user.name || 'User',

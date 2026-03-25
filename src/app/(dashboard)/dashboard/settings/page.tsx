@@ -779,10 +779,11 @@ export default function SettingsPage() {
                                   {rule.limit && (
                                     <div className="text-right">
                                       <p className="text-lg font-bold text-violet-600">
-                                        ${rule.limit.amount}
+                                        {rule.limit.currency === 'CNY' ? '¥' : '$'}{rule.limit.amount}
                                       </p>
                                       <p className="text-xs text-gray-500">
                                         {limitTypeLabels[rule.limit.type] || rule.limit.type}
+                                        {rule.limit.currency && ` · ${rule.limit.currency}`}
                                       </p>
                                     </div>
                                   )}

@@ -235,14 +235,14 @@ export async function POST(request: NextRequest) {
       return apiError('请先在设置中创建或加入公司，才能提交报销', 400, 'NO_TENANT');
     }
 
-    // Agent 金额限制检查
+    // Agent 金额限制检查（使用本位币金额，与限额币种一致）
     if (authCtx.authType === 'api_key' && authCtx.apiKey?.limits.maxAmountPerRequest) {
       const requestTotal = items.reduce(
-        (sum: number, item: any) => sum + (parseFloat(item.amount) || 0), 0
+        (sum: number, item: any) => sum + (parseFloat(item.amountInBaseCurrency) || parseFloat(item.amount) || 0), 0
       );
       if (requestTotal > authCtx.apiKey.limits.maxAmountPerRequest) {
         return apiError(
-          `Agent 单次报销金额超过限制（上限: ${authCtx.apiKey.limits.maxAmountPerRequest}）`,
+          `Agent 单次报销金额超过限制（上限: $${authCtx.apiKey.limits.maxAmountPerRequest}，本次: $${requestTotal.toFixed(2)}）`,
           403,
           'AMOUNT_LIMIT_EXCEEDED',
         );
