@@ -322,8 +322,58 @@ export async function PUT(
       .where(eq(reimbursements.id, id))
       .returning();
 
-    // 如果有新的费用明细，删除旧的并创建新的
+    // 如果有新的费用明细，先做校验，再删除旧的并创建新的
     if (items && items.length > 0) {
+      // 保留旧 items 的 receiptUrl，用于在新 items 缺失时自动回填
+      const oldItems = await db.query.reimbursementItems.findMany({
+        where: eq(reimbursementItems.reimbursementId, id),
+      });
+      const oldReceiptMap = new Map<string, string>();
+      for (const old of oldItems) {
+        if (old.receiptUrl) {
+          const key = `${old.category}_${old.amount}_${old.date?.toISOString?.()?.split('T')[0] || ''}`;
+          oldReceiptMap.set(key, old.receiptUrl);
+        }
+      }
+
+      // 预检查：尝试回填 receiptUrl 后，仍然缺失的 items
+      const missingReceiptItems: string[] = [];
+      for (const item of items) {
+        let hasReceipt = !!item.receiptUrl;
+        if (!hasReceipt) {
+          const matchKey = `${item.category}_${parseFloat(item.amount) || 0}_${item.date?.split?.('T')[0] || item.date || ''}`;
+          hasReceipt = oldReceiptMap.has(matchKey);
+        }
+        if (!hasReceipt) {
+          missingReceiptItems.push(`${item.category}: ${item.description || item.amount}`);
+        }
+      }
+      if (missingReceiptItems.length > 0) {
+        return apiError(
+          `以下费用项缺少凭证附件（receiptUrl），请先上传凭证再提交：${missingReceiptItems.join('、')}`,
+          400,
+          'MISSING_RECEIPT',
+        );
+      }
+
+      // 检查重复费用项
+      const itemKeys = items.map((item: any) =>
+        `${item.category}_${parseFloat(item.amount) || 0}_${item.date}`
+      );
+      const duplicateKeys = itemKeys.filter((key: string, idx: number) => itemKeys.indexOf(key) !== idx);
+      if (duplicateKeys.length > 0) {
+        const dupes = (Array.from(new Set(duplicateKeys)) as string[]).map((k) => {
+          const parts = k.split('_');
+          return `${parts[0]}: ${parts[1]} (${parts[2]})`;
+        });
+        return apiError(
+          `发现重复费用项（类别+金额+日期相同），请确认是否误传：${dupes.join('、')}`,
+          400,
+          'DUPLICATE_ITEMS',
+        );
+      }
+
+      // 校验通过，执行替换
       await db
         .delete(reimbursementItems)
         .where(eq(reimbursementItems.reimbursementId, id));
@@ -341,6 +391,19 @@ export async function PUT(
 
       await db.insert(reimbursementItems).values(
         items.map((item: any) => {
+          // 如果新 item 没有 receiptUrl，尝试从旧 items 中回填
+          let receiptUrl = item.receiptUrl || null;
+          if (!receiptUrl) {
+            const matchKey = `${item.category}_${parseFloat(item.amount) || 0}_${item.date?.split?.('T')[0] || item.date || ''}`;
+            receiptUrl = oldReceiptMap.get(matchKey) || null;
+            if (receiptUrl) {
+              console.log(`[PUT] Auto-recovered receiptUrl for item: ${item.category} ${item.amount} ${item.date}`);
+            }
+          }
+          if (!receiptUrl) {
+            missingReceiptItems.push(`${item.category}: ${item.description || item.amount}`);
+          }
+
           const itemData: any = {
             reimbursementId: id,
             category: item.category,
@@ -352,7 +415,7 @@ export async function PUT(
             date: new Date(item.date),
             location: item.location || null,
             vendor: item.vendor || null,
-            receiptUrl: item.receiptUrl || null,
+            receiptUrl,
           };
           // Hotel-specific fields
           if (item.checkInDate) {
@@ -716,12 +779,13 @@ async function triggerPayment(reimbursement: any, userId: string) {
       };
     }
 
-    // 创建支付请求（FluxPay Base 链）
+    // 创建支付请求（FluxPay Base 链）— 使用本位币金额
     const paymentService = createPaymentService();
+    const paymentAmount = reimbursement.totalAmountInBaseCurrency || reimbursement.totalAmount;
     const result = await paymentService.processReimbursementPayment(
       reimbursement.id,
       userId,
-      reimbursement.totalAmount,
+      paymentAmount,
       reimbursement.baseCurrency || 'USD', // FluxPay on Base uses stablecoins
       {
         name: user.name || 'User',

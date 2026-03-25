@@ -72,6 +72,8 @@ API 基础地址：\`{REIMBURSEMENT_API_URL}\`（当前服务地址：${baseUrl}
 6. **同时填写原币和本位币金额**：每个 item 必须同时填写 \`amount\`+\`currency\`（原始票面值）和 \`exchangeRate\`+\`amountInBaseCurrency\`（用公司汇率表计算）。不要用 OCR 返回的 \`amountInBaseCurrency\`
 7. **汇率必须来自公司汇率表**：使用 \`GET /api/exchange-rates?target={本位币}\` 返回的汇率计算 \`amountInBaseCurrency\`，不要用 OCR 汇率
 8. **政策限额以本位币（USD）为准**：限额规则、审批、支付都以 \`amountInBaseCurrency\` 为判断标准，Agent 提交前必须用美元金额与政策限额对比
+9. **标题必须包含具体日期和路线**：\`title\` 必须写明具体出差日期和往返城市。✅ \`"1月20-22日北京-杭州往返出差"\` ❌ \`"2025年12月杭州出差"\`（太模糊）。日期从票据 OCR 的 \`date\`/\`checkInDate\` 提取，城市从 \`departure\`/\`destination\`/\`location\` 提取
+10. **创建前必须查重**：创建报销单前必须先 \`GET /api/reimbursements\` 查询历史，检查是否存在相同日期/金额/路线的费用项。发现疑似重复必须提醒用户确认
 
 ## 必须执行的初始化步骤
 

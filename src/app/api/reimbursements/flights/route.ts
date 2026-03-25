@@ -77,11 +77,12 @@ export async function POST(request: NextRequest) {
       return apiError('Missing payment details: amount, currency', 400, 'MISSING_PAYMENT_DETAILS');
     }
 
-    // Agent 金额限制检查
+    // Agent 金额限制检查（使用本位币金额，与限额币种一致）
     if (authCtx.authType === 'api_key' && authCtx.apiKey?.limits.maxAmountPerRequest) {
-      if (payment.amount > authCtx.apiKey.limits.maxAmountPerRequest) {
+      const checkAmount = payment.amountInBaseCurrency || payment.amount;
+      if (checkAmount > authCtx.apiKey.limits.maxAmountPerRequest) {
         return apiError(
-          `Agent 单次报销金额超过限制（上限: ${authCtx.apiKey.limits.maxAmountPerRequest}）`,
+          `Agent 单次报销金额超过限制（上限: $${authCtx.apiKey.limits.maxAmountPerRequest}，本次: $${checkAmount.toFixed(2)}）`,
           403,
           'AMOUNT_LIMIT_EXCEEDED'
         );

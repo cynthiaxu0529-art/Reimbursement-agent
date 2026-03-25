@@ -235,14 +235,14 @@ export async function POST(request: NextRequest) {
       return apiError('请先在设置中创建或加入公司，才能提交报销', 400, 'NO_TENANT');
     }
 
-    // Agent 金额限制检查
+    // Agent 金额限制检查（使用本位币金额，与限额币种一致）
     if (authCtx.authType === 'api_key' && authCtx.apiKey?.limits.maxAmountPerRequest) {
       const requestTotal = items.reduce(
-        (sum: number, item: any) => sum + (parseFloat(item.amount) || 0), 0
+        (sum: number, item: any) => sum + (parseFloat(item.amountInBaseCurrency) || parseFloat(item.amount) || 0), 0
       );
       if (requestTotal > authCtx.apiKey.limits.maxAmountPerRequest) {
         return apiError(
-          `Agent 单次报销金额超过限制（上限: ${authCtx.apiKey.limits.maxAmountPerRequest}）`,
+          `Agent 单次报销金额超过限制（上限: $${authCtx.apiKey.limits.maxAmountPerRequest}，本次: $${requestTotal.toFixed(2)}）`,
           403,
           'AMOUNT_LIMIT_EXCEEDED',
         );
@@ -352,6 +352,35 @@ export async function POST(request: NextRequest) {
         wasAdjusted: limitItem.wasAdjusted,
       };
     });
+
+    // 检查缺失凭证的 items — 缺凭证直接拒绝创建
+    const missingReceiptItems = adjustedItems
+      .filter((item: any) => !item.receiptUrl)
+      .map((item: any) => `${item.category}: ${item.description || item.amount}`);
+    if (missingReceiptItems.length > 0) {
+      return apiError(
+        `以下费用项缺少凭证附件（receiptUrl），请先上传凭证再提交：${missingReceiptItems.join('、')}`,
+        400,
+        'MISSING_RECEIPT',
+      );
+    }
+
+    // 检查重复费用项（同一报销单内 category+amount+date 相同）
+    const itemKeys = adjustedItems.map((item: any) =>
+      `${item.category}_${parseFloat(item.amount) || 0}_${item.date}`
+    );
+    const duplicateKeys = itemKeys.filter((key: string, idx: number) => itemKeys.indexOf(key) !== idx);
+    if (duplicateKeys.length > 0) {
+      const dupes = (Array.from(new Set(duplicateKeys)) as string[]).map((k) => {
+        const parts = k.split('_');
+        return `${parts[0]}: ${parts[1]} (${parts[2]})`;
+      });
+      return apiError(
+        `发现重复费用项（类别+金额+日期相同），请确认是否误传：${dupes.join('、')}`,
+        400,
+        'DUPLICATE_ITEMS',
+      );
+    }
 
     // 计算原币总金额（使用调整后的金额）
     const totalAmount = adjustedItems.reduce(

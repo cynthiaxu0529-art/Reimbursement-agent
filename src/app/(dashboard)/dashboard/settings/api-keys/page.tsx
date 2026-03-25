@@ -613,7 +613,7 @@ export default function ApiKeysPage() {
                     {/* Limits */}
                     {(key.maxAmountPerRequest || key.expiresAt) && (
                       <div className="flex gap-4 mt-2 text-xs text-gray-400">
-                        {key.maxAmountPerRequest && <span>{t.amountLimit} {key.maxAmountPerRequest}</span>}
+                        {key.maxAmountPerRequest && <span>{t.amountLimit} ${key.maxAmountPerRequest}</span>}
                         {key.expiresAt && <span>{t.expiresAt} {fmtDate(key.expiresAt)}</span>}
                       </div>
                     )}
@@ -794,8 +794,8 @@ const TEXT_ZH = {
   customAgent: '自定义 Agent',
   scopePreset: '权限预设',
   scopes: '权限范围',
-  maxAmount: '单次金额上限',
-  maxAmountHint: '为空则不限制',
+  maxAmount: '单次金额上限（USD）',
+  maxAmountHint: '以公司本位币（美元）为单位，为空则不限制',
   expiry: '有效期（天）',
   expiryHint: '为空则永不过期',
   confirmCreate: '创建 API Key',
@@ -854,8 +854,8 @@ const TEXT_EN = {
   customAgent: 'Custom Agent',
   scopePreset: 'Permission Presets',
   scopes: 'Permissions',
-  maxAmount: 'Max Amount Per Request',
-  maxAmountHint: 'Leave empty for no limit',
+  maxAmount: 'Max Amount Per Request (USD)',
+  maxAmountHint: 'In base currency (USD). Leave empty for no limit',
   expiry: 'Expires In (days)',
   expiryHint: 'Leave empty for no expiry',
   confirmCreate: 'Create API Key',
