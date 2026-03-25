@@ -362,7 +362,7 @@ export async function PUT(
       );
       const duplicateKeys = itemKeys.filter((key: string, idx: number) => itemKeys.indexOf(key) !== idx);
       if (duplicateKeys.length > 0) {
-        const dupes = [...new Set(duplicateKeys)].map((k: string) => {
+        const dupes = (Array.from(new Set(duplicateKeys)) as string[]).map((k) => {
           const parts = k.split('_');
           return `${parts[0]}: ${parts[1]} (${parts[2]})`;
         });
