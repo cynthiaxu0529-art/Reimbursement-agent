@@ -11,7 +11,7 @@ import { API_SCOPES } from '@/lib/auth/scopes';
 import { createChatCompletion, extractTextContent } from '@/lib/ai/openrouter-client';
 import { apiError } from '@/lib/api-error';
 import { getIdempotencyKey, getCachedResponse, cacheResponse } from '@/lib/idempotency';
-import { exchangeRateService } from '@/lib/currency/exchange-service';
+import { exchangeRateService, loadMonthlyRatesFromDB } from '@/lib/currency/exchange-service';
 import type { CurrencyType } from '@/types';
 
 // 强制动态渲染，避免构建时预渲染
@@ -277,6 +277,9 @@ export async function POST(request: NextRequest) {
         return apiError(`第 ${i + 1} 项费用缺少日期`, 400, 'MISSING_REQUIRED_FIELDS');
       }
     }
+
+    // 从数据库加载当月管理员设定的汇率，确保与公司汇率表一致
+    await loadMonthlyRatesFromDB();
 
     // 服务端汇率转换：如果 item 缺少 exchangeRate / amountInBaseCurrency，自动转换
     // 保证 Agent 提交和手动提交行为一致（前端在客户端做转换，Agent 由服务端补齐）

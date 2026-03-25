@@ -4,7 +4,7 @@ import { apiError } from '@/lib/api-error';
 import { authenticate } from '@/lib/auth/api-key';
 import { API_SCOPES } from '@/lib/auth/scopes';
 import { createReceiptOCRAgent } from '@/agents/receipt-ocr-agent';
-import { exchangeRateService } from '@/lib/currency/exchange-service';
+import { exchangeRateService, loadMonthlyRatesFromDB } from '@/lib/currency/exchange-service';
 import { db } from '@/lib/db';
 import { tenants } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -76,6 +76,10 @@ export async function POST(request: NextRequest) {
       addRandomSuffix: false,
     });
 
+    // 检查是否为仅上传模式（跳过 OCR 和汇率转换）
+    const mode = formData.get('mode') as string | null;
+    const uploadOnly = mode === 'upload_only';
+
     // 基础返回数据
     const responseData: Record<string, unknown> = {
       success: true,
@@ -85,9 +89,9 @@ export async function POST(request: NextRequest) {
       type: file.type,
     };
 
-    // Agent 模式：自动触发 OCR + 汇率转换
+    // Agent 模式：自动触发 OCR + 汇率转换（除非 upload_only）
     // 系统负责识别金额和币种，Agent 无需手动调 OCR 也无需计算汇率
-    if (authCtx.authType === 'api_key') {
+    if (authCtx.authType === 'api_key' && !uploadOnly) {
       try {
         const ocrAgent = createReceiptOCRAgent();
         const ocrResult = await ocrAgent.recognize({ imageUrl: blob.url });
@@ -115,8 +119,12 @@ export async function POST(request: NextRequest) {
         };
 
         // 自动汇率转换：查找公司本位币并转换
+        // 优先使用管理员在数据库中设定的月初汇率
         if (ocrResult.amount && ocrResult.currency && authCtx.tenantId) {
           try {
+            // 先从数据库加载当月管理员设定的汇率，确保与公司汇率表一致
+            await loadMonthlyRatesFromDB();
+
             const tenantRecord = await db.query.tenants.findFirst({
               where: eq(tenants.id, authCtx.tenantId),
               columns: { baseCurrency: true },
