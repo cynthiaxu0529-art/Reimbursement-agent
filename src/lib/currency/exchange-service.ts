@@ -464,5 +464,42 @@ export function parseCurrencyString(
   return null;
 }
 
+/**
+ * 从数据库加载当月的月初固定汇率到内存缓存
+ * 确保 upload/创建报销时使用管理员设定的汇率，而非外部 API
+ */
+export async function loadMonthlyRatesFromDB(
+  yearMonth?: string
+): Promise<void> {
+  try {
+    // 动态 import 避免循环依赖
+    const { db } = await import('@/lib/db');
+    const { monthlyExchangeRates } = await import('@/lib/db/schema');
+    const { eq } = await import('drizzle-orm');
+
+    const now = new Date();
+    const targetYearMonth = yearMonth || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const dbRates = await db.query.monthlyExchangeRates.findMany({
+      where: eq(monthlyExchangeRates.yearMonth, targetYearMonth),
+    });
+
+    for (const record of dbRates) {
+      const key = `${targetYearMonth}_${record.fromCurrency}_${record.toCurrency}`;
+      // DB 汇率优先级最高，覆盖已有缓存
+      monthlyRateCache.set(key, {
+        rate: record.rate,
+        source: record.source || 'db',
+      });
+    }
+
+    if (dbRates.length > 0) {
+      console.log(`[ExchangeRate] Loaded ${dbRates.length} monthly rates from DB for ${targetYearMonth}`);
+    }
+  } catch (err) {
+    console.warn('[ExchangeRate] Failed to load monthly rates from DB:', err);
+  }
+}
+
 // 默认导出单例
 export const exchangeRateService = new ExchangeRateService();

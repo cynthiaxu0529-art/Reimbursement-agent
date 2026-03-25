@@ -68,6 +68,19 @@ API 基础地址：\`{REIMBURSEMENT_API_URL}\`（当前服务地址：${baseUrl}
 2. **金额核实**：如果用户提供的票据金额与口述金额不一致，主动提醒
 3. **政策合规**：提交前先查询政策确认是否超限
 4. **不要猜测**：如果用户没有提供必要信息（金额、类别、日期），请追问而不是猜测
+5. **凭证必须关联（最重要）**：每个费用明细的 \`receiptUrl\` 字段**必须**填入对应上传返回的 \`url\`。没有凭证的费用项会被财务驳回。**绝对不能**创建 \`receiptUrl\` 为空的费用项
+6. **使用原币金额**：创建报销时，\`amount\` 和 \`currency\` 必须使用票据上的**原始币种和原始金额**（如 CNY 662），**不要**使用 OCR 返回的 \`amountInBaseCurrency\`（已转换的本位币金额）。汇率转换由服务端自动完成
+7. **不要手动计算汇率**：Agent 不应自行换算汇率。服务端会根据管理员设定的月初固定汇率自动转换
+
+## 必须执行的初始化步骤
+
+在执行**任何**报销操作之前，必须先完成以下初始化（按顺序）：
+
+1. **获取费用类别**：\`GET /api/settings/categories\`
+2. **获取汇率表**：\`GET /api/exchange-rates?target={公司本位币}\` — 获取管理员设定的当月汇率
+3. **获取报销政策**：\`GET /api/settings/policies\` — 获取报销规则和各类别限额
+
+**只有完成以上三步后**，才能开始上传凭证、创建报销单等操作。
 
 ## 报销单状态流转
 
@@ -102,7 +115,9 @@ paid（已支付）
 
 ## 登录后初始化
 
-认证成功后，在执行任何报销操作之前，必须先获取当前公司的费用类别配置：
+认证成功后，在执行任何报销操作之前，**必须按顺序**完成以下三个初始化请求：
+
+### 步骤 1：获取费用类别
 
 \`\`\`http
 GET {REIMBURSEMENT_API_URL}/api/settings/categories
@@ -226,9 +241,10 @@ Content-Type: application/json
 - \`"status": "pending"\` - 直接提交审批（需要 \`reimbursement:submit\` scope）
 
 **注意事项：**
+- **⚠️ 必须附带票据（最重要）**：每个 item 的 \`receiptUrl\` **必须**填入上传返回的 \`url\`。没有凭证的费用项会被财务驳回。
+- **⚠️ amount 和 currency 必须是原始票面值**：\`amount\` 填 OCR 识别的原始金额（如 \`662\`），\`currency\` 填票据上的原始币种（如 \`CNY\`）。**不要**填入已转换的本位币金额。\`exchangeRate\` 和 \`amountInBaseCurrency\` **不要填**，服务端自动转换。
 - 如果费用超过政策限额，会包含 \`limitAdjustments\` 字段说明调整详情，请告知用户。
-- **汇率自动转换**：\`amount\` 和 \`currency\` 是必填项，\`exchangeRate\` 和 \`amountInBaseCurrency\` 可以省略。服务端会自动按照管理员设定的汇率转换为公司记账本位币。
-- **OCR 金额保护**：通过 OCR 识别出的发票原始金额应如实填入 \`amount\`，不要修改 OCR 识别的金额。
+- **OCR 金额保护**：通过 OCR 识别出的发票原始金额应如实填入 \`amount\`，不要修改。
 
 ### 3. 更新报销单
 
@@ -259,9 +275,16 @@ Content-Type: multipart/form-data
 
 表单字段：
 - \`file\` - 图片文件（支持 jpg, png, webp, gif, pdf，最大 10MB）
+- \`mode\` -（可选）设为 \`upload_only\` 时仅上传文件，跳过 OCR 和汇率转换
 
 Agent 调用时，系统自动完成：上传 → OCR 识别 → 汇率转换。
-返回 \`ocr\` 字段包含票面金额、币种、汇率、本位币金额，直接用于创建报销单。
+
+**⚠️ 关键：正确使用 OCR 返回值**
+- \`ocr.amount\` + \`ocr.currency\` → 填入报销 item 的 \`amount\` 和 \`currency\`（原始票面值）
+- 顶层 \`url\` → **必须**填入 \`receiptUrl\`（凭证附件地址）
+- \`ocr.amountInBaseCurrency\` / \`ocr.exchangeRate\` → **仅供参考展示，不要填入报销单**
+- ❌ 错误：\`{ "amount": 91.36, "currency": "USD" }\`（用了转换后的值）
+- ✅ 正确：\`{ "amount": 662, "currency": "CNY", "receiptUrl": "..." }\`（原始票面值+凭证）
 
 ### 6. OCR 识别发票（备用）
 
@@ -287,6 +310,15 @@ GET {REIMBURSEMENT_API_URL}/api/settings/categories
 \`\`\`
 
 返回当前公司可用的费用类别列表。创建报销时 \`category\` 字段的值**必须**来自此接口。
+
+### 8a. 获取公司汇率表（初始化必读）
+
+\`\`\`http
+GET {REIMBURSEMENT_API_URL}/api/exchange-rates?target={本位币}
+\`\`\`
+
+返回管理员设定的当月固定汇率。初始化时必须调用。\`source\` 为 \`monthly_manual\` 的是管理员手动设定的汇率。
+创建报销时**不要自己填入汇率值**，服务端会自动使用这些汇率转换。
 
 ### 9. 查看费用分析
 

@@ -41,6 +41,22 @@ API 基础地址：`{REIMBURSEMENT_API_URL}`
 2. **金额核实**：如果用户提供的票据金额与口述金额不一致，主动提醒
 3. **政策合规**：提交前先查询政策确认是否超限
 4. **不要猜测**：如果用户没有提供必要信息（金额、类别、日期），请追问而不是猜测
+5. **凭证必须关联（最重要）**：每个费用明细的 `receiptUrl` 字段**必须**填入对应上传返回的 `url`。没有凭证的费用项会被财务驳回。**绝对不能**创建 `receiptUrl` 为空的费用项
+6. **使用原币金额**：创建报销时，`amount` 和 `currency` 必须使用票据上的**原始币种和原始金额**（如 CNY 662），**不要**使用 OCR 返回的 `amountInBaseCurrency`（已转换的本位币金额）。汇率转换由服务端自动完成
+7. **不要手动计算汇率**：Agent 不应自行换算汇率。服务端会根据管理员设定的月初固定汇率自动转换。如果 OCR 返回了 `exchangeRate`，仅供参考展示，不要用于填写报销单
+
+## 必须执行的初始化步骤
+
+在执行**任何**报销操作之前，必须先完成以下初始化（按顺序）：
+
+1. **获取费用类别**：`GET /api/settings/categories` — 获取公司允许的费用类别
+2. **获取汇率表**：`GET /api/exchange-rates?target={公司本位币}` — 获取管理员设定的当月汇率表，了解各币种的汇率
+3. **获取报销政策**：`GET /api/settings/policies` — 获取公司报销规则和各类别限额
+
+**只有完成以上三步后**，才能开始上传凭证、创建报销单等操作。这确保了：
+- 费用类别正确（不会用错类别值）
+- 汇率与公司设定一致（不会出现汇率偏差）
+- 报销金额符合政策限额（避免被驳回）
 
 ## 报销单状态流转
 
@@ -75,7 +91,9 @@ paid（已支付）
 
 ## 登录后初始化
 
-认证成功后，在执行任何报销操作之前，必须先获取当前公司的费用类别配置：
+认证成功后，在执行任何报销操作之前，**必须按顺序**完成以下三个初始化请求：
+
+### 步骤 1：获取费用类别
 
 ```http
 GET {REIMBURSEMENT_API_URL}/api/settings/categories
@@ -96,6 +114,38 @@ GET {REIMBURSEMENT_API_URL}/api/settings/categories
 ```
 
 **注意**：不同公司的费用类别不同，创建报销时 `category` 字段的值必须来自此接口返回的 `value` 列表。不要使用硬编码的类别值。
+
+### 步骤 2：获取公司汇率表
+
+```http
+GET {REIMBURSEMENT_API_URL}/api/exchange-rates?target={公司本位币}
+```
+
+返回示例（以 USD 为本位币）：
+```json
+{
+  "target": "USD",
+  "rates": {
+    "CNY": { "rate": 0.1380, "source": "monthly_manual" },
+    "EUR": { "rate": 1.0850, "source": "monthly_manual" },
+    "JPY": { "rate": 0.0067, "source": "monthly_api" }
+  },
+  "timestamp": "2026-03-01T00:00:00Z"
+}
+```
+
+**注意**：
+- `source` 为 `monthly_manual` 表示管理员手动设定的汇率，具有最高优先级
+- 记住这些汇率值，后续用于向用户展示预估的本位币金额（仅供参考）
+- **创建报销时不要自己换算**，服务端会使用这些管理员设定的汇率自动转换
+
+### 步骤 3：获取报销政策
+
+```http
+GET {REIMBURSEMENT_API_URL}/api/settings/policies
+```
+
+返回报销规则和限额。**必须仔细阅读每条规则**，在后续创建报销时检查是否超限。
 
 ## 可用操作
 
@@ -225,9 +275,9 @@ Content-Type: application/json
 ```
 
 **注意事项：**
-- **必须附带票据（重要）**：每个费用明细的 `receiptUrl` 字段必须填入对应的票据图片 URL。没有附件的报销会被财务驳回。流程是：先调用 `POST /api/upload` 上传票据获取 `url`，然后把该 `url` 填入 items 的 `receiptUrl` 字段。
+- **⚠️ 必须附带票据（最重要）**：每个费用明细的 `receiptUrl` 字段**必须**填入对应的票据图片 URL。没有附件的报销会被财务驳回。流程是：先调用 `POST /api/upload` 上传票据获取 `url`，然后把该 `url` 填入 items 的 `receiptUrl` 字段。**创建报销前检查：每个 item 是否都有非空的 `receiptUrl`？如果有缺失，必须先上传凭证。**
+- **⚠️ amount 和 currency 必须是原始票面值**：`amount` 填 OCR 识别的原始金额（如 `662`），`currency` 填票据上的原始币种（如 `CNY`）。**不要**填入已转换的本位币金额。`exchangeRate` 和 `amountInBaseCurrency` **不要填**，服务端会自动按管理员设定的月初汇率转换。
 - 如果费用超过政策限额，系统会自动调整金额并在 `limitAdjustments` 中说明。请将调整信息告知用户。
-- **汇率自动转换**：`amount` 和 `currency` 是必填项，`exchangeRate` 和 `amountInBaseCurrency` 可以省略。服务端会自动按照管理员设定的汇率将原币金额转换为公司记账本位币。Agent 无需手动计算汇率。
 - **OCR 金额保护**：通过 OCR 识别出的发票原始金额应如实填入 `amount`，不要修改 OCR 识别的金额。
 
 ### 3. 更新报销单
@@ -345,15 +395,25 @@ Content-Type: multipart/form-data
 
 表单字段：
 - `file` - 图片文件（支持 jpg, png, webp, gif, pdf，最大 10MB）
+- `mode` -（可选）设为 `upload_only` 时仅上传文件，跳过 OCR 和汇率转换
 
-**Agent 调用时，系统会自动完成以下操作：**
+**两种模式：**
+
+#### 模式 A：自动 OCR 模式（默认）
+
+不传 `mode` 字段，系统自动完成：
 1. 上传图片到云存储
 2. 自动 OCR 识别发票内容（金额、币种、商家、日期、类别）
-3. 自动按管理员设定的汇率转换为公司本位币
+3. 自动按管理员设定的月初汇率转换为公司本位币
 
-Agent 无需单独调用 OCR，也无需计算汇率，一步到位。
+#### 模式 B：仅上传模式
 
-响应示例（Agent 模式）：
+传 `mode=upload_only`，系统仅上传文件，不做 OCR 识别。适用于：
+- 用户已经提供了金额等信息，不需要 OCR
+- 凭证格式特殊，OCR 识别不准确
+- 只需要上传附件获取 URL
+
+响应示例（模式 A - Agent 自动 OCR）：
 ```json
 {
   "success": true,
@@ -362,30 +422,55 @@ Agent 无需单独调用 OCR，也无需计算汇率，一步到位。
   "size": 102400,
   "type": "image/jpeg",
   "ocr": {
-    "type": "taxi",
-    "category": "taxi",
-    "amount": 45.00,
+    "type": "train_ticket",
+    "category": "train",
+    "amount": 662.00,
     "currency": "CNY",
-    "vendor": "滴滴出行",
-    "date": "2026-02-15",
+    "vendor": "中国铁路",
+    "date": "2026-01-04",
     "confidence": 0.95,
+    "departure": "北京南",
+    "destination": "上海虹桥",
+    "trainNumber": "G5",
     "exchangeRate": 0.138,
-    "amountInBaseCurrency": 6.21,
+    "amountInBaseCurrency": 91.36,
     "baseCurrency": "USD"
   }
 }
 ```
 
-**使用方法**：将 `ocr` 返回的字段直接用于创建报销单的 `items`，其中：
-- `amount` / `currency` → 票面原始金额（系统识别，不可修改）
-- `exchangeRate` / `amountInBaseCurrency` → 系统自动换算的本位币金额
-- `category` / `vendor` / `date` → 直接填入报销明细
-- **`url` → 必须填入 `receiptUrl` 关联票据**（这是返回的顶层 `url` 字段，不是 `ocr` 内的字段）
+**⚠️ 关键：正确使用 OCR 返回值创建报销**
+
+| OCR 返回字段 | 用途 | 填入报销 item 的字段 |
+|---|---|---|
+| 顶层 `url` | **凭证附件地址（必须！）** | `receiptUrl` |
+| `ocr.amount` | **票面原始金额** | `amount` |
+| `ocr.currency` | **票面原始币种** | `currency` |
+| `ocr.category` | 费用类别 | `category` |
+| `ocr.vendor` | 商家名称 | `vendor` |
+| `ocr.date` | 日期 | `date` |
+| `ocr.departure` | 出发地 | `description` 中描述 |
+| `ocr.destination` | 目的地 | `description` 中描述 |
+| `ocr.exchangeRate` | 仅供参考展示 | **不要填入报销单** |
+| `ocr.amountInBaseCurrency` | 仅供参考展示 | **不要填入报销单** |
+
+**❌ 错误做法**（会导致汇率=1.0000）：
+```json
+{ "amount": 91.36, "currency": "USD" }
+```
+这是把已转换的美元金额当作原始金额，导致系统认为币种就是 USD，汇率当然是 1。
+
+**✅ 正确做法**：
+```json
+{ "amount": 662.00, "currency": "CNY", "receiptUrl": "https://xxx.blob..." }
+```
+使用票面原始金额和币种，服务端会自动按公司汇率表转换为本位币。
 
 **完整流程示例（上传 → 创建报销）：**
-1. 调用 `POST /api/upload` 上传每张票据 → 记下返回的 `url` 和 `ocr` 数据
-2. 创建报销时，每个 item 都必须填入 `receiptUrl: "<上传返回的 url>"`
-3. 没有 `receiptUrl` 的报销会被财务驳回，务必确保每项都附带票据
+1. 调用 `POST /api/upload` 上传每张票据 → 记下返回的 **`url`**（顶层字段）和 `ocr` 数据
+2. 创建报销时，每个 item 都**必须**填入 `receiptUrl: "<上传返回的 url>"`
+3. `amount` 和 `currency` 使用 `ocr.amount` 和 `ocr.currency`（原始票面值），**不要用** `amountInBaseCurrency`
+4. 没有 `receiptUrl` 的报销会被财务驳回，**务必确保每项都附带票据**
 
 ### 6. OCR 识别发票（备用）
 
@@ -443,6 +528,38 @@ GET {REIMBURSEMENT_API_URL}/api/settings/categories
 
 需要的 scope：`settings:read`
 
+### 8a. 获取公司汇率表（初始化必读）
+
+```http
+GET {REIMBURSEMENT_API_URL}/api/exchange-rates?target={本位币}
+```
+
+查询参数：
+- `target` - 目标本位币（如 `USD`、`CNY`），返回所有货币到该本位币的汇率
+- `from` + `to` - 查询单个货币对汇率（如 `from=CNY&to=USD`）
+
+**重要**：这个接口返回的是管理员设定的月初固定汇率。初始化时必须调用，以了解公司使用的汇率。
+
+响应示例：
+```json
+{
+  "target": "USD",
+  "rates": {
+    "CNY": { "rate": 0.1380, "source": "monthly_manual" },
+    "EUR": { "rate": 1.0850, "source": "monthly_manual" },
+    "JPY": { "rate": 0.0067, "source": "monthly_api" }
+  },
+  "timestamp": "2026-03-01T00:00:00Z"
+}
+```
+
+**`source` 字段含义**：
+- `monthly_manual` — 管理员手动设定的汇率（优先级最高，最可信）
+- `monthly_api` / `monthly_exchangerate-api.com` — 从外部 API 获取的月初汇率
+- `fallback` — 备用汇率（API 不可用时的兜底值）
+
+**用途**：向用户展示参考汇率和预估本位币金额。但创建报销时**不要自己填入汇率值**，服务端会自动使用这些汇率转换。
+
 ### 9. 查看费用分析
 
 ```http
@@ -481,13 +598,25 @@ GET {REIMBURSEMENT_API_URL}/api/settings/profile
 
 ### 用户："帮我报销这张发票"（附带图片）
 
-1. 上传图片到 /api/upload（系统自动 OCR + 汇率转换）
-2. 记下返回的 `url`（票据永久链接）和 `ocr` 字段（金额、币种、类别等）
-3. 展示识别结果让用户确认（金额已由系统识别，不可修改）
-4. 创建报销单（草稿），每个 item 的 `receiptUrl` 必须填入步骤 2 的 `url`
-5. 让用户确认后通过 PUT 提交
+1. **初始化**（如尚未完成）：获取费用类别、汇率表、报销政策
+2. **上传凭证**：`POST /api/upload` 上传图片 → 记下返回的 **`url`** 和 `ocr` 数据
+3. **展示识别结果**让用户确认：
+   - 原始金额：`ocr.amount` `ocr.currency`（如 ¥662 CNY）
+   - 参考本位币：`ocr.amountInBaseCurrency` `ocr.baseCurrency`（如 $91.36 USD，仅供参考）
+   - 类别、商家、日期等
+4. **检查政策**：根据步骤 1 获取的政策，检查金额是否超限
+5. **创建报销单**（草稿）：
+   - `amount` = `ocr.amount`（原始金额，如 662）
+   - `currency` = `ocr.currency`（原始币种，如 CNY）
+   - `receiptUrl` = 步骤 2 返回的 **`url`**（顶层字段）
+   - **不要填** `exchangeRate` 和 `amountInBaseCurrency`，服务端自动转换
+6. **最终检查**：确认每个 item 都有 `receiptUrl`（非空）
+7. 让用户确认后通过 PUT 提交
 
-**重要**：如果忘记填 `receiptUrl`，报销单会没有附件，财务会驳回。
+**⚠️ 常见错误**：
+- 忘记填 `receiptUrl` → 报销单没有附件，财务驳回
+- 把 `amountInBaseCurrency` 当作 `amount` 填入 → 汇率显示 1.0000，金额错误
+- 把 `baseCurrency` 当作 `currency` 填入 → 币种错误
 
 ### 用户："那笔被驳回的报销帮我重新提交"
 
