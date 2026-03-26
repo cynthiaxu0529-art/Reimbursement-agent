@@ -39,6 +39,8 @@ interface Reimbursement {
   paymentStatus?: 'pending' | 'processing' | 'completed' | 'failed';
   paymentId?: string;
   aiSuggestions?: any[];
+  isAdvance?: boolean;
+  advancePurpose?: string;
 }
 
 const categoryLabels: Record<string, { label: string; icon: string; color: string }> = {
@@ -58,11 +60,11 @@ const currencySymbols: Record<string, string> = {
   CNY: '¥', USD: '$', EUR: '€', GBP: '£', JPY: '¥',
 };
 
-const generateFormId = (createdAt: string, id: string): string => {
+const generateFormId = (createdAt: string, id: string, isAdvance?: boolean): string => {
   const date = new Date(createdAt);
   const year = date.getFullYear();
   const idSuffix = id.slice(-5).toUpperCase();
-  return `#RF-${year}-${idSuffix}`;
+  return isAdvance ? `#ADV-${year}-${idSuffix}` : `#RF-${year}-${idSuffix}`;
 };
 
 export default function DisbursementsPage() {
@@ -180,7 +182,41 @@ export default function DisbursementsPage() {
       const response = await fetch(`/api/reimbursements?status=${status}&role=finance`);
       const result = await response.json();
       if (result.success) {
-        const data = result.data || [];
+        let data = result.data || [];
+
+        // 待付款 tab：同时获取已批准的预借款并合并到列表
+        if (activeTab === 'ready') {
+          try {
+            const advRes = await fetch('/api/advances?status=approved');
+            const advResult = await advRes.json();
+            if (advResult.success && advResult.data) {
+              const advanceItems: Reimbursement[] = advResult.data.map((adv: any) => ({
+                id: adv.id,
+                title: adv.title,
+                status: 'approved',
+                totalAmount: adv.amount,
+                totalAmountInBaseCurrency: adv.amount,
+                baseCurrency: adv.currency || 'USD',
+                createdAt: adv.createdAt,
+                submittedAt: adv.createdAt,
+                approvedAt: adv.approvedAt,
+                items: [],
+                submitter: adv.user ? {
+                  id: adv.user.id,
+                  name: adv.user.name,
+                  email: adv.user.email,
+                  department: adv.user.department,
+                } : undefined,
+                isAdvance: true,
+                advancePurpose: adv.purpose || adv.description || '',
+              }));
+              data = [...data, ...advanceItems];
+            }
+          } catch (err) {
+            console.error('Failed to fetch advances:', err);
+          }
+        }
+
         setReimbursements(data);
 
         // 从报销单的 aiSuggestions 中读取已保存的自定义打款金额
@@ -359,6 +395,37 @@ export default function DisbursementsPage() {
   const processPayment = async (id: string) => {
     setProcessing(id);
     setErrorMessage(null);
+
+    // 检查是否为预借款
+    const item = reimbursements.find(r => r.id === id);
+    if (item?.isAdvance) {
+      try {
+        const response = await fetch(`/api/advances/${id}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'pay' }),
+        });
+        const result = await response.json();
+        if (result.success) {
+          setReimbursements(prev => prev.filter(r => r.id !== id));
+          setSelectedIds(prev => prev.filter(sid => sid !== id));
+          setExpandedId(null);
+          setErrorMessage(null);
+          alert('预借款付款已完成');
+          fetchPaymentStats();
+        } else {
+          setErrorMessage(result.error || '预借款付款失败');
+          alert(`预借款付款失败: ${result.error || '未知错误'}`);
+        }
+      } catch (error) {
+        console.error('Advance payment error:', error);
+        setErrorMessage('预借款付款处理失败');
+      } finally {
+        setProcessing(null);
+      }
+      return;
+    }
+
     try {
       // 获取自定义金额（如果有）
       const customAmount = customPaymentAmounts[id];
@@ -792,7 +859,7 @@ export default function DisbursementsPage() {
             {reimbursements.map((item) => {
               const isExpanded = expandedId === item.id;
               const isSelected = selectedIds.includes(item.id);
-              const formId = generateFormId(item.createdAt, item.id);
+              const formId = generateFormId(item.createdAt, item.id, item.isAdvance);
               const usdAmount = item.totalAmountInBaseCurrency || 0;
 
               return (
@@ -839,8 +906,13 @@ export default function DisbursementsPage() {
 
                     {/* Subject */}
                     <div className="text-sm text-gray-900">
+                      {item.isAdvance && (
+                        <span className="inline-block mr-1 px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 rounded font-medium">预借款</span>
+                      )}
                       {item.title}
-                      <span className="ml-1 text-xs text-gray-500">{item.items?.length || 0} 项</span>
+                      {!item.isAdvance && (
+                        <span className="ml-1 text-xs text-gray-500">{item.items?.length || 0} 项</span>
+                      )}
                     </div>
 
                     {/* Amount */}
@@ -894,6 +966,43 @@ export default function DisbursementsPage() {
                   {/* Expanded Detail */}
                   {isExpanded && (
                     <div className="bg-gray-50 border-b px-4 py-5">
+                      {/* Advance detail */}
+                      {item.isAdvance ? (
+                        <div className="space-y-3">
+                          <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                            <span>💰</span> 预借款详情
+                          </h4>
+                          <div className="bg-white rounded-lg border p-4 space-y-2">
+                            <div className="flex justify-between text-sm">
+                              <span className="text-gray-500">标题</span>
+                              <span className="font-medium">{item.title}</span>
+                            </div>
+                            {item.advancePurpose && (
+                              <div className="flex justify-between text-sm">
+                                <span className="text-gray-500">用途</span>
+                                <span>{item.advancePurpose}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between text-sm">
+                              <span className="text-gray-500">申请人</span>
+                              <span>{item.submitter?.name || '未知'}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-gray-500">金额</span>
+                              <span className="font-bold">${usdAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={() => processPayment(item.id)}
+                              disabled={processing === item.id}
+                              className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white"
+                            >
+                              {processing === item.id ? '处理中...' : '💳 确认付款'}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
                       <div className="grid grid-cols-[1fr_300px] gap-6">
                         {/* Left: Line Items */}
                         <div>
@@ -1215,6 +1324,7 @@ export default function DisbursementsPage() {
                           })()}
                         </div>
                       </div>
+                      )}
                     </div>
                   )}
                 </div>
