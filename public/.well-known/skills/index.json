@@ -2,7 +2,7 @@
   "skills": [
     {
       "name": "reimbursement",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "description": "企业报销管理 - 帮助用户规划差旅行程、提交报销、上传发票、查询报销状态、查看政策和分析费用",
       "url": "/skill.md",
       "requires": {
