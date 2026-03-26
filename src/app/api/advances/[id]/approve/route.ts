@@ -59,6 +59,43 @@ export async function POST(
       return NextResponse.json({ success: true, data: updated[0] });
     }
 
+    // 撤回付款：paid → approved（用于修正无实际打款记录的情况）
+    if (action === 'revert_pay') {
+      if (advance.status !== 'paid') {
+        return NextResponse.json({ error: '只能撤回已打款状态的预借款' }, { status: 400 });
+      }
+      const updated = await db.update(advances)
+        .set({
+          status: 'approved',
+          paidAt: null,
+          paymentId: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(advances.id, id))
+        .returning();
+
+      return NextResponse.json({ success: true, data: updated[0] });
+    }
+
+    // 驳回操作：pending 或 approved 都可以驳回
+    if (action === 'reject') {
+      if (advance.status !== 'pending' && advance.status !== 'approved') {
+        return NextResponse.json({ error: '只能驳回待审批或已批准的预借款' }, { status: 400 });
+      }
+      const updated = await db.update(advances)
+        .set({
+          status: 'rejected',
+          rejectedBy: user.id,
+          rejectedAt: new Date(),
+          rejectReason: reason || '',
+          updatedAt: new Date(),
+        })
+        .where(eq(advances.id, id))
+        .returning();
+
+      return NextResponse.json({ success: true, data: updated[0] });
+    }
+
     if (advance.status !== 'pending') {
       return NextResponse.json({ error: '只能审批待审批状态的预借款' }, { status: 400 });
     }
@@ -69,19 +106,6 @@ export async function POST(
           status: 'approved',
           approvedBy: user.id,
           approvedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(advances.id, id))
-        .returning();
-
-      return NextResponse.json({ success: true, data: updated[0] });
-    } else if (action === 'reject') {
-      const updated = await db.update(advances)
-        .set({
-          status: 'rejected',
-          rejectedBy: user.id,
-          rejectedAt: new Date(),
-          rejectReason: reason || '',
           updatedAt: new Date(),
         })
         .where(eq(advances.id, id))
