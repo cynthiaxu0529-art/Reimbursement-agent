@@ -396,14 +396,13 @@ export default function DisbursementsPage() {
     setProcessing(id);
     setErrorMessage(null);
 
-    // 检查是否为预借款
+    // 检查是否为预借款 - 走 Fluxa 支付流程
     const item = reimbursements.find(r => r.id === id);
     if (item?.isAdvance) {
       try {
-        const response = await fetch(`/api/advances/${id}/approve`, {
+        const response = await fetch(`/api/advances/${id}/process-payment`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'pay' }),
         });
         const result = await response.json();
         if (result.success) {
@@ -411,11 +410,16 @@ export default function DisbursementsPage() {
           setSelectedIds(prev => prev.filter(sid => sid !== id));
           setExpandedId(null);
           setErrorMessage(null);
-          alert('预借款付款已完成');
+          // 打开 Fluxa 审批链接
+          if (result.approvalUrl) {
+            window.open(result.approvalUrl, '_blank');
+          }
+          alert('预借款付款已提交，请在 Fluxa 钱包中完成审批');
           fetchPaymentStats();
         } else {
-          setErrorMessage(result.error || '预借款付款失败');
-          alert(`预借款付款失败: ${result.error || '未知错误'}`);
+          const errorMsg = result.message || result.error || '预借款付款失败';
+          setErrorMessage(errorMsg);
+          alert(`预借款付款失败: ${errorMsg}`);
         }
       } catch (error) {
         console.error('Advance payment error:', error);
@@ -472,18 +476,32 @@ export default function DisbursementsPage() {
     const reason = prompt('请输入拒绝原因：');
     if (!reason) return;
 
+    // 检查是否为预借款
+    const item = reimbursements.find(r => r.id === id);
+
     setProcessing(id);
     try {
-      const response = await fetch(`/api/reimbursements/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'rejected', rejectReason: `财务拒绝: ${reason}` }),
-      });
+      let response;
+      if (item?.isAdvance) {
+        // 预借款使用 advances API 驳回
+        response = await fetch(`/api/advances/${id}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'reject', reason: `财务拒绝: ${reason}` }),
+        });
+      } else {
+        response = await fetch(`/api/reimbursements/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'rejected', rejectReason: `财务拒绝: ${reason}` }),
+        });
+      }
       const result = await response.json();
 
       if (result.success) {
         setReimbursements(prev => prev.filter(r => r.id !== id));
         setExpandedId(null);
+        fetchPaymentStats();
         alert('已拒绝付款');
       } else {
         alert(result.error || '操作失败');
@@ -1518,6 +1536,18 @@ function AdvancesPanel() {
                           className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
                         >
                           付款
+                        </button>
+                      )}
+                      {adv.status === 'paid' && !adv.paymentId && (
+                        <button
+                          onClick={() => {
+                            if (confirm('该笔预借款无实际打款记录，确认撤回打款状态？')) {
+                              handleApprove(adv.id, 'revert_pay' as any);
+                            }
+                          }}
+                          className="px-2 py-1 text-xs bg-amber-100 text-amber-700 rounded hover:bg-amber-200"
+                        >
+                          撤回打款
                         </button>
                       )}
                     </div>
