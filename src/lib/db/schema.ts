@@ -383,6 +383,7 @@ export const reimbursementItems = pgTable('reimbursement_items', {
 
   receiptId: uuid('receipt_id'),
   receiptUrl: text('receipt_url'),
+  invoiceNumber: text('invoice_number'),  // 发票号码（用于去重检测）
 
   extractedFromEmail: boolean('extracted_from_email').default(false),
   ocrConfidence: real('ocr_confidence'),

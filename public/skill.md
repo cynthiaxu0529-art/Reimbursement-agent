@@ -54,7 +54,11 @@ API 基础地址：`{REIMBURSEMENT_API_URL}`
    - ❌ `"2025年12月杭州出差"` — 只有月份，没有具体日期
    - ❌ `"2025年11月上海出差"` — 太模糊
    - 日期从票据（OCR 识别的 `date`、`checkInDate`）中提取，城市从 `departure`/`destination` 或 `location` 中提取
-10. **创建前必须查重**：创建报销单之前，**必须**先调用 `GET /api/reimbursements` 查询该用户的历史报销单。检查是否存在相同日期、相同金额或相同路线的费用项，避免重复报销。如果发现疑似重复，必须告知用户并请求确认后再创建
+10. **创建前必须查重（三重检查）**：创建报销单之前，**必须**执行以下去重检查：
+    - **历史查重**：调用 `GET /api/reimbursements` 查询该用户的历史报销单，检查是否存在相同日期、相同金额或相同路线的费用项
+    - **发票号码查重**：如果 OCR 返回了 `invoiceNumber`（发票号码），**必须**将其填入报销 item 的 `invoiceNumber` 字段。系统会自动检测同一租户下是否有相同发票号码的费用项，**发票号码重复会被硬拦截**（返回 `DUPLICATE_DETECTED` 错误）
+    - **凭证图片查重**：系统会自动检测同一 `receiptUrl` 是否已在其他报销中使用，重复时会在响应中返回 `duplicateWarnings` 警告
+    - 如果发现疑似重复，必须告知用户并请求确认后再创建。注意：系统返回的 `duplicateWarnings` 警告信息也必须展示给用户
 11. **酒店必须识别住宿天数（最常出错）**：当费用类别为酒店(hotel)时，**必须**从 OCR 返回值或用户消息中提取住宿天数，并填入 `checkInDate`、`checkOutDate`、`nights` 三个字段。用户可能用"2晚"、"两天"、"15号到17号"等多种方式表达天数。如果无法确定天数，**必须主动追问**。缺少这些字段会导致系统按 1 晚计算限额，多晚住宿金额被错误截断
 
 ## 必须执行的初始化步骤
@@ -240,7 +244,8 @@ Content-Type: application/json
       "date": "2026-02-15",
       "vendor": "东方航空",
       "location": "上海",
-      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-flight.jpg"
+      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-flight.jpg",
+      "invoiceNumber": "044001900111-92847365"
     },
     {
       "category": "hotel",
@@ -294,9 +299,18 @@ Content-Type: application/json
     "count": 1,
     "messages": ["酒店费用超过每日限额，已从 1600 调整为 1400"],
     "message": "有 1 项费用超过政策限额，已自动调整"
+  },
+  "duplicateWarnings": {
+    "count": 1,
+    "messages": ["第 2 项的凭证图片已在其他报销单中使用"],
+    "message": "检测到 1 项疑似重复，请确认是否正确"
   }
 }
 ```
+
+**⚠️ 去重响应处理**：
+- `duplicateWarnings`（软提示）：系统检测到疑似重复（跨报销单相同费用、凭证图片复用），**必须**将 `messages` 内容展示给用户确认。报销单仍然会被创建，但用户需要确认是否正确
+- 如果返回 HTTP 409 + `error_code: "DUPLICATE_DETECTED"`：表示**硬拦截**（如发票号码重复），报销单不会被创建，需要告知用户不能重复报销同一张发票
 
 **注意事项：**
 - **⚠️ 必须附带票据（最重要）**：每个费用明细的 `receiptUrl` 字段**必须**填入对应的票据图片 URL。没有附件的报销会被财务驳回。流程是：先调用 `POST /api/upload` 上传票据获取 `url`，然后把该 `url` 填入 items 的 `receiptUrl` 字段。**创建报销前检查：每个 item 是否都有非空的 `receiptUrl`？如果有缺失，必须先上传凭证。**
@@ -510,6 +524,7 @@ Content-Type: multipart/form-data
 | `ocr.checkInDate` | 酒店入住日期 | `checkInDate`（**酒店必填**） |
 | `ocr.checkOutDate` | 酒店离店日期 | `checkOutDate`（**酒店必填**） |
 | `ocr.nights` | 住宿晚数 | `nights`（**酒店必填**） |
+| `ocr.invoiceNumber` | **发票号码（去重关键）** | `invoiceNumber`（**有则必填**） |
 | `ocr.exchangeRate` | ⚠️ OCR 估算的汇率 | **不要使用**，改用公司汇率表 |
 | `ocr.amountInBaseCurrency` | ⚠️ OCR 估算的本位币 | **不要使用**，自己用公司汇率算 |
 

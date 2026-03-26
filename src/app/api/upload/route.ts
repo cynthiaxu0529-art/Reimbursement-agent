@@ -116,6 +116,8 @@ export async function POST(request: NextRequest) {
           checkInDate: ocrResult.checkInDate,
           checkOutDate: ocrResult.checkOutDate,
           nights: ocrResult.nights,
+          // 发票号码（用于去重检测）
+          invoiceNumber: ocrResult.invoiceNumber,
         };
 
         // 自动汇率转换：查找公司本位币并转换

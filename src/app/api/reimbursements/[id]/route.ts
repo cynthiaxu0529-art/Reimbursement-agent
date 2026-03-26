@@ -416,6 +416,7 @@ export async function PUT(
             location: item.location || null,
             vendor: item.vendor || null,
             receiptUrl,
+            invoiceNumber: item.invoiceNumber || null,
           };
           // Hotel-specific fields
           if (item.checkInDate) {
