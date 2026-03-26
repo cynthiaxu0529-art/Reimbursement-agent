@@ -315,6 +315,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 服务端补齐酒店住宿天数：如果有 checkInDate/checkOutDate 但缺少 nights，自动计算
+    // 防止 Agent 传了日期但漏传 nights 导致限额按 1 晚计算
+    for (const item of items) {
+      if (item.category === 'hotel' && item.checkInDate && item.checkOutDate && !item.nights) {
+        try {
+          const checkIn = new Date(item.checkInDate);
+          const checkOut = new Date(item.checkOutDate);
+          const diffMs = checkOut.getTime() - checkIn.getTime();
+          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+          if (diffDays > 0) {
+            item.nights = diffDays;
+          }
+        } catch {
+          // 日期解析失败，不做处理
+        }
+      }
+    }
+
     // 应用政策限额约束（支持 per_day 和 per_month 类型）
     // 传入 nights/checkInDate/checkOutDate 以便多日住宿按 每日限额×天数 计算
     // 传入 tenantBaseCurrency 确保限额比较时货币一致

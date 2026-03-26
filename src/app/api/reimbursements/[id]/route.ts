@@ -427,6 +427,17 @@ export async function PUT(
           if (item.nights) {
             itemData.nights = parseInt(item.nights) || null;
           }
+          // 服务端补齐酒店住宿天数：如果有 checkInDate/checkOutDate 但缺少 nights，自动计算
+          if (item.category === 'hotel' && item.checkInDate && item.checkOutDate && !item.nights) {
+            try {
+              const ciDate = new Date(item.checkInDate);
+              const coDate = new Date(item.checkOutDate);
+              const diffDays = Math.ceil((coDate.getTime() - ciDate.getTime()) / (1000 * 60 * 60 * 24));
+              if (diffDays > 0) itemData.nights = diffDays;
+            } catch {
+              // 日期解析失败，不做处理
+            }
+          }
           return itemData;
         })
       );
