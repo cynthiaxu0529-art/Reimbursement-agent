@@ -54,7 +54,12 @@ API 基础地址：`{REIMBURSEMENT_API_URL}`
    - ❌ `"2025年12月杭州出差"` — 只有月份，没有具体日期
    - ❌ `"2025年11月上海出差"` — 太模糊
    - 日期从票据（OCR 识别的 `date`、`checkInDate`）中提取，城市从 `departure`/`destination` 或 `location` 中提取
-10. **创建前必须查重**：创建报销单之前，**必须**先调用 `GET /api/reimbursements` 查询该用户的历史报销单。检查是否存在相同日期、相同金额或相同路线的费用项，避免重复报销。如果发现疑似重复，必须告知用户并请求确认后再创建
+10. **创建前必须查重（三重检查）**：创建报销单之前，**必须**执行以下去重检查：
+    - **历史查重**：调用 `GET /api/reimbursements` 查询该用户的历史报销单，检查是否存在相同日期、相同金额或相同路线的费用项
+    - **发票号码查重**：如果 OCR 返回了 `invoiceNumber`（发票号码），**必须**将其填入报销 item 的 `invoiceNumber` 字段。系统会自动检测同一租户下是否有相同发票号码的费用项，**发票号码重复会被硬拦截**（返回 `DUPLICATE_DETECTED` 错误）
+    - **凭证图片查重**：系统会自动检测同一 `receiptUrl` 是否已在其他报销中使用，重复时会在响应中返回 `duplicateWarnings` 警告
+    - 如果发现疑似重复，必须告知用户并请求确认后再创建。注意：系统返回的 `duplicateWarnings` 警告信息也必须展示给用户
+11. **酒店必须识别住宿天数（最常出错）**：当费用类别为酒店(hotel)时，**必须**从 OCR 返回值或用户消息中提取住宿天数，并填入 `checkInDate`、`checkOutDate`、`nights` 三个字段。用户可能用"2晚"、"两天"、"15号到17号"等多种方式表达天数。如果无法确定天数，**必须主动追问**。缺少这些字段会导致系统按 1 晚计算限额，多晚住宿金额被错误截断
 
 ## 必须执行的初始化步骤
 
@@ -239,7 +244,8 @@ Content-Type: application/json
       "date": "2026-02-15",
       "vendor": "东方航空",
       "location": "上海",
-      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-flight.jpg"
+      "receiptUrl": "https://xxx.blob.vercel-storage.com/receipt-flight.jpg",
+      "invoiceNumber": "044001900111-92847365"
     },
     {
       "category": "hotel",
@@ -293,9 +299,18 @@ Content-Type: application/json
     "count": 1,
     "messages": ["酒店费用超过每日限额，已从 1600 调整为 1400"],
     "message": "有 1 项费用超过政策限额，已自动调整"
+  },
+  "duplicateWarnings": {
+    "count": 1,
+    "messages": ["第 2 项的凭证图片已在其他报销单中使用"],
+    "message": "检测到 1 项疑似重复，请确认是否正确"
   }
 }
 ```
+
+**⚠️ 去重响应处理**：
+- `duplicateWarnings`（软提示）：系统检测到疑似重复（跨报销单相同费用、凭证图片复用），**必须**将 `messages` 内容展示给用户确认。报销单仍然会被创建，但用户需要确认是否正确
+- 如果返回 HTTP 409 + `error_code: "DUPLICATE_DETECTED"`：表示**硬拦截**（如发票号码重复），报销单不会被创建，需要告知用户不能重复报销同一张发票
 
 **注意事项：**
 - **⚠️ 必须附带票据（最重要）**：每个费用明细的 `receiptUrl` 字段**必须**填入对应的票据图片 URL。没有附件的报销会被财务驳回。流程是：先调用 `POST /api/upload` 上传票据获取 `url`，然后把该 `url` 填入 items 的 `receiptUrl` 字段。**创建报销前检查：每个 item 是否都有非空的 `receiptUrl`？如果有缺失，必须先上传凭证。**
@@ -509,6 +524,7 @@ Content-Type: multipart/form-data
 | `ocr.checkInDate` | 酒店入住日期 | `checkInDate`（**酒店必填**） |
 | `ocr.checkOutDate` | 酒店离店日期 | `checkOutDate`（**酒店必填**） |
 | `ocr.nights` | 住宿晚数 | `nights`（**酒店必填**） |
+| `ocr.invoiceNumber` | **发票号码（去重关键）** | `invoiceNumber`（**有则必填**） |
 | `ocr.exchangeRate` | ⚠️ OCR 估算的汇率 | **不要使用**，改用公司汇率表 |
 | `ocr.amountInBaseCurrency` | ⚠️ OCR 估算的本位币 | **不要使用**，自己用公司汇率算 |
 
@@ -516,12 +532,39 @@ Agent 还需自行填写（根据公司汇率表计算）：
 - `exchangeRate` = 公司汇率表中该币种到本位币的汇率
 - `amountInBaseCurrency` = `amount` × `exchangeRate`
 
-**🏨 酒店住宿特别说明**：
-- 酒店票据的 OCR 会返回 `checkInDate`、`checkOutDate`、`nights` 三个字段
-- **必须**将这三个字段填入报销 item，否则系统会按 1 晚计算限额
+**🏨 酒店住宿特别说明（最常见错误，务必仔细阅读）**：
+
+**核心原则**：酒店类别的费用项**必须**同时填入 `checkInDate`、`checkOutDate`、`nights` 三个字段。缺失任何一个，系统默认按 1 晚计算限额，导致多晚住宿金额被错误截断。
+
+**信息来源优先级**：
+1. **OCR 返回值**：如果通过 `POST /api/upload` 上传了酒店票据，OCR 会返回 `checkInDate`、`checkOutDate`、`nights`，直接使用
+2. **用户口述/文字描述**：如果用户在消息中提到了住宿天数，**必须从中提取**并填入对应字段
+3. **主动追问**：如果以上两种方式都没有获取到，**必须主动询问用户**入住日期和天数
+
+**从用户消息中识别住宿天数（关键能力）**：
+
+用户可能以多种方式表达住宿天数，Agent 必须能识别以下所有表述：
+- 直接数字："2晚"、"3天"、"住了2晚"、"住宿2天"
+- 中文数字："两晚"、"三天"、"住了两个晚上"
+- 日期范围："12月15日到17日"（= 2晚）、"15号住到17号"（= 2晚）
+- 描述性："前天和昨天的酒店"（= 2晚）、"周一到周三住的"（= 2晚）
+- 隐含在备注中："notes 里明确说明是 2 晚"
+
+**识别后必须填写的字段**：
+- `nights`：住宿晚数（整数）
+- `checkInDate`：入住日期（YYYY-MM-DD）
+- `checkOutDate`：`checkInDate` + `nights` 天（YYYY-MM-DD）
+- 如果用户只说了"2晚"和一个日期，`checkInDate` = 该日期，`checkOutDate` = 该日期 + 2天
+
+**限额计算规则**：
 - 每日限额（如 $100/天）会乘以住宿天数：2 晚 = $200 限额，3 晚 = $300 限额
 - 政策对比示例：2 晚酒店 ¥1200 CNY → $165.60 USD，限额 $100×2=$200，未超限
 - 如果不传 `nights`/`checkInDate`/`checkOutDate`，系统默认按 1 晚 $100 限额判断，$165.60 会被判定超限并截断为 $100
+
+**⚠️ 常见错误场景**：
+- 用户说"帮我报销酒店 2 晚 580 元"，Agent 只填了 `amount=580` 而没有填 `nights=2` → 系统按 1 晚限额截断
+- 用户说"12月15到17号的酒店"，Agent 只填了 `date=2025-12-15` 而没有填 `checkInDate`/`checkOutDate`/`nights` → 同样被截断
+- 用户在 notes 里写了"2晚"，但 Agent 没有解析 notes 内容 → 同样被截断
 
 **❌ 错误做法 1**（把转换后金额当原始金额，汇率=1.0000）：
 ```json
@@ -709,6 +752,31 @@ GET {REIMBURSEMENT_API_URL}/api/settings/profile
 - 把 OCR 的 `amountInBaseCurrency` 当作 `amount` 填入 → 汇率显示 1.0000
 - 用 OCR 返回的 `exchangeRate` 而非公司汇率表 → 汇率与公司设定不一致
 - 用原币金额（¥662）对比美元限额（$100）→ 误判超限
+
+### 用户："帮我报销酒店2晚，580元"（口述酒店费用，无票据 OCR）
+
+1. **初始化**（如尚未完成）：获取费用类别、汇率表、报销政策
+2. **识别住宿天数**：从用户消息中提取"2晚" → `nights = 2`
+3. **追问缺失信息**：
+   - 入住日期？→ 用户回复"12月15号" → `checkInDate = "2025-12-15"`
+   - 自动计算 `checkOutDate = "2025-12-17"`（checkInDate + nights）
+   - 凭证？→ 提醒用户上传酒店发票
+4. **上传凭证**：`POST /api/upload` → 获取 `url` 和 `ocr` 数据
+5. **用公司汇率计算本位币金额**：580 × 0.1380 = $80.04
+6. **政策自查**（用美元金额）：$80.04 vs 限额 $100×2晚=$200，未超限 ✅
+7. **创建报销**时**必须填入**：
+   ```json
+   {
+     "category": "hotel",
+     "amount": 580,
+     "currency": "CNY",
+     "nights": 2,
+     "checkInDate": "2025-12-15",
+     "checkOutDate": "2025-12-17",
+     "receiptUrl": "https://..."
+   }
+   ```
+8. 如果漏掉 `nights`/`checkInDate`/`checkOutDate`，系统会按 1 晚 $100 限额判断，$80.04 虽未超限但未来金额更大时会被错误截断
 
 ### 用户："那笔被驳回的报销帮我重新提交"
 

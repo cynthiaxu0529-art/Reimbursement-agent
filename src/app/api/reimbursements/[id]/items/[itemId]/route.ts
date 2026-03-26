@@ -200,9 +200,21 @@ export async function PATCH(
       const dateToCheck = date || item.date;
 
       if (currentUser?.tenantId) {
-        const nightsToCheck = body.nights ? parseInt(body.nights) : (item as any).nights;
+        let nightsToCheck = body.nights ? parseInt(body.nights) : (item as any).nights;
         const checkInToCheck = body.checkInDate || (item as any).checkInDate;
         const checkOutToCheck = body.checkOutDate || (item as any).checkOutDate;
+
+        // 服务端补齐酒店住宿天数：如果有 checkInDate/checkOutDate 但缺少 nights，自动计算
+        if (categoryToCheck === 'hotel' && checkInToCheck && checkOutToCheck && !nightsToCheck) {
+          try {
+            const ciDate = new Date(typeof checkInToCheck === 'string' ? checkInToCheck : checkInToCheck.toISOString());
+            const coDate = new Date(typeof checkOutToCheck === 'string' ? checkOutToCheck : checkOutToCheck.toISOString());
+            const diffDays = Math.ceil((coDate.getTime() - ciDate.getTime()) / (1000 * 60 * 60 * 24));
+            if (diffDays > 0) nightsToCheck = diffDays;
+          } catch {
+            // 日期解析失败，不做处理
+          }
+        }
 
         const limitResult = await checkItemsLimit(
           authCtx.userId,

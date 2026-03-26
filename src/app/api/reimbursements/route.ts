@@ -6,6 +6,7 @@ import { eq, desc, and, or, inArray, sql } from 'drizzle-orm';
 import { getUserRoles, canApprove, canProcessPayment, isAdmin } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
 import { checkItemsLimit } from '@/lib/policy/limit-service';
+import { checkDuplicates } from '@/lib/dedup/dedup-service';
 import { authenticate, logAgentAction, type AuthContext } from '@/lib/auth/api-key';
 import { API_SCOPES } from '@/lib/auth/scopes';
 import { createChatCompletion, extractTextContent } from '@/lib/ai/openrouter-client';
@@ -315,6 +316,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 服务端补齐酒店住宿天数：如果有 checkInDate/checkOutDate 但缺少 nights，自动计算
+    // 防止 Agent 传了日期但漏传 nights 导致限额按 1 晚计算
+    for (const item of items) {
+      if (item.category === 'hotel' && item.checkInDate && item.checkOutDate && !item.nights) {
+        try {
+          const checkIn = new Date(item.checkInDate);
+          const checkOut = new Date(item.checkOutDate);
+          const diffMs = checkOut.getTime() - checkIn.getTime();
+          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+          if (diffDays > 0) {
+            item.nights = diffDays;
+          }
+        } catch {
+          // 日期解析失败，不做处理
+        }
+      }
+    }
+
     // 应用政策限额约束（支持 per_day 和 per_month 类型）
     // 传入 nights/checkInDate/checkOutDate 以便多日住宿按 每日限额×天数 计算
     // 传入 tenantBaseCurrency 确保限额比较时货币一致
@@ -379,6 +398,33 @@ export async function POST(request: NextRequest) {
         `发现重复费用项（类别+金额+日期相同），请确认是否误传：${dupes.join('、')}`,
         400,
         'DUPLICATE_ITEMS',
+      );
+    }
+
+    // 综合去重检查：跨报销单 + 发票号码 + 凭证 URL
+    const dedupResult = await checkDuplicates(
+      authCtx.userId,
+      tenantId,
+      adjustedItems.map((item: any) => ({
+        category: item.category,
+        amount: parseFloat(item.amount) || 0,
+        date: item.date,
+        invoiceNumber: item.invoiceNumber || undefined,
+        receiptUrl: item.receiptUrl || undefined,
+        description: item.description,
+      }))
+    );
+
+    // 收集去重信息：硬拦截 (error) 和 软提示 (warning)
+    const dedupErrors = dedupResult.warnings.filter(w => w.severity === 'error');
+    const dedupWarnings = dedupResult.warnings.filter(w => w.severity === 'warning');
+
+    // 发票号码重复 → 硬拦截，禁止创建
+    if (dedupErrors.length > 0) {
+      return apiError(
+        `检测到重复报销：${dedupErrors.map(w => w.message).join('；')}`,
+        409,
+        'DUPLICATE_DETECTED',
       );
     }
 
@@ -452,6 +498,7 @@ export async function POST(request: NextRequest) {
             location: item.location || null,
             vendor: item.vendor || null,
             receiptUrl: item.receiptUrl || null,
+            invoiceNumber: item.invoiceNumber || null,
           };
           // Add hotel-specific fields
           if (item.checkInDate) {
@@ -480,6 +527,15 @@ export async function POST(request: NextRequest) {
         count: limitResult.totalAdjusted,
         messages: limitResult.messages,
         message: `有 ${limitResult.totalAdjusted} 项费用超过政策限额，已自动调整`,
+      };
+    }
+
+    // 如果有去重警告（非硬拦截），返回提示信息让 Agent/用户知晓
+    if (dedupWarnings.length > 0) {
+      responseData.duplicateWarnings = {
+        count: dedupWarnings.length,
+        messages: dedupWarnings.map(w => w.message),
+        message: `检测到 ${dedupWarnings.length} 项疑似重复，请确认是否正确`,
       };
     }
 
