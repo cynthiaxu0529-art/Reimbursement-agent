@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, users } from '@/lib/db/schema';
+import { reimbursements, advances, users } from '@/lib/db/schema';
 import { eq, and, sql, gte, lt } from 'drizzle-orm';
 import { getUserRoles, canProcessPayment } from '@/lib/auth/roles';
 
@@ -49,8 +49,19 @@ export async function GET(request: NextRequest) {
         eq(reimbursements.status, 'approved')
       ));
 
-    const pendingCount = pendingResult[0]?.count || 0;
-    const pendingTotal = pendingResult[0]?.total || 0;
+    // 查询已批准的预借款数量和总额
+    const advancePendingResult = await db.select({
+      count: sql<number>`count(*)::int`,
+      total: sql<number>`coalesce(sum(amount), 0)::float`,
+    })
+      .from(advances)
+      .where(and(
+        eq(advances.tenantId, tenantId),
+        eq(advances.status, 'approved')
+      ));
+
+    const pendingCount = (pendingResult[0]?.count || 0) + (advancePendingResult[0]?.count || 0);
+    const pendingTotal = (pendingResult[0]?.total || 0) + (advancePendingResult[0]?.total || 0);
 
     // 查询处理中的报销单数量
     const processingResult = await db.select({
