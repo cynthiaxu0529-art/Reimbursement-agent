@@ -1402,7 +1402,7 @@ function AdvancesPanel() {
     }
   };
 
-  const handleApprove = async (id: string, action: 'approve' | 'reject' | 'pay') => {
+  const handleApprove = async (id: string, action: 'approve' | 'reject' | 'pay' | 'revert_pay') => {
     if (action === 'reject') {
       const reason = prompt('请输入拒绝原因');
       if (reason === null) return;
@@ -1416,9 +1416,30 @@ function AdvancesPanel() {
       } catch {}
       return;
     }
+    // 付款走 Fluxa 支付流程
     if (action === 'pay') {
-      if (!confirm('确认已完成付款？')) return;
+      if (!confirm('确认发起 Fluxa 付款？')) return;
+      try {
+        const res = await fetch(`/api/advances/${id}/process-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const result = await res.json();
+        if (result.success) {
+          if (result.approvalUrl) {
+            window.open(result.approvalUrl, '_blank');
+          }
+          alert('预借款付款已提交，请在 Fluxa 钱包中完成审批');
+          fetchAdvances();
+        } else {
+          alert(`付款失败: ${result.message || result.error || '未知错误'}`);
+        }
+      } catch {
+        alert('付款请求失败');
+      }
+      return;
     }
+    // 其他操作（approve, revert_pay）
     try {
       await fetch(`/api/advances/${id}/approve`, {
         method: 'POST',
