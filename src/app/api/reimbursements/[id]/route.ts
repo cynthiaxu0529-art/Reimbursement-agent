@@ -425,6 +425,13 @@ export async function PUT(
           if (item.checkOutDate) {
             itemData.checkOutDate = parseDate(item.checkOutDate);
           }
+          // 兼容 quantity 字段：Bot 可能传 quantity+unit 而非 nights
+          if (item.category === 'hotel' && !item.nights && item.quantity && parseInt(item.quantity) > 0) {
+            const unit = (item.unit || '').toLowerCase();
+            if (!unit || unit === '晚' || unit === '天' || unit === 'night' || unit === 'nights' || unit === 'day' || unit === 'days') {
+              item.nights = parseInt(item.quantity);
+            }
+          }
           if (item.nights) {
             itemData.nights = parseInt(item.nights) || null;
           }

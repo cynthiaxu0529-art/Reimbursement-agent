@@ -322,7 +322,9 @@ Content-Type: application/json
 - **⚠️ 政策对比用美元金额**：系统的限额规则（如酒店每日 $100）、审批阈值、支付判断都以 `amountInBaseCurrency` 为准。Agent 提交前应自行用美元金额检查是否超限。
 - 如果费用超过政策限额，系统会自动调整金额并在 `limitAdjustments` 中说明。请将调整信息告知用户。
 - **OCR 金额保护**：通过 OCR 识别出的发票原始金额应如实填入 `amount`，不要修改 OCR 识别的金额。
-- **🏨 酒店必须传入住天数**：酒店类别的费用项**必须**同时填入 `checkInDate`、`checkOutDate`、`nights`（从 OCR 返回值中获取）。如果缺失这些字段，系统会按 **1 晚**计算每日限额，导致多晚住宿被错误截断。例如：2 晚酒店不传 `nights`，限额只算 $100（而非 $200），金额会被错误调整。
+- **🏨 酒店必须传 `nights` 字段（不是 `quantity`）**：酒店类别的费用项**必须**同时填入 `checkInDate`、`checkOutDate`、`nights`。**字段名必须是 `nights`**（整数），不要用 `quantity`、`unit`、`duration` 等其他字段名。如果缺失 `nights`，系统会按 **1 晚**计算每日限额，导致多晚住宿被错误截断。例如：2 晚酒店不传 `nights`，限额只算 $100（而非 $200），金额会被错误调整。
+  - ✅ 正确：`"nights": 2, "checkInDate": "2026-02-15", "checkOutDate": "2026-02-17"`
+  - ❌ 错误：`"quantity": 2, "unit": "晚"` — 系统不识别 quantity/unit 字段
 
 ### 3. 更新报销单
 
@@ -550,8 +552,8 @@ Agent 还需自行填写（根据公司汇率表计算）：
 - 描述性："前天和昨天的酒店"（= 2晚）、"周一到周三住的"（= 2晚）
 - 隐含在备注中："notes 里明确说明是 2 晚"
 
-**识别后必须填写的字段**：
-- `nights`：住宿晚数（整数）
+**识别后必须填写的字段（字段名必须精确）**：
+- `nights`：住宿晚数（整数）— **必须用 `nights`，不要用 `quantity`/`unit`/`duration` 等其他字段名**
 - `checkInDate`：入住日期（YYYY-MM-DD）
 - `checkOutDate`：`checkInDate` + `nights` 天（YYYY-MM-DD）
 - 如果用户只说了"2晚"和一个日期，`checkInDate` = 该日期，`checkOutDate` = 该日期 + 2天

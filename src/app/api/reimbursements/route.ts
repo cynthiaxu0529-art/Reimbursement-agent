@@ -316,6 +316,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 服务端字段兼容：将 Agent 可能误传的 quantity/unit 映射为标准 nights 字段
+    // OpenClaw 等 Bot 可能传 { quantity: 2, unit: "晚" } 而非 { nights: 2 }
+    for (const item of items) {
+      if (item.category === 'hotel' && !item.nights) {
+        // 兼容 quantity 字段：quantity + unit 为天/晚相关时，映射为 nights
+        if (item.quantity && parseInt(item.quantity) > 0) {
+          const unit = (item.unit || '').toLowerCase();
+          if (!unit || unit === '晚' || unit === '天' || unit === 'night' || unit === 'nights' || unit === 'day' || unit === 'days') {
+            item.nights = parseInt(item.quantity);
+          }
+        }
+      }
+    }
+
     // 服务端补齐酒店住宿天数：如果有 checkInDate/checkOutDate 但缺少 nights，自动计算
     // 防止 Agent 传了日期但漏传 nights 导致限额按 1 晚计算
     for (const item of items) {

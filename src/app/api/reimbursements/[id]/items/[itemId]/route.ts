@@ -200,7 +200,15 @@ export async function PATCH(
       const dateToCheck = date || item.date;
 
       if (currentUser?.tenantId) {
-        let nightsToCheck = body.nights ? parseInt(body.nights) : (item as any).nights;
+        // 兼容 quantity 字段：Bot 可能传 quantity+unit 而非 nights
+        let bodyNights = body.nights;
+        if (!bodyNights && body.quantity && parseInt(body.quantity) > 0 && categoryToCheck === 'hotel') {
+          const unit = (body.unit || '').toLowerCase();
+          if (!unit || unit === '晚' || unit === '天' || unit === 'night' || unit === 'nights' || unit === 'day' || unit === 'days') {
+            bodyNights = parseInt(body.quantity);
+          }
+        }
+        let nightsToCheck = bodyNights ? parseInt(bodyNights) : (item as any).nights;
         const checkInToCheck = body.checkInDate || (item as any).checkInDate;
         const checkOutToCheck = body.checkOutDate || (item as any).checkOutDate;
 

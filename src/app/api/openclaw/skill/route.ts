@@ -74,7 +74,7 @@ API 基础地址：\`{REIMBURSEMENT_API_URL}\`（当前服务地址：${baseUrl}
 8. **政策限额以本位币（USD）为准**：限额规则、审批、支付都以 \`amountInBaseCurrency\` 为判断标准，Agent 提交前必须用美元金额与政策限额对比
 9. **标题必须包含具体日期和路线**：\`title\` 必须写明具体出差日期和往返城市。✅ \`"1月20-22日北京-杭州往返出差"\` ❌ \`"2025年12月杭州出差"\`（太模糊）。日期从票据 OCR 的 \`date\`/\`checkInDate\` 提取，城市从 \`departure\`/\`destination\`/\`location\` 提取
 10. **创建前必须查重（三重检查）**：创建报销单前必须执行以下去重检查：(a) 历史查重：\`GET /api/reimbursements\` 查询历史，检查相同日期/金额/路线；(b) 发票号码查重：OCR 返回的 \`invoiceNumber\` 必须填入报销 item，系统自动检测同一发票号码重复（硬拦截 HTTP 409）；(c) 凭证图片查重：系统自动检测 \`receiptUrl\` 复用并在响应 \`duplicateWarnings\` 中警告。发现疑似重复必须提醒用户确认
-11. **酒店必须识别住宿天数**：酒店费用必须从 OCR 或用户消息中提取天数，填入 \`checkInDate\`/\`checkOutDate\`/\`nights\`。缺失会导致系统按 1 晚计算限额
+11. **酒店必须用 \`nights\` 字段传天数**：酒店费用必须从 OCR 或用户消息中提取天数，填入 \`checkInDate\`/\`checkOutDate\`/\`nights\`（整数）。**字段名必须是 \`nights\`，不要用 \`quantity\`/\`unit\` 等其他名称**。缺失会导致系统按 1 晚计算限额
 
 ## 必须执行的初始化步骤
 
