@@ -55,15 +55,23 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const { name, department, walletAddress, phone } = body;
 
+    // 先读取现有的 bankAccount，避免部分更新时覆盖已有数据
+    const existingUser = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+    });
+    const existingBankAccount = (existingUser?.bankAccount as any) || {};
+
+    const updatedBankAccount: Record<string, string> = {
+      walletAddress: walletAddress !== undefined ? (walletAddress || '') : (existingBankAccount.walletAddress || ''),
+      phone: phone !== undefined ? (phone || '') : (existingBankAccount.phone || ''),
+    };
+
     const [updated] = await db
       .update(users)
       .set({
         name: name || undefined,
         department: department || undefined,
-        bankAccount: {
-          walletAddress: walletAddress || '',
-          phone: phone || '',
-        },
+        bankAccount: updatedBankAccount,
         updatedAt: new Date(),
       })
       .where(eq(users.id, session.user.id))
