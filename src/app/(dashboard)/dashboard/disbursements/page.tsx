@@ -1534,7 +1534,7 @@ function AdvancesPanel() {
                     <div className="text-xs text-gray-500">
                       {new Date(adv.createdAt).toLocaleDateString('zh-CN')}
                     </div>
-                    <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                    <div className="flex gap-1 flex-wrap" onClick={e => e.stopPropagation()}>
                       {adv.status === 'pending' && (
                         <>
                           <button
@@ -1552,12 +1552,20 @@ function AdvancesPanel() {
                         </>
                       )}
                       {adv.status === 'approved' && (
-                        <button
-                          onClick={() => handleApprove(adv.id, 'pay')}
-                          className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
-                        >
-                          付款
-                        </button>
+                        <>
+                          <button
+                            onClick={() => handleApprove(adv.id, 'pay')}
+                            className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
+                          >
+                            付款
+                          </button>
+                          <button
+                            onClick={() => handleApprove(adv.id, 'reject')}
+                            className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200"
+                          >
+                            驳回
+                          </button>
+                        </>
                       )}
                       {adv.status === 'paid' && !adv.paymentId && (
                         <button
@@ -1569,6 +1577,27 @@ function AdvancesPanel() {
                           className="px-2 py-1 text-xs bg-amber-100 text-amber-700 rounded hover:bg-amber-200"
                         >
                           撤回打款
+                        </button>
+                      )}
+                      {['pending', 'approved', 'rejected', 'cancelled'].includes(adv.status) && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`确认删除预借款「${adv.title}」？此操作不可撤销。`)) return;
+                            try {
+                              const res = await fetch(`/api/advances/${adv.id}`, { method: 'DELETE' });
+                              const result = await res.json();
+                              if (result.success) {
+                                fetchAdvances();
+                              } else {
+                                alert(result.error || '删除失败');
+                              }
+                            } catch {
+                              alert('删除失败');
+                            }
+                          }}
+                          className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
+                        >
+                          删除
                         </button>
                       )}
                     </div>
