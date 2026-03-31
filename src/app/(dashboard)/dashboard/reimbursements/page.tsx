@@ -616,6 +616,11 @@ export default function ReimbursementsPage() {
                     <p style={{ fontSize: '14px', fontWeight: 500, color: '#111827', marginBottom: '2px' }}>
                       {item.title}
                     </p>
+                    {item.description && (
+                      <p style={{ fontSize: '12px', color: '#2563eb', marginBottom: '2px' }}>
+                        {item.description}
+                      </p>
+                    )}
                     <p style={{ fontSize: '12px', color: '#6b7280' }}>
                       {item.items?.length || 0}{t.reimbursements.expenseItems}
                     </p>
