@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users, departments } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, departments, correctionApplications, expenseCorrections } from '@/lib/db/schema';
 import { eq, inArray } from 'drizzle-orm';
 import { getUserRoles } from '@/lib/auth/roles';
 import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
@@ -217,6 +217,61 @@ export async function GET(request: NextRequest) {
         account_name: accountName || '',
       });
       group.totalAmount += item.amountInBaseCurrency || item.amount;
+      group.recordCount += 1;
+    }
+
+    // 查询所有冲差抵扣记录，补充调整分录
+    const allApplications = await db
+      .select({
+        application: correctionApplications,
+        correction: expenseCorrections,
+      })
+      .from(correctionApplications)
+      .innerJoin(expenseCorrections, eq(correctionApplications.correctionId, expenseCorrections.id));
+
+    for (const row of allApplications) {
+      const { application, correction } = row;
+      const appliedAt = application.appliedAt || new Date();
+      const period = getHalfMonthPeriod(appliedAt);
+
+      const adjustmentCode = '1220';
+      const adjustmentName = correction.differenceAmount > 0
+        ? '费用冲差调整（多付扣回）'
+        : '费用冲差调整（少付补付）';
+
+      const employeeName = String(userMap.get(correction.employeeId) || '未知');
+      const deptInfo = userDeptMap.get(correction.employeeId);
+
+      const groupKey = `${period.summaryId}::${adjustmentCode}`;
+
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          period,
+          accountCode: adjustmentCode,
+          accountName: adjustmentName,
+          details: [],
+          totalAmount: 0,
+          recordCount: 0,
+        });
+      }
+
+      const group = groups.get(groupKey)!;
+      const adjustmentAmount = correction.differenceAmount > 0
+        ? -application.appliedAmount
+        : application.appliedAmount;
+
+      group.details.push({
+        employee_name: employeeName,
+        department: deptInfo?.name || '-',
+        amount: Number(adjustmentAmount.toFixed(2)),
+        description: `冲差调整: ${correction.reason}`,
+        item_id: application.id,
+        reimbursement_id: correction.originalReimbursementId,
+        category: 'correction_adjustment',
+        account_code: adjustmentCode,
+        account_name: adjustmentName,
+      });
+      group.totalAmount += adjustmentAmount;
       group.recordCount += 1;
     }
 

@@ -12,6 +12,8 @@ import {
   reimbursementSummaries,
   users,
   departments,
+  correctionApplications,
+  expenseCorrections,
 } from '@/lib/db/schema';
 import { eq, and, gte, lte, inArray } from 'drizzle-orm';
 import { mapExpenseToAccount } from './expense-account-mapping';
@@ -279,7 +281,59 @@ export async function generateAndPersistSummary(summaryId: string): Promise<Gene
     group.recordCount += 1;
   }
 
-  // 5. 组装 items
+  // 5. 查询该期间内的冲差抵扣记录，补充调整分录
+  const periodApplications = await db
+    .select({
+      application: correctionApplications,
+      correction: expenseCorrections,
+    })
+    .from(correctionApplications)
+    .innerJoin(expenseCorrections, eq(correctionApplications.correctionId, expenseCorrections.id))
+    .where(
+      and(
+        gte(correctionApplications.appliedAt, period.periodStart),
+        lte(correctionApplications.appliedAt, period.periodEnd),
+      )
+    );
+
+  for (const row of periodApplications) {
+    const { application, correction } = row;
+    // 冲差调整使用特殊科目代码
+    const adjustmentCode = '1220'; // 其他应收款 - 冲差调整
+    const adjustmentName = correction.differenceAmount > 0
+      ? '费用冲差调整（多付扣回）'
+      : '费用冲差调整（少付补付）';
+
+    const employeeId = correction.employeeId;
+    const employeeName = String(userMap.get(employeeId) || '未知');
+
+    const key = adjustmentCode;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        accountCode: adjustmentCode,
+        accountName: adjustmentName,
+        details: [],
+        totalAmount: 0,
+        recordCount: 0,
+      });
+    }
+
+    const group = groups.get(key)!;
+    // 多付扣回记为负数（减少支出），少付补付记为正数（增加支出）
+    const adjustmentAmount = correction.differenceAmount > 0
+      ? -application.appliedAmount
+      : application.appliedAmount;
+
+    group.details.push({
+      employee_name: employeeName,
+      amount: Number(adjustmentAmount.toFixed(2)),
+      description: `冲差调整: ${correction.reason} (原报销 ${correction.originalReimbursementId.slice(0, 8)}...)`,
+    });
+    group.totalAmount += adjustmentAmount;
+    group.recordCount += 1;
+  }
+
+  // 6. 组装 items
   const items = Array.from(groups.values()).map(g => ({
     account_code: g.accountCode,
     account_name: g.accountName,
@@ -291,7 +345,7 @@ export async function generateAndPersistSummary(summaryId: string): Promise<Gene
   const totalAmount = Number(items.reduce((s, i) => s + i.total_amount, 0).toFixed(2));
   const totalRecords = items.reduce((s, i) => s + i.record_count, 0);
 
-  // 6. 持久化（upsert）
+  // 7. 持久化（upsert）
   const existing = await db.query.reimbursementSummaries.findFirst({
     where: eq(reimbursementSummaries.summaryId, summaryId),
   });

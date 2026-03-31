@@ -716,6 +716,111 @@ export const skillExecutionLogs = pgTable('skill_execution_logs', {
 });
 
 // ============================================================================
+// 费用冲差（Expense Corrections）
+// ============================================================================
+
+/**
+ * 冲差状态枚举
+ * pending: 财务标记了错误，等待冲差
+ * partial: 部分冲差（已抵扣部分金额）
+ * settled: 完全冲差完成
+ * cancelled: 已取消
+ */
+export const correctionStatusEnum = pgEnum('correction_status', [
+  'pending',
+  'partial',
+  'settled',
+  'cancelled',
+]);
+
+/**
+ * 费用冲差表
+ * 当已付款报销存在错误时，财务标记并记录差额，
+ * 后续从新报销中自动/手动抵扣。
+ */
+export const expenseCorrections = pgTable('expense_corrections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+
+  // 原始错误报销单
+  originalReimbursementId: uuid('original_reimbursement_id')
+    .notNull()
+    .references(() => reimbursements.id),
+  // 提交报销的员工
+  employeeId: uuid('employee_id')
+    .notNull()
+    .references(() => users.id),
+
+  // 金额信息
+  originalPaidAmount: real('original_paid_amount').notNull(),      // 原已付金额
+  correctedAmount: real('corrected_amount').notNull(),             // 正确应付金额
+  differenceAmount: real('difference_amount').notNull(),           // 差额 = original - corrected（正数=多付，负数=少付）
+  currency: text('currency').notNull().default('USD'),
+
+  // 冲差进度
+  appliedAmount: real('applied_amount').notNull().default(0),      // 已冲差金额
+  remainingAmount: real('remaining_amount').notNull(),              // 剩余待冲差金额
+
+  // 状态
+  status: correctionStatusEnum('status').notNull().default('pending'),
+
+  // 原因与备注
+  reason: text('reason').notNull(),                                // 错误原因说明
+  correctionNote: text('correction_note'),                         // 财务备注
+  errorCategory: text('error_category'),                           // 错误分类: amount_error, category_error, duplicate, policy_violation, other
+
+  // 标记信息
+  flaggedBy: uuid('flagged_by')
+    .notNull()
+    .references(() => users.id),                                   // 标记人（财务）
+  flaggedAt: timestamp('flagged_at').notNull().defaultNow(),
+  settledAt: timestamp('settled_at'),                              // 冲差完成时间
+  cancelledAt: timestamp('cancelled_at'),
+  cancelReason: text('cancel_reason'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * 冲差应用记录表
+ * 记录每次从新报销中抵扣差额的明细
+ */
+export const correctionApplications = pgTable('correction_applications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // 关联冲差记录
+  correctionId: uuid('correction_id')
+    .notNull()
+    .references(() => expenseCorrections.id),
+
+  // 用于抵扣的新报销单
+  targetReimbursementId: uuid('target_reimbursement_id')
+    .notNull()
+    .references(() => reimbursements.id),
+
+  // 本次抵扣金额
+  appliedAmount: real('applied_amount').notNull(),
+  currency: text('currency').notNull().default('USD'),
+
+  // 抵扣后的实际打款金额
+  originalPaymentAmount: real('original_payment_amount').notNull(),  // 新报销原应付金额
+  adjustedPaymentAmount: real('adjusted_payment_amount').notNull(),  // 抵扣后实际打款金额
+
+  note: text('note'),
+
+  // 操作人
+  appliedBy: uuid('applied_by')
+    .notNull()
+    .references(() => users.id),
+  appliedAt: timestamp('applied_at').notNull().defaultNow(),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+// ============================================================================
 // Relations
 // ============================================================================
 
@@ -897,6 +1002,43 @@ export const advanceReconciliationsRelations = relations(advanceReconciliations,
   }),
   createdByUser: one(users, {
     fields: [advanceReconciliations.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const expenseCorrectionsRelations = relations(expenseCorrections, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [expenseCorrections.tenantId],
+    references: [tenants.id],
+  }),
+  originalReimbursement: one(reimbursements, {
+    fields: [expenseCorrections.originalReimbursementId],
+    references: [reimbursements.id],
+  }),
+  employee: one(users, {
+    fields: [expenseCorrections.employeeId],
+    references: [users.id],
+    relationName: 'correctionEmployee',
+  }),
+  flaggedByUser: one(users, {
+    fields: [expenseCorrections.flaggedBy],
+    references: [users.id],
+    relationName: 'correctionFlagger',
+  }),
+  applications: many(correctionApplications),
+}));
+
+export const correctionApplicationsRelations = relations(correctionApplications, ({ one }) => ({
+  correction: one(expenseCorrections, {
+    fields: [correctionApplications.correctionId],
+    references: [expenseCorrections.id],
+  }),
+  targetReimbursement: one(reimbursements, {
+    fields: [correctionApplications.targetReimbursementId],
+    references: [reimbursements.id],
+  }),
+  appliedByUser: one(users, {
+    fields: [correctionApplications.appliedBy],
     references: [users.id],
   }),
 }));
