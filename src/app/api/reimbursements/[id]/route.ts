@@ -295,6 +295,43 @@ export async function PUT(
       }
     }
 
+    // 安全网 2：检测 Agent 错误地将 CNY 金额标为 USD 提交
+    if (items && items.length > 0) {
+      const hasCJKPattern = /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/;
+      for (const item of items) {
+        const itemCurrency = (item.currency || '') as string;
+        const itemAmount = parseFloat(item.amount) || 0;
+        const rate = parseFloat(item.exchangeRate) || 0;
+        if (
+          itemCurrency === tenantBaseCurrency &&
+          (rate === 0 || Math.abs(rate - 1) < 0.01) &&
+          itemAmount > 0 &&
+          (hasCJKPattern.test(item.vendor || '') || hasCJKPattern.test(item.description || ''))
+        ) {
+          let actualCurrency: CurrencyType = 'CNY';
+          const vendorText = (item.vendor || '') + (item.description || '');
+          if (/[\u3040-\u309f\u30a0-\u30ff]/.test(vendorText)) actualCurrency = 'JPY';
+          if (/[\uac00-\ud7af]/.test(vendorText)) actualCurrency = 'KRW';
+          console.warn(`[CurrencyAutoFix] PUT: "${item.vendor || item.description}" correcting ${tenantBaseCurrency} → ${actualCurrency}`);
+          item.currency = actualCurrency;
+          try {
+            const conversion = await exchangeRateService.convert({
+              amount: itemAmount,
+              fromCurrency: actualCurrency,
+              toCurrency: tenantBaseCurrency as CurrencyType,
+            });
+            item.exchangeRate = conversion.exchangeRate;
+            item.amountInBaseCurrency = conversion.convertedAmount;
+          } catch {
+            const fallbackRates: Record<string, number> = { CNY: 0.138, JPY: 0.0067, KRW: 0.00073 };
+            const fallbackRate = fallbackRates[actualCurrency] || 0.138;
+            item.exchangeRate = fallbackRate;
+            item.amountInBaseCurrency = Math.round(itemAmount * fallbackRate * 100) / 100;
+          }
+        }
+      }
+    }
+
     // 计算原币总金额
     const totalAmount = items?.reduce(
       (sum: number, item: any) => sum + (parseFloat(item.amount) || 0),
