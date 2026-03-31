@@ -538,12 +538,39 @@ export async function POST(request: NextRequest) {
       0
     );
 
+    // Auto-compute trip date range from travel items if description not provided
+    let finalDescription = description || null;
+    if (!finalDescription) {
+      const TRAVEL_CATS_FOR_DATES = ['flight', 'train', 'hotel', 'taxi', 'car_rental', 'fuel', 'parking', 'toll'];
+      const travelDates = items
+        .filter((item: any) => TRAVEL_CATS_FOR_DATES.includes(item.category))
+        .flatMap((item: any) => {
+          const dates: string[] = [];
+          if (item.date) dates.push(item.date);
+          if (item.checkInDate) dates.push(item.checkInDate);
+          if (item.checkOutDate) dates.push(item.checkOutDate);
+          return dates;
+        })
+        .map((d: string) => new Date(d))
+        .filter((d: Date) => !isNaN(d.getTime()))
+        .sort((a: Date, b: Date) => a.getTime() - b.getTime());
+
+      if (travelDates.length > 0) {
+        const startDate = travelDates[0];
+        const endDate = travelDates[travelDates.length - 1];
+        const fmt = (d: Date) => `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+        finalDescription = startDate.getTime() === endDate.getTime()
+          ? `出差日期：${fmt(startDate)}`
+          : `出差日期：${fmt(startDate)} ~ ${fmt(endDate)}`;
+      }
+    }
+
     // 构建报销单数据（不包含 undefined 值）
     const reimbursementData: any = {
       tenantId: tenantId,
       userId: authCtx.userId,
       title,
-      description: description || null,
+      description: finalDescription,
       totalAmount,
       totalAmountInBaseCurrency: usdTotal,
       baseCurrency: tenantBaseCurrency,
@@ -663,18 +690,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 自动生成差旅行程单（异步，不阻塞响应）
-    const TRAVEL_CATEGORIES = ['flight', 'train', 'hotel', 'meal', 'taxi', 'car_rental', 'fuel', 'parking', 'toll'];
-    const hasTravelItems = items.some((item: any) => TRAVEL_CATEGORIES.includes(item.category));
-    if (hasTravelItems) {
-      // 异步生成，不阻塞主请求返回
-      generateTripItinerary(
-        tenantId,
-        authCtx.userId,
-        reimbursement.id,
-        title,
-        items
-      ).catch(err => console.error('Auto-generate itinerary failed (non-blocking):', err));
+    // 自动生成差旅行程单（仅 Agent/API 提交时异步生成，浏览器提交由前端处理，避免重复生成）
+    if (authCtx.authType === 'api_key') {
+      const TRAVEL_CATEGORIES = ['flight', 'train', 'hotel', 'meal', 'taxi', 'car_rental', 'fuel', 'parking', 'toll'];
+      const hasTravelItems = items.some((item: any) => TRAVEL_CATEGORIES.includes(item.category));
+      if (hasTravelItems) {
+        // 异步生成，不阻塞主请求返回
+        generateTripItinerary(
+          tenantId,
+          authCtx.userId,
+          reimbursement.id,
+          title,
+          items
+        ).catch(err => console.error('Auto-generate itinerary failed (non-blocking):', err));
+      }
     }
 
     const jsonResponse = withRateHeaders(NextResponse.json(responseData), authCtx);

@@ -33,6 +33,7 @@ interface PayoutInfo {
 interface Reimbursement {
   id: string;
   title: string;
+  description?: string;
   status: string;
   createdAt: string;
   submittedAt?: string;
@@ -441,6 +442,11 @@ export default function ReimbursementDetailPage({ params }: { params: Promise<{ 
               {status.label}
             </span>
           </div>
+          {reimbursement.description && (
+            <p style={{ color: '#2563eb', fontSize: '0.875rem', marginBottom: '0.25rem', fontWeight: 500 }}>
+              {reimbursement.description}
+            </p>
+          )}
           <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>
             提交于 {new Date(reimbursement.createdAt).toLocaleDateString('zh-CN')}
             {reimbursement.tripName && ` · 关联行程: ${reimbursement.tripName}`}

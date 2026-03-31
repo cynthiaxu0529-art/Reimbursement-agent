@@ -590,16 +590,50 @@ export default function NewReimbursementPage() {
           checkInDate: item.checkInDate,
           checkOutDate: item.checkOutDate,
           nights: item.nights,
+          // Include transport details for AI itinerary generation
+          departure: item.departure || '',
+          destination: item.destination || '',
+          trainNumber: item.trainNumber || '',
+          flightNumber: item.flightNumber || '',
+          seatClass: item.seatClass || '',
           // Include receipt attachment
           receiptUrl: item.receiptUrl || '',
         };
       });
+
+      // Auto-compute trip date range from travel items for description
+      const TRAVEL_CATEGORIES_FOR_DATES = ['flight', 'train', 'hotel', 'taxi', 'car_rental', 'fuel', 'parking', 'toll'];
+      const travelDates = itemsData
+        .filter(item => TRAVEL_CATEGORIES_FOR_DATES.includes(item.category))
+        .flatMap(item => {
+          const dates: string[] = [];
+          if (item.date) dates.push(item.date);
+          if (item.checkInDate) dates.push(item.checkInDate);
+          if (item.checkOutDate) dates.push(item.checkOutDate);
+          return dates;
+        })
+        .map(d => new Date(d))
+        .filter(d => !isNaN(d.getTime()))
+        .sort((a, b) => a.getTime() - b.getTime());
+
+      let tripDateDescription = '';
+      if (travelDates.length > 0) {
+        const startDate = travelDates[0];
+        const endDate = travelDates[travelDates.length - 1];
+        const fmt = (d: Date) => `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+        if (startDate.getTime() === endDate.getTime()) {
+          tripDateDescription = `出差日期：${fmt(startDate)}`;
+        } else {
+          tripDateDescription = `出差日期：${fmt(startDate)} ~ ${fmt(endDate)}`;
+        }
+      }
 
       const response = await fetch('/api/reimbursements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: description,
+          description: tripDateDescription || undefined,
           items: itemsData,
           status: isDraft ? 'draft' : 'pending',
           totalAmountInBaseCurrency: totalAmountUSD,
