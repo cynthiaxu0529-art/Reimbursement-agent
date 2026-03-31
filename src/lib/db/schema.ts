@@ -37,6 +37,7 @@ export const reimbursementStatusEnum = pgEnum('reimbursement_status', [
   'processing',
   'paid',
   'cancelled',
+  'reversed',
 ]);
 
 export const tripStatusEnum = pgEnum('trip_status', [
@@ -633,6 +634,56 @@ export const advanceReconciliations = pgTable('advance_reconciliations', {
 });
 
 /**
+ * 冲销记录表
+ * 已付款的报销单发现问题时，财务可发起冲销，将金额转为员工应收
+ */
+export const reversals = pgTable('reversals', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  reimbursementId: uuid('reimbursement_id')
+    .notNull()
+    .references(() => reimbursements.id),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id),  // 被冲销的员工
+
+  // 冲销金额（支持部分冲销）
+  amount: real('amount').notNull(),
+  currency: text('currency').notNull().default('USD'),
+
+  // 冲销原因
+  reason: text('reason').notNull(),
+  category: text('category').notNull().default('full'),  // 'full' | 'partial' | 'policy_violation' | 'duplicate' | 'error'
+
+  // 员工应收追踪
+  receivableStatus: text('receivable_status').notNull().default('outstanding'),  // 'outstanding' | 'partially_repaid' | 'repaid' | 'waived'
+  repaidAmount: real('repaid_amount').notNull().default(0),
+  repaidAt: timestamp('repaid_at'),
+  waivedAt: timestamp('waived_at'),
+  waivedBy: uuid('waived_by').references(() => users.id),
+  waivedReason: text('waived_reason'),
+
+  // 操作人
+  initiatedBy: uuid('initiated_by')
+    .notNull()
+    .references(() => users.id),
+
+  // 关联的原始支付记录
+  originalPaymentId: uuid('original_payment_id'),
+
+  note: text('note'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => [
+  index('idx_reversals_tenant').on(table.tenantId, table.createdAt),
+  index('idx_reversals_user').on(table.userId, table.receivableStatus),
+  index('idx_reversals_reimbursement').on(table.reimbursementId),
+]);
+
+/**
  * 审计日志表
  */
 export const auditLogs = pgTable('audit_logs', {
@@ -989,6 +1040,26 @@ export const advancesRelations = relations(advances, ({ one, many }) => ({
     references: [users.id],
   }),
   reconciliations: many(advanceReconciliations),
+}));
+
+export const reversalsRelations = relations(reversals, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [reversals.tenantId],
+    references: [tenants.id],
+  }),
+  reimbursement: one(reimbursements, {
+    fields: [reversals.reimbursementId],
+    references: [reimbursements.id],
+  }),
+  user: one(users, {
+    fields: [reversals.userId],
+    references: [users.id],
+  }),
+  initiator: one(users, {
+    fields: [reversals.initiatedBy],
+    references: [users.id],
+    relationName: 'reversalInitiator',
+  }),
 }));
 
 export const advanceReconciliationsRelations = relations(advanceReconciliations, ({ one }) => ({
