@@ -15,7 +15,7 @@ import { canViewReimbursement } from '@/lib/department/department-service';
 import { apiError } from '@/lib/api-error';
 import { authenticate, logAgentAction } from '@/lib/auth/api-key';
 import { API_SCOPES } from '@/lib/auth/scopes';
-import { exchangeRateService } from '@/lib/currency/exchange-service';
+import { exchangeRateService, loadMonthlyRatesFromDB } from '@/lib/currency/exchange-service';
 import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
 import type { CurrencyType } from '@/types';
 
@@ -234,6 +234,8 @@ export async function PUT(
 
     // 服务端汇率转换：如果 item 缺少 exchangeRate / amountInBaseCurrency，自动转换
     if (items && items.length > 0) {
+      await loadMonthlyRatesFromDB();
+
       for (const item of items) {
         const itemCurrency = (item.currency || 'CNY') as CurrencyType;
         const itemAmount = parseFloat(item.amount) || 0;
@@ -258,7 +260,37 @@ export async function PUT(
           item.amountInBaseCurrency = conversion.convertedAmount;
         } catch (err) {
           console.warn(`Exchange rate conversion failed for ${itemCurrency} → ${tenantBaseCurrency}:`, err);
-          item.amountInBaseCurrency = item.amountInBaseCurrency || itemAmount;
+          item._conversionFailed = true;
+        }
+      }
+
+      // 安全网：强制校验所有非本位币的 item 已正确转换
+      for (const item of items) {
+        const itemCurrency = (item.currency || 'CNY') as CurrencyType;
+        const itemAmount = parseFloat(item.amount) || 0;
+        if (itemCurrency === tenantBaseCurrency || itemAmount === 0) continue;
+
+        const baseCurrencyAmount = parseFloat(item.amountInBaseCurrency) || 0;
+        const notConverted = item._conversionFailed ||
+          baseCurrencyAmount === 0 ||
+          (baseCurrencyAmount > 0 && Math.abs(baseCurrencyAmount - itemAmount) / itemAmount < 0.01);
+
+        if (notConverted) {
+          console.warn(`[CurrencyFix] PUT: ${itemCurrency} ${itemAmount} not converted to ${tenantBaseCurrency}, forcing re-conversion`);
+          try {
+            const conversion = await exchangeRateService.convert({
+              amount: itemAmount,
+              fromCurrency: itemCurrency,
+              toCurrency: tenantBaseCurrency as CurrencyType,
+            });
+            item.exchangeRate = conversion.exchangeRate;
+            item.amountInBaseCurrency = conversion.convertedAmount;
+          } catch {
+            const fallbackRates: Record<string, number> = { CNY: 0.138, EUR: 1.08, GBP: 1.27, JPY: 0.0067, HKD: 0.128, SGD: 0.74, AUD: 0.65, CAD: 0.73, KRW: 0.00073 };
+            const fallbackRate = fallbackRates[itemCurrency] || 0.15;
+            item.exchangeRate = fallbackRate;
+            item.amountInBaseCurrency = Math.round(itemAmount * fallbackRate * 100) / 100;
+          }
         }
       }
     }

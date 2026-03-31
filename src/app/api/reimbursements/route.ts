@@ -311,8 +311,46 @@ export async function POST(request: NextRequest) {
         item.amountInBaseCurrency = conversion.convertedAmount;
       } catch (err) {
         console.warn(`Exchange rate conversion failed for ${itemCurrency} → ${tenantBaseCurrency}:`, err);
-        // 回退：使用原始金额（与之前行为一致）
-        item.amountInBaseCurrency = item.amountInBaseCurrency || itemAmount;
+        // 转换失败时不要用原始金额当本位币金额，这会导致 CNY 金额被当作 USD 比对限额
+        // 而是标记为未转换，后续安全网会处理
+        item._conversionFailed = true;
+      }
+    }
+
+    // 安全网：强制校验所有非本位币的 item 已正确转换
+    // 防止 CNY 金额被当作 USD 来比对限额（最常见的 bug）
+    for (const item of items) {
+      const itemCurrency = (item.currency || 'CNY') as CurrencyType;
+      const itemAmount = parseFloat(item.amount) || 0;
+
+      if (itemCurrency === tenantBaseCurrency || itemAmount === 0) continue;
+
+      const baseCurrencyAmount = parseFloat(item.amountInBaseCurrency) || 0;
+
+      // 检测未转换的情况：币种不同但 amountInBaseCurrency ≈ amount（说明没有真正转换）
+      const notConverted = item._conversionFailed ||
+        baseCurrencyAmount === 0 ||
+        (baseCurrencyAmount > 0 && Math.abs(baseCurrencyAmount - itemAmount) / itemAmount < 0.01);
+
+      if (notConverted) {
+        console.warn(`[CurrencyFix] ${itemCurrency} ${itemAmount} was not properly converted to ${tenantBaseCurrency} (amountInBaseCurrency=${baseCurrencyAmount}), forcing re-conversion`);
+        try {
+          const conversion = await exchangeRateService.convert({
+            amount: itemAmount,
+            fromCurrency: itemCurrency,
+            toCurrency: tenantBaseCurrency as CurrencyType,
+          });
+          item.exchangeRate = conversion.exchangeRate;
+          item.amountInBaseCurrency = conversion.convertedAmount;
+          console.log(`[CurrencyFix] Successfully re-converted: ${itemCurrency} ${itemAmount} → ${tenantBaseCurrency} ${conversion.convertedAmount} (rate: ${conversion.exchangeRate})`);
+        } catch (retryErr) {
+          // 最终兜底：用硬编码汇率估算，绝不能让原币金额直接当本位币
+          console.error(`[CurrencyFix] Re-conversion also failed, using hardcoded fallback`, retryErr);
+          const fallbackRates: Record<string, number> = { CNY: 0.138, EUR: 1.08, GBP: 1.27, JPY: 0.0067, HKD: 0.128, SGD: 0.74, AUD: 0.65, CAD: 0.73, KRW: 0.00073 };
+          const fallbackRate = fallbackRates[itemCurrency] || 0.15;
+          item.exchangeRate = fallbackRate;
+          item.amountInBaseCurrency = Math.round(itemAmount * fallbackRate * 100) / 100;
+        }
       }
     }
 
