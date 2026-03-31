@@ -102,6 +102,7 @@ export const ReimbursementStatus = {
   PROCESSING: 'processing',       // 付款处理中
   PAID: 'paid',                   // 已付款
   CANCELLED: 'cancelled',         // 已取消
+  REVERSED: 'reversed',           // 已冲销
 } as const;
 
 export type ReimbursementStatusType = typeof ReimbursementStatus[keyof typeof ReimbursementStatus];

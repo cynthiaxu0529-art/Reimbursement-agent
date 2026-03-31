@@ -67,7 +67,7 @@ const generateFormId = (createdAt: string, id: string): string => {
 
 export default function DisbursementsPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'ready' | 'processing' | 'history' | 'advances'>('ready');
+  const [activeTab, setActiveTab] = useState<'ready' | 'processing' | 'history' | 'advances' | 'receivables'>('ready');
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -79,6 +79,12 @@ export default function DisbursementsPage() {
   // 自定义打款金额（财务可修改）
   const [customPaymentAmounts, setCustomPaymentAmounts] = useState<Record<string, number>>({});
   const [editingAmountId, setEditingAmountId] = useState<string | null>(null);
+  // 冲销相关状态
+  const [reversalTarget, setReversalTarget] = useState<Reimbursement | null>(null);
+  const [reversalReason, setReversalReason] = useState('');
+  const [reversalAmount, setReversalAmount] = useState<number | ''>('');
+  const [reversalCategory, setReversalCategory] = useState('full');
+  const [reversalProcessing, setReversalProcessing] = useState(false);
 
   // 预览附件：将base64 data URL转为Blob URL以提高渲染性能
   const handlePreviewReceipt = (url: string | null | undefined) => {
@@ -175,7 +181,7 @@ export default function DisbursementsPage() {
     try {
       let status = 'approved';
       if (activeTab === 'processing') status = 'processing';
-      if (activeTab === 'history') status = 'paid';
+      if (activeTab === 'history') status = 'paid,reversed';
 
       const response = await fetch(`/api/reimbursements?status=${status}&role=finance`);
       const result = await response.json();
@@ -493,6 +499,43 @@ export default function DisbursementsPage() {
     alert(`批量驳回完成：${successCount} 笔成功${failCount > 0 ? `，${failCount} 笔失败` : ''}`);
   };
 
+  // 冲销操作
+  const processReversal = async () => {
+    if (!reversalTarget || !reversalReason.trim()) return;
+    setReversalProcessing(true);
+    try {
+      const paidAmount = reversalTarget.totalAmountInBaseCurrency || 0;
+      const body: any = {
+        reason: reversalReason.trim(),
+        category: reversalCategory,
+      };
+      if (reversalCategory === 'partial' && reversalAmount && reversalAmount > 0) {
+        body.amount = reversalAmount;
+      }
+      const response = await fetch(`/api/reimbursements/${reversalTarget.id}/reverse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json();
+      if (result.success) {
+        alert(result.message || '冲销成功');
+        setReversalTarget(null);
+        setReversalReason('');
+        setReversalAmount('');
+        setReversalCategory('full');
+        fetchReimbursements();
+        fetchPaymentStats();
+      } else {
+        alert(result.error || '冲销失败');
+      }
+    } catch (error) {
+      alert('冲销处理失败');
+    } finally {
+      setReversalProcessing(false);
+    }
+  };
+
   const toggleSelect = (id: string) => {
     setSelectedIds(prev =>
       prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]
@@ -692,6 +735,16 @@ export default function DisbursementsPage() {
           >
             预借款管理
           </button>
+          <button
+            onClick={() => { setActiveTab('receivables'); setSelectedIds([]); }}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
+              activeTab === 'receivables'
+                ? 'text-red-600 border-red-600'
+                : 'text-gray-500 border-transparent hover:text-gray-700'
+            }`}
+          >
+            员工应收
+          </button>
         </div>
         {activeTab === 'processing' && (
           <button
@@ -709,8 +762,13 @@ export default function DisbursementsPage() {
         <AdvancesPanel />
       )}
 
+      {/* Receivables Tab */}
+      {activeTab === 'receivables' && (
+        <ReceivablesPanel />
+      )}
+
       {/* Search & Filter */}
-      {activeTab !== 'advances' && (<><div className="flex items-center justify-between mb-4">
+      {activeTab !== 'advances' && activeTab !== 'receivables' && (<><div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
@@ -874,9 +932,15 @@ export default function DisbursementsPage() {
                         );
                       })()}
                       {activeTab === 'history' && (
-                        <Badge className="bg-blue-100 text-blue-700">
-                          ● Paid
-                        </Badge>
+                        item.status === 'reversed' ? (
+                          <Badge className="bg-red-100 text-red-700">
+                            ● 已冲销
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-blue-100 text-blue-700">
+                            ● Paid
+                          </Badge>
+                        )
                       )}
                     </div>
 
@@ -1192,24 +1256,51 @@ export default function DisbursementsPage() {
                             );
                           })()}
 
-                          {/* History tab - show paid info */}
+                          {/* History tab - show paid info + reversal button */}
                           {activeTab === 'history' && (() => {
                             const payoutInfo = item.aiSuggestions?.find(
                               (s: any) => s.type === 'fluxa_payout_initiated'
                             );
+                            const isReversed = item.status === 'reversed';
                             return (
                               <div className="pt-2 border-t space-y-2">
-                                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                                  <p className="text-sm font-medium text-green-800 mb-1">
-                                    已完成付款
-                                  </p>
-                                  <div className="text-xs text-green-700 space-y-1">
-                                    <p>金额: ${(payoutInfo?.amountUSDC || item.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</p>
-                                    {payoutInfo?.initiatedAt && (
-                                      <p>发起时间: {formatDate(payoutInfo.initiatedAt)}</p>
-                                    )}
+                                {isReversed ? (
+                                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                                    <p className="text-sm font-medium text-red-800 mb-1">
+                                      已冲销
+                                    </p>
+                                    <div className="text-xs text-red-700 space-y-1">
+                                      <p>原付款金额: ${(payoutInfo?.amountUSDC || item.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</p>
+                                      <p>该笔金额已转为员工应收</p>
+                                    </div>
                                   </div>
-                                </div>
+                                ) : (
+                                  <>
+                                    <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                                      <p className="text-sm font-medium text-green-800 mb-1">
+                                        已完成付款
+                                      </p>
+                                      <div className="text-xs text-green-700 space-y-1">
+                                        <p>金额: ${(payoutInfo?.amountUSDC || item.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</p>
+                                        {payoutInfo?.initiatedAt && (
+                                          <p>发起时间: {formatDate(payoutInfo.initiatedAt)}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => {
+                                        setReversalTarget(item);
+                                        setReversalAmount('');
+                                        setReversalReason('');
+                                        setReversalCategory('full');
+                                      }}
+                                      className="w-full text-red-600 border-red-200 hover:bg-red-50"
+                                    >
+                                      <span className="mr-1">↩</span> 冲销 (转为员工应收)
+                                    </Button>
+                                  </>
+                                )}
                               </div>
                             );
                           })()}
@@ -1224,6 +1315,109 @@ export default function DisbursementsPage() {
         )}
       </Card>
       </>)}
+
+      {/* Reversal Confirmation Modal */}
+      {reversalTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center" style={{ zIndex: 9998 }}>
+          <div className="bg-white rounded-xl shadow-2xl w-[500px] max-w-[90vw] p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">冲销确认</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              将报销单 {generateFormId(reversalTarget.createdAt, reversalTarget.id)} 的付款冲销，金额转为员工应收
+            </p>
+
+            <div className="space-y-4">
+              {/* 报销信息 */}
+              <div className="p-3 bg-gray-50 rounded-lg text-sm">
+                <div className="flex justify-between mb-1">
+                  <span className="text-gray-500">员工</span>
+                  <span className="font-medium">{reversalTarget.submitter?.name || '未知'}</span>
+                </div>
+                <div className="flex justify-between mb-1">
+                  <span className="text-gray-500">标题</span>
+                  <span className="font-medium">{reversalTarget.title}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">付款金额</span>
+                  <span className="font-bold text-gray-900">
+                    ${(reversalTarget.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC
+                  </span>
+                </div>
+              </div>
+
+              {/* 冲销类型 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">冲销类型</label>
+                <div className="flex gap-2">
+                  {[
+                    { value: 'full', label: '全额冲销' },
+                    { value: 'partial', label: '部分冲销' },
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setReversalCategory(opt.value)}
+                      className={`flex-1 px-3 py-2 text-sm rounded-lg border transition-colors ${
+                        reversalCategory === opt.value
+                          ? 'bg-red-50 border-red-300 text-red-700 font-medium'
+                          : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 部分冲销金额 */}
+              {reversalCategory === 'partial' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">冲销金额 (USDC)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max={reversalTarget.totalAmountInBaseCurrency || 0}
+                    value={reversalAmount}
+                    onChange={(e) => setReversalAmount(parseFloat(e.target.value) || '')}
+                    placeholder={`最大 ${(reversalTarget.totalAmountInBaseCurrency || 0).toFixed(2)}`}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+              )}
+
+              {/* 冲销原因 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">冲销原因 <span className="text-red-500">*</span></label>
+                <textarea
+                  value={reversalReason}
+                  onChange={(e) => setReversalReason(e.target.value)}
+                  placeholder="请输入冲销原因，如：发票造假、金额不符、重复报销等"
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
+                />
+              </div>
+
+              {/* 按钮 */}
+              <div className="flex gap-3 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setReversalTarget(null)}
+                  className="flex-1"
+                  disabled={reversalProcessing}
+                >
+                  取消
+                </Button>
+                <Button
+                  onClick={processReversal}
+                  disabled={!reversalReason.trim() || reversalProcessing || (reversalCategory === 'partial' && (!reversalAmount || reversalAmount <= 0))}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+                >
+                  {reversalProcessing ? '处理中...' : '确认冲销'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Image Preview Modal */}
       {previewImage && (
@@ -1436,6 +1630,204 @@ function AdvancesPanel() {
                       )}
                     </div>
                   )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * 员工应收管理面板（冲销产生的应收）
+ */
+function ReceivablesPanel() {
+  const [receivables, setReceivables] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({ totalCount: 0, outstandingCount: 0, totalOutstanding: 0 });
+  const [filter, setFilter] = useState<string>('all');
+
+  useEffect(() => {
+    fetchReceivables();
+  }, [filter]);
+
+  const fetchReceivables = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/receivables?status=${filter}`);
+      const data = await res.json();
+      if (data.success) {
+        setReceivables(data.data || []);
+        setStats(data.stats || { totalCount: 0, outstandingCount: 0, totalOutstanding: 0 });
+      }
+    } catch (e) {
+      console.error('Failed to fetch receivables:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAction = async (reversalId: string, action: 'repay' | 'waive', amount?: number) => {
+    if (action === 'waive') {
+      const reason = prompt('请输入豁免原因：');
+      if (!reason) return;
+      try {
+        const res = await fetch('/api/receivables', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reversalId, action: 'waive', reason }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(data.message);
+          fetchReceivables();
+        } else {
+          alert(data.error || '操作失败');
+        }
+      } catch { alert('操作失败'); }
+      return;
+    }
+
+    if (action === 'repay') {
+      const input = prompt('请输入还款金额（留空表示全额还款）：');
+      if (input === null) return;
+      const repayAmount = input ? parseFloat(input) : undefined;
+      try {
+        const res = await fetch('/api/receivables', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reversalId, action: 'repay', amount: repayAmount }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(data.message);
+          fetchReceivables();
+        } else {
+          alert(data.error || '操作失败');
+        }
+      } catch { alert('操作失败'); }
+    }
+  };
+
+  const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
+    outstanding: { label: '待收回', color: '#dc2626', bg: '#fee2e2' },
+    partially_repaid: { label: '部分还款', color: '#d97706', bg: '#fef3c7' },
+    repaid: { label: '已还清', color: '#16a34a', bg: '#dcfce7' },
+    waived: { label: '已豁免', color: '#6b7280', bg: '#f3f4f6' },
+  };
+
+  return (
+    <div>
+      {/* 统计 */}
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <Card className="p-4 border-l-4 border-l-red-500">
+          <div className="text-xs text-gray-500 mb-1">待收回总额</div>
+          <div className="text-xl font-bold text-red-600">
+            ${stats.totalOutstanding.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          </div>
+          <div className="text-xs text-gray-500 mt-1">{stats.outstandingCount} 笔未结清</div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs text-gray-500 mb-1">总冲销笔数</div>
+          <div className="text-xl font-bold text-gray-700">{stats.totalCount}</div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs text-gray-500 mb-1">筛选</div>
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="w-full mt-1 px-2 py-1.5 border border-gray-200 rounded-lg text-sm"
+          >
+            <option value="all">全部</option>
+            <option value="outstanding">待收回</option>
+            <option value="partially_repaid">部分还款</option>
+            <option value="repaid">已还清</option>
+            <option value="waived">已豁免</option>
+          </select>
+        </Card>
+      </div>
+
+      {/* 列表 */}
+      <Card className="overflow-hidden">
+        {loading ? (
+          <div className="p-10 text-center text-gray-500">加载中...</div>
+        ) : receivables.length === 0 ? (
+          <div className="py-16 text-center">
+            <div className="text-4xl mb-3">📋</div>
+            <div className="text-gray-500">暂无员工应收记录</div>
+          </div>
+        ) : (
+          <div>
+            {/* Header */}
+            <div className="grid grid-cols-[1fr_120px_100px_120px_120px_140px] gap-2 px-4 py-3 bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase">
+              <span>员工 / 报销单</span>
+              <span>应收金额</span>
+              <span>状态</span>
+              <span>已还款</span>
+              <span>冲销日期</span>
+              <span>操作</span>
+            </div>
+            {receivables.map((item: any) => {
+              const sc = statusConfig[item.receivableStatus] || statusConfig.outstanding;
+              const remaining = item.amount - item.repaidAmount;
+              return (
+                <div key={item.id} className="grid grid-cols-[1fr_120px_100px_120px_120px_140px] gap-2 px-4 py-3 items-center border-b hover:bg-gray-50">
+                  <div>
+                    <div className="font-medium text-sm">{item.employeeName}</div>
+                    <div className="text-xs text-gray-500">{item.reimbursementTitle}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{item.reason}</div>
+                  </div>
+                  <div className="font-semibold text-sm text-red-600">
+                    ${item.amount.toFixed(2)}
+                  </div>
+                  <div>
+                    <span style={{
+                      backgroundColor: sc.bg,
+                      color: sc.color,
+                      padding: '2px 8px',
+                      borderRadius: '9999px',
+                      fontSize: '0.75rem',
+                      fontWeight: 500
+                    }}>
+                      {sc.label}
+                    </span>
+                  </div>
+                  <div className="text-sm">
+                    {item.repaidAmount > 0 ? (
+                      <span className="text-green-600">${item.repaidAmount.toFixed(2)}</span>
+                    ) : (
+                      <span className="text-gray-400">-</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {new Date(item.createdAt).toLocaleDateString('zh-CN')}
+                  </div>
+                  <div className="flex gap-1">
+                    {(item.receivableStatus === 'outstanding' || item.receivableStatus === 'partially_repaid') && (
+                      <>
+                        <button
+                          onClick={() => handleAction(item.id, 'repay')}
+                          className="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600"
+                        >
+                          还款
+                        </button>
+                        <button
+                          onClick={() => handleAction(item.id, 'waive')}
+                          className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
+                        >
+                          豁免
+                        </button>
+                      </>
+                    )}
+                    {item.receivableStatus === 'repaid' && (
+                      <span className="text-xs text-green-600">已结清</span>
+                    )}
+                    {item.receivableStatus === 'waived' && (
+                      <span className="text-xs text-gray-500" title={item.waivedReason}>已豁免</span>
+                    )}
+                  </div>
                 </div>
               );
             })}

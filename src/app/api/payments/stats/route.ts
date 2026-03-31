@@ -90,6 +90,18 @@ export async function GET(request: NextRequest) {
 
     const todayPaidCount = todayPaidResult[0]?.count || 0;
 
+    // 查询已冲销的报销单数量
+    const reversedResult = await db.select({
+      count: sql<number>`count(*)::int`,
+    })
+      .from(reimbursements)
+      .where(and(
+        eq(reimbursements.tenantId, tenantId),
+        eq(reimbursements.status, 'reversed')
+      ));
+
+    const reversedCount = reversedResult[0]?.count || 0;
+
     return NextResponse.json({
       success: true,
       stats: {
@@ -98,6 +110,7 @@ export async function GET(request: NextRequest) {
         processingCount,
         totalPaidCount,
         todayPaidCount,
+        reversedCount,
       },
     });
   } catch (error) {

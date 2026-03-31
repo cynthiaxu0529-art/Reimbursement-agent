@@ -75,6 +75,7 @@ const statusColors: Record<string, { bg: string; text: string; label: string }> 
   processing: { bg: '#ede9fe', text: '#7c3aed', label: '打款处理中' },
   paid: { bg: '#d1fae5', text: '#059669', label: '已付款' },
   cancelled: { bg: '#f3f4f6', text: '#9ca3af', label: '已取消' },
+  reversed: { bg: '#fef2f2', text: '#dc2626', label: '已冲销' },
 };
 
 const payoutStatusLabels: Record<string, { label: string; color: string }> = {
