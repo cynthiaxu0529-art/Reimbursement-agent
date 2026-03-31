@@ -681,7 +681,10 @@ export async function PATCH(
 
       // 记录 Agent 审计日志
       if (authCtx.apiKey) {
-        await logAgentAction(authCtx, {
+        logAgentAction({
+          tenantId: authCtx.tenantId!,
+          apiKeyId: authCtx.apiKey.id,
+          userId: authCtx.userId,
           action: `reimbursement:${newStatus === 'pending' ? 'submit' : 'withdraw'}`,
           method: 'PATCH',
           path: `/api/reimbursements/${id}`,

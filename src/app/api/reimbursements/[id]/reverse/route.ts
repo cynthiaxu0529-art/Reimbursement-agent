@@ -27,7 +27,9 @@ export async function POST(
     }
 
     // 权限检查：仅财务或超级管理员可冲销
-    const roles = await getUserRoles(session.user.id);
+    const [currentUser] = await db.select({ role: users.role, roles: users.roles })
+      .from(users).where(eq(users.id, session.user.id)).limit(1);
+    const roles = getUserRoles(currentUser || {});
     if (!roles.includes('finance') && !roles.includes('super_admin')) {
       return apiError('无权限执行冲销操作', 403);
     }

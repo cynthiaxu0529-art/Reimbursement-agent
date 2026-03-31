@@ -19,7 +19,9 @@ export async function GET(request: NextRequest) {
       return apiError('未登录', 401);
     }
 
-    const roles = await getUserRoles(session.user.id);
+    const [currentUser] = await db.select({ role: users.role, roles: users.roles })
+      .from(users).where(eq(users.id, session.user.id)).limit(1);
+    const roles = getUserRoles(currentUser || {});
     const isFinance = roles.includes('finance') || roles.includes('super_admin');
 
     const url = new URL(request.url);
@@ -98,7 +100,9 @@ export async function PATCH(request: NextRequest) {
       return apiError('未登录', 401);
     }
 
-    const roles = await getUserRoles(session.user.id);
+    const [patchUser] = await db.select({ role: users.role, roles: users.roles })
+      .from(users).where(eq(users.id, session.user.id)).limit(1);
+    const roles = getUserRoles(patchUser || {});
     if (!roles.includes('finance') && !roles.includes('super_admin')) {
       return apiError('无权限', 403);
     }
