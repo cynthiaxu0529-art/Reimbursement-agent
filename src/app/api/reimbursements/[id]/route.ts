@@ -606,7 +606,8 @@ export async function DELETE(
 }
 
 /**
- * PATCH /api/reimbursements/[id] - 更新报销单状态（用于审批）
+ * PATCH /api/reimbursements/[id] - 更新报销单状态（用于审批/提交）
+ * 支持双重认证：Session（浏览器）+ API Key（Agent/M2M）
  */
 export async function PATCH(
   request: NextRequest,
@@ -614,10 +615,13 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const session = await auth();
-    if (!session?.user) {
-      return apiError('未登录', 401);
+
+    // 统一认证（支持 Session 和 API Key）
+    const authResult = await authenticate(request, API_SCOPES.REIMBURSEMENT_UPDATE);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
     }
+    const authCtx = authResult.context;
 
     const body = await request.json();
     const { status: newStatus, rejectReason, comment, useApprovalChain } = body;
@@ -632,13 +636,74 @@ export async function PATCH(
     }
 
     // 检查权限：必须是同一租户
-    if (existing.tenantId !== session.user.tenantId) {
+    if (existing.tenantId !== authCtx.tenantId) {
       return apiError('无权操作此报销单', 403);
     }
 
+    // API Key 认证的 Agent 只能操作自己的报销单（提交/撤回），不能审批
+    const isAgentRequest = authCtx.authType === 'api_key';
+    if (isAgentRequest) {
+      // Agent 只能对自己的报销单做 draft→pending 或 pending→draft 的状态变更
+      if (existing.userId !== authCtx.userId) {
+        return apiError('API Key 只能操作绑定用户的报销单', 403);
+      }
+      const agentAllowedTransitions: Record<string, string[]> = {
+        draft: ['pending'],
+        pending: ['draft'],
+        rejected: ['draft', 'pending'],
+      };
+      if (!agentAllowedTransitions[existing.status]?.includes(newStatus)) {
+        return apiError(`API Key 无权将状态从 ${existing.status} 变更为 ${newStatus}`, 403);
+      }
+
+      // 提交操作需要 submit scope
+      if (newStatus === 'pending') {
+        const hasSubmitScope = authCtx.apiKey?.scopes.includes(API_SCOPES.REIMBURSEMENT_SUBMIT);
+        if (!hasSubmitScope) {
+          return apiError('API Key 缺少提交报销单权限 (reimbursement:submit)', 403);
+        }
+      }
+
+      // 直接执行状态变更
+      const updateData: Record<string, unknown> = {
+        status: newStatus,
+        updatedAt: new Date(),
+      };
+      if (newStatus === 'pending') {
+        updateData.submittedAt = new Date();
+      }
+
+      const [updated] = await db
+        .update(reimbursements)
+        .set(updateData)
+        .where(eq(reimbursements.id, id))
+        .returning();
+
+      // 记录 Agent 审计日志
+      if (authCtx.apiKey) {
+        await logAgentAction(authCtx, {
+          action: `reimbursement:${newStatus === 'pending' ? 'submit' : 'withdraw'}`,
+          method: 'PATCH',
+          path: `/api/reimbursements/${id}`,
+          statusCode: 200,
+          agentType: authCtx.apiKey.agentType,
+          requestSummary: { newStatus },
+          entityType: 'reimbursement',
+          entityId: id,
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: updated,
+      });
+    }
+
+    // --- 以下为 Session 认证的浏览器端逻辑 ---
+
     // 获取当前用户完整信息和角色
     const currentUser = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
+      where: eq(users.id, authCtx.userId),
     });
 
     if (!currentUser) {
@@ -649,7 +714,7 @@ export async function PATCH(
 
     // 检查部门级数据隔离权限
     const canView = await canViewReimbursement(
-      session.user.id,
+      authCtx.userId,
       existing.userId,
       id,
       existing.tenantId,
@@ -672,7 +737,7 @@ export async function PATCH(
         const action = newStatus === 'approved' ? 'approve' : 'reject';
         const result = await processApprovalAction(
           id,
-          session.user.id,
+          authCtx.userId,
           action,
           comment || rejectReason
         );
@@ -725,10 +790,10 @@ export async function PATCH(
 
     if (newStatus === 'approved') {
       updateData.approvedAt = new Date();
-      updateData.approvedBy = session.user.id;
+      updateData.approvedBy = authCtx.userId;
     } else if (newStatus === 'rejected') {
       updateData.rejectedAt = new Date();
-      updateData.rejectedBy = session.user.id;
+      updateData.rejectedBy = authCtx.userId;
       if (rejectReason) {
         updateData.rejectReason = rejectReason;
       }
