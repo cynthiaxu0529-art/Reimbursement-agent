@@ -64,11 +64,8 @@ export async function GET(request: NextRequest) {
     // 构建查询条件
     const conditions: any[] = [];
 
-    // API Key 认证时，Agent 默认只能看绑定用户自己的报销（安全限制）
-    const isAgentRequest = authCtx.authType === 'api_key';
-
     // 验证角色权限并应用部门级数据隔离
-    if (role === 'approver' && currentUser.tenantId && !isAgentRequest) {
+    if (role === 'approver' && currentUser.tenantId) {
       // 检查用户是否有审批权限（admin也可以查看和审批）
       if (!canApprove(userRoles) && !isAdmin(userRoles)) {
         return apiError('无审批权限', 403, 'ROLE_INSUFFICIENT');
@@ -100,7 +97,7 @@ export async function GET(request: NextRequest) {
           eq(reimbursements.rejectedBy, authCtx.userId)
         ));
       }
-    } else if (role === 'finance' && currentUser.tenantId && !isAgentRequest) {
+    } else if (role === 'finance' && currentUser.tenantId) {
       // 检查用户是否有财务权限
       if (!canProcessPayment(userRoles)) {
         return apiError('无财务权限', 403, 'ROLE_INSUFFICIENT');
@@ -108,7 +105,7 @@ export async function GET(request: NextRequest) {
       // 财务可以看同租户所有报销（需要处理付款）
       conditions.push(eq(reimbursements.tenantId, currentUser.tenantId));
     } else {
-      // 员工模式 / Agent 模式：只看自己的
+      // 员工模式：只看自己的
       conditions.push(eq(reimbursements.userId, authCtx.userId));
     }
 
