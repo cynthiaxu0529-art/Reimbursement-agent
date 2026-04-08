@@ -262,13 +262,16 @@ export class ReceiptOCRAgent {
       '人民币': Currency.CNY,
       '元': Currency.CNY,
 
-      // 美元
+      // 美元（含稳定币 USDC/USDT）
       USD: Currency.USD,
       'US$': Currency.USD,
       'US DOLLAR': Currency.USD,
       'U.S. DOLLAR': Currency.USD,
       '美元': Currency.USD,
       '美金': Currency.USD,
+      USDC: Currency.USD,
+      USDT: Currency.USD,
+      BUSD: Currency.USD,
 
       // 欧元
       EUR: Currency.EUR,
