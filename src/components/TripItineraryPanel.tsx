@@ -108,12 +108,7 @@ export default function TripItineraryPanel({
     TRAVEL_CATEGORIES.includes(item.category)
   );
 
-  // 如果没有差旅项目，不显示面板
-  if (!hasTravelItems) {
-    return null;
-  }
-
-  // AI 生成行程
+  // AI 生成行程（必须在条件 return 前声明，遵守 React Hooks 规则）
   const generateItinerary = useCallback(async () => {
     setIsGenerating(true);
     setError(null);
@@ -145,7 +140,7 @@ export default function TripItineraryPanel({
     }
   }, [lineItems, description]);
 
-  // 确认行程
+  // 确认行程（必须在条件 return 前声明，遵守 React Hooks 规则）
   const confirmItinerary = useCallback(async () => {
     if (!itinerary) return;
 
@@ -176,6 +171,11 @@ export default function TripItineraryPanel({
       setIsSaving(false);
     }
   }, [itinerary, onItineraryConfirmed]);
+
+  // 如果没有差旅项目，不显示面板
+  if (!hasTravelItems) {
+    return null;
+  }
 
   // 编辑行程节点
   const updateItineraryItem = (index: number, field: string, value: any) => {
