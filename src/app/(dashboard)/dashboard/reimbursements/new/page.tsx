@@ -17,6 +17,7 @@ const expenseCategories = [
   { value: 'ai_token', label: 'AI 服务', icon: '🤖' },
   { value: 'cloud_resource', label: '云资源', icon: '☁️' },
   { value: 'client_entertainment', label: '客户招待', icon: '🤝' },
+  { value: 'marketing', label: '市场推广', icon: '📢' },
   { value: 'other', label: '其他', icon: '📦' },
 ];
 

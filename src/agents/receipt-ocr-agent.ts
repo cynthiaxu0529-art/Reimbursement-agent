@@ -392,21 +392,39 @@ export class ReceiptOCRAgent {
 
     const type = this.mapReceiptType(parsed.type as string);
 
-    // 如果是通用发票，尝试从商家名称推断
-    if (type === 'vat_invoice' || type === 'general_receipt') {
+    // 如果是通用发票/增值税发票，尝试从商家名称和描述推断
+    if (type === 'vat_invoice' || type === 'vat_special' || type === 'general_receipt') {
       const vendor = ((parsed.vendor as string) || '').toLowerCase();
+      const description = ((parsed.description as string) || '').toLowerCase();
+      const combined = `${vendor} ${description}`;
 
-      if (vendor.includes('酒店') || vendor.includes('hotel')) {
+      if (combined.includes('酒店') || combined.includes('hotel')) {
         return ExpenseCategory.HOTEL;
       }
-      if (vendor.includes('餐') || vendor.includes('restaurant') || vendor.includes('食')) {
+      if (combined.includes('餐') || combined.includes('restaurant') || combined.includes('食')) {
         return ExpenseCategory.MEAL;
       }
-      if (vendor.includes('打印') || vendor.includes('复印')) {
+      if (combined.includes('打印') || combined.includes('复印')) {
         return ExpenseCategory.PRINTING;
       }
-      if (vendor.includes('快递') || vendor.includes('物流')) {
+      if (combined.includes('快递') || combined.includes('物流')) {
         return ExpenseCategory.COURIER;
+      }
+      // 市场推广：KOC/KOL 投放、红包活动、营销推广、广告投放等
+      if (
+        combined.includes('koc') ||
+        combined.includes('kol') ||
+        combined.includes('营销') ||
+        combined.includes('推广') ||
+        combined.includes('市场') ||
+        combined.includes('广告') ||
+        combined.includes('投放') ||
+        combined.includes('红包活动') ||
+        combined.includes('品牌') ||
+        combined.includes('活动费') ||
+        combined.includes('marketing')
+      ) {
+        return ExpenseCategory.MARKETING;
       }
     }
 
