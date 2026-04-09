@@ -9,11 +9,11 @@
     },
     {
       "path": "/api/cron/auto-approval",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 1 * * *"
     },
     {
       "path": "/api/cron/auto-payment",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 2 * * *"
     }
   ]
 }
