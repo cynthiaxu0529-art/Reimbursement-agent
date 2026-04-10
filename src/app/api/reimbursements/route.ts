@@ -281,8 +281,14 @@ export async function POST(request: NextRequest) {
 
     // 服务端汇率转换：如果 item 缺少 exchangeRate / amountInBaseCurrency，自动转换
     // 保证 Agent 提交和手动提交行为一致（前端在客户端做转换，Agent 由服务端补齐）
+    // 稳定币归一化：USDC/USDT/BUSD → USD（与 exchange-service.ts 保持一致）
+    const STABLECOIN_ALIASES: Record<string, string> = { USDC: 'USD', USDT: 'USD', BUSD: 'USD' };
     for (const item of items) {
-      const itemCurrency = (item.currency || 'CNY') as CurrencyType;
+      const rawCurrency = (item.currency || 'CNY').toUpperCase();
+      const itemCurrency = (STABLECOIN_ALIASES[rawCurrency] || rawCurrency) as CurrencyType;
+      if (STABLECOIN_ALIASES[rawCurrency]) {
+        item.currency = itemCurrency; // 同步更新 item.currency，保证后续逻辑一致
+      }
       const itemAmount = parseFloat(item.amount) || 0;
 
       // 如果币种和本位币相同，无需转换
