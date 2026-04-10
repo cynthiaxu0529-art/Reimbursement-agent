@@ -492,6 +492,7 @@ const en: Translations = {
     batchChangeTo: 'Change to',
     batchApply: 'Batch Apply ({count})',
     batchSuccess: 'Successfully updated {count} item(s)',
+    generating: 'Processing...',
   },
 
   // Language

@@ -490,6 +490,7 @@ const zh = {
     batchChangeTo: '修改为',
     batchApply: '批量修改 ({count})',
     batchSuccess: '成功更新 {count} 条记录',
+    generating: '处理中...',
   },
 
   // Language
