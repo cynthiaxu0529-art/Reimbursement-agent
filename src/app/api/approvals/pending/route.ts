@@ -5,6 +5,8 @@
  *
  * 支持 Session 和 API Key 认证
  * API Key 需要 scope: approval:read
+ *
+ * 匹配规则：直接指定 approverId = userId，或角色匹配 approverRole IN (userRoles)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
