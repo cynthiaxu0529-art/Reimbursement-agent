@@ -42,6 +42,10 @@ interface SummaryItem {
   total_amount: number;
   record_count: number;
   details: SummaryDetail[];
+  /** true if no specific mapping rule matched — fell back to miscellaneous account */
+  is_fallback?: boolean;
+  /** sample original categories / description snippets that triggered the fallback */
+  fallback_hints?: string[];
 }
 
 interface Summary {
@@ -254,6 +258,8 @@ export async function GET(request: NextRequest) {
       details: SummaryDetail[];
       totalAmount: number;
       recordCount: number;
+      isFallback: boolean;
+      fallbackHints: string[];  // collect original category/description snippets
     }>();
 
     for (const item of allItems) {
@@ -278,6 +284,8 @@ export async function GET(request: NextRequest) {
           details: [],
           totalAmount: 0,
           recordCount: 0,
+          isFallback: false,
+          fallbackHints: [],
         });
       }
 
@@ -291,6 +299,15 @@ export async function GET(request: NextRequest) {
       });
       group.totalAmount += item.amountInBaseCurrency || item.amount;
       group.recordCount += 1;
+
+      // Track fallback mappings for finance to-do
+      if (mapping.is_fallback) {
+        group.isFallback = true;
+        const hint = `${item.category}${item.description ? ': ' + item.description.slice(0, 40) : ''}`;
+        if (!group.fallbackHints.includes(hint) && group.fallbackHints.length < 5) {
+          group.fallbackHints.push(hint);
+        }
+      }
     }
 
     // 8. 组装成 Summary 结构
@@ -318,6 +335,10 @@ export async function GET(request: NextRequest) {
         total_amount: Number(group.totalAmount.toFixed(2)),
         record_count: group.recordCount,
         details: group.details,
+        ...(group.isFallback && {
+          is_fallback: true,
+          fallback_hints: group.fallbackHints,
+        }),
       });
       summary.total_amount += group.totalAmount;
       summary.total_records += group.recordCount;
