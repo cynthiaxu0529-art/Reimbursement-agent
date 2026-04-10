@@ -444,21 +444,40 @@ Content-Type: multipart/form-data
 - `file` - 图片文件（支持 jpg, png, webp, gif, pdf，最大 10MB）
 - `mode` -（可选）设为 `upload_only` 时仅上传文件，跳过 OCR 和汇率转换
 
-**两种模式：**
+**三种上传模式：**
 
-#### 模式 A：自动 OCR 模式（默认）
+#### 模式 A：自动 OCR 模式（默认，multipart 文件）
 
 不传 `mode` 字段，系统自动完成：
 1. 上传图片到云存储
 2. 自动 OCR 识别发票内容（金额、币种、商家、日期、类别）
 3. 自动按管理员设定的月初汇率转换为公司本位币
 
-#### 模式 B：仅上传模式
+#### 模式 B：仅上传模式（multipart 文件）
 
 传 `mode=upload_only`，系统仅上传文件，不做 OCR 识别。适用于：
 - 用户已经提供了金额等信息，不需要 OCR
 - 凭证格式特殊，OCR 识别不准确
 - 只需要上传附件获取 URL
+
+#### 模式 C：URL 转存模式（JSON 请求，Agent 专用）
+
+**当 Agent 只有图片 URL 而无法直接上传二进制文件时**，可用 JSON 方式请求，服务端会自动从该 URL 下载图片并永久存储至云存储：
+
+```http
+POST {REIMBURSEMENT_API_URL}/api/upload
+Content-Type: application/json
+```
+
+```json
+{
+  "imageUrl": "https://platform-uploads.example.com/your-receipt-url.jpg"
+}
+```
+
+返回格式与模式 A 完全相同（包含 `url` 和 `ocr` 数据）。
+
+**⚠️ 严禁将第三方 URL 直接用作 receiptUrl**：来自聊天平台（如 OpenClaw）的图片 URL 会在数小时内过期或需要身份验证，导致财务审核时图片无法查看。必须通过 `/api/upload` 将图片转存到报销系统自己的存储后，才能将返回的 `url` 用作 `receiptUrl`。
 
 响应示例（模式 A - 火车票 OCR）：
 ```json
