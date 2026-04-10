@@ -47,6 +47,25 @@ export const CURRENCY_INFO: Record<
 };
 
 /**
+ * 稳定币别名 → 法币映射
+ * USDC/USDT/BUSD 与 USD 1:1 挂钩，直接等同处理
+ * 与 receipt-ocr-agent.ts 中的 currencyMap 保持一致
+ */
+const STABLECOIN_TO_FIAT: Record<string, CurrencyType> = {
+  USDC: Currency.USD,
+  USDT: Currency.USD,
+  BUSD: Currency.USD,
+};
+
+/**
+ * 将稳定币归一化为对应法币
+ * 例如 USDC → USD，避免调用外部 API 时拿到错误的加密货币汇率
+ */
+function normalizeCurrency(currency: string): CurrencyType {
+  return STABLECOIN_TO_FIAT[currency.toUpperCase()] ?? (currency as CurrencyType);
+}
+
+/**
  * 默认备用汇率（当 API 不可用时使用）
  * 基于 CNY 的汇率
  * 注意：这些是硬编码的默认值，实际使用时会优先从 dynamicFallbackRates 获取
@@ -161,6 +180,10 @@ export class ExchangeRateService {
     toCurrency: CurrencyType,
     date?: Date
   ): Promise<ExchangeRate> {
+    // 稳定币归一化：USDC/USDT/BUSD → USD，避免调用外部 API 时得到错误的加密货币汇率
+    fromCurrency = normalizeCurrency(fromCurrency as string);
+    toCurrency = normalizeCurrency(toCurrency as string);
+
     // 相同货币
     if (fromCurrency === toCurrency) {
       return {
