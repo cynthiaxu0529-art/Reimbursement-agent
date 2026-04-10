@@ -128,7 +128,6 @@ const SCOPE_REQUIRED_ROLES: Record<string, string[]> = {
   'payment:read': ['finance', 'super_admin'],
   'payment:process': ['finance', 'super_admin'],
   'accounting_summary:read': ['finance', 'admin', 'super_admin'],
-  'accounting_summary:generate': ['finance', 'admin', 'super_admin'],
   'account_mapping:read': ['finance', 'admin', 'super_admin'],
   'account_mapping:update': ['finance', 'super_admin'],
 };

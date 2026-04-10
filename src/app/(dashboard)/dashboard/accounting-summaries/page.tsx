@@ -111,7 +111,7 @@ export default function AccountingSummariesPage() {
   const { t } = useLanguage();
   const ts = t.accountingSummaries;
 
-  const [activeTab, setActiveTab] = useState<'summaries' | 'details' | 'mapping' | 'generate'>('summaries');
+  const [activeTab, setActiveTab] = useState<'summaries' | 'details' | 'mapping'>('summaries');
   const [summaries, setSummaries] = useState<Summary[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedSummaryId, setExpandedSummaryId] = useState<string | null>(null);
@@ -135,20 +135,6 @@ export default function AccountingSummariesPage() {
   const [filterEmployee, setFilterEmployee] = useState<string>('all');
   const [filterAccountCode, setFilterAccountCode] = useState<string>('all');
 
-  // Generate tab state
-  interface PeriodInfo {
-    summary_id: string;
-    period_start: string;
-    period_end: string;
-    label: string;
-    is_generated: boolean;
-  }
-  const [availablePeriods, setAvailablePeriods] = useState<PeriodInfo[]>([]);
-  const [selectedPeriods, setSelectedPeriods] = useState<Set<string>>(new Set());
-  const [generatingPeriods, setGeneratingPeriods] = useState(false);
-  const [generateMessage, setGenerateMessage] = useState<string | null>(null);
-  const [loadingPeriods, setLoadingPeriods] = useState(false);
-
   const fetchSummaries = useCallback(async () => {
     try {
       setLoading(true);
@@ -168,33 +154,9 @@ export default function AccountingSummariesPage() {
     }
   }, [router]);
 
-  const fetchPeriods = useCallback(async () => {
-    try {
-      setLoadingPeriods(true);
-      const res = await fetch('/api/internal/generate-summary');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          setAvailablePeriods(data.periods || []);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch periods:', error);
-    } finally {
-      setLoadingPeriods(false);
-    }
-  }, []);
-
   useEffect(() => {
     fetchSummaries();
   }, [fetchSummaries]);
-
-  // Fetch periods when generate tab is active
-  useEffect(() => {
-    if (activeTab === 'generate') {
-      fetchPeriods();
-    }
-  }, [activeTab, fetchPeriods]);
 
   // Get unique periods for filter
   const periods = [...new Set(summaries.map(s => s.summary_id))];
@@ -1041,333 +1003,6 @@ export default function AccountingSummariesPage() {
   };
 
   // ============================================================================
-  // Tab: Generate
-  // ============================================================================
-
-  const handleGenerate = async (periodIds: string[]) => {
-    if (periodIds.length === 0) return;
-    setGeneratingPeriods(true);
-    setGenerateMessage(null);
-    try {
-      const res = await fetch('/api/internal/generate-summary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ summary_ids: periodIds }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        const parts: string[] = [];
-        if (data.generated?.length > 0) {
-          parts.push(ts.generateSuccess.replace('{count}', String(data.generated.length)));
-        }
-        if (data.skipped?.length > 0) {
-          parts.push(ts.generateSkipped.replace('{count}', String(data.skipped.length)));
-        }
-        if (data.errors?.length > 0) {
-          parts.push(`${data.errors.length} error(s)`);
-        }
-        setGenerateMessage(parts.join('，'));
-        setSelectedPeriods(new Set());
-        // Refresh both periods and summaries
-        await Promise.all([fetchPeriods(), fetchSummaries()]);
-      } else {
-        setGenerateMessage(data.error || 'Failed');
-      }
-    } catch {
-      setGenerateMessage('Network error');
-    } finally {
-      setGeneratingPeriods(false);
-    }
-  };
-
-  const togglePeriodSelection = (sid: string) => {
-    setSelectedPeriods(prev => {
-      const next = new Set(prev);
-      if (next.has(sid)) next.delete(sid);
-      else next.add(sid);
-      return next;
-    });
-  };
-
-  const renderGenerateTab = () => {
-    if (loadingPeriods) {
-      return (
-        <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
-          {t.common.loading}
-        </div>
-      );
-    }
-
-    const notGeneratedPeriods = availablePeriods.filter(p => !p.is_generated);
-    const generatedPeriods = availablePeriods.filter(p => p.is_generated);
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {/* Description */}
-        <div style={{
-          backgroundColor: '#f0f9ff',
-          border: '1px solid #bae6fd',
-          borderRadius: '0.75rem',
-          padding: '1rem 1.25rem',
-          fontSize: '0.875rem',
-          color: '#0c4a6e',
-        }}>
-          <strong>{ts.generateTitle}</strong>
-          <p style={{ margin: '0.5rem 0 0', color: '#0369a1' }}>{ts.generateDescription}</p>
-        </div>
-
-        {/* Message */}
-        {generateMessage && (
-          <div style={{
-            backgroundColor: '#f0fdf4',
-            border: '1px solid #bbf7d0',
-            borderRadius: '0.5rem',
-            padding: '0.75rem 1rem',
-            fontSize: '0.875rem',
-            color: '#166534',
-          }}>
-            {generateMessage}
-          </div>
-        )}
-
-        {/* Not Generated Periods */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '0.75rem',
-          border: '1px solid #e5e7eb',
-          overflow: 'hidden',
-        }}>
-          <div style={{
-            padding: '1rem 1.25rem',
-            borderBottom: '1px solid #e5e7eb',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}>
-            <div style={{ fontWeight: 600, fontSize: '0.9375rem', color: '#111827' }}>
-              {ts.notGenerated} ({notGeneratedPeriods.length})
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button
-                onClick={() => {
-                  if (selectedPeriods.size === notGeneratedPeriods.length) {
-                    setSelectedPeriods(new Set());
-                  } else {
-                    setSelectedPeriods(new Set(notGeneratedPeriods.map(p => p.summary_id)));
-                  }
-                }}
-                style={{
-                  padding: '0.375rem 0.75rem',
-                  borderRadius: '0.375rem',
-                  border: '1px solid #d1d5db',
-                  backgroundColor: 'white',
-                  fontSize: '0.8125rem',
-                  cursor: 'pointer',
-                  color: '#374151',
-                }}
-              >
-                {selectedPeriods.size === notGeneratedPeriods.length ? ts.deselectAll : ts.selectAll}
-              </button>
-              <button
-                onClick={() => handleGenerate(Array.from(selectedPeriods))}
-                disabled={selectedPeriods.size === 0 || generatingPeriods}
-                style={{
-                  padding: '0.375rem 1rem',
-                  borderRadius: '0.375rem',
-                  border: 'none',
-                  backgroundColor: selectedPeriods.size > 0 && !generatingPeriods ? '#2563eb' : '#d1d5db',
-                  color: 'white',
-                  fontSize: '0.8125rem',
-                  fontWeight: 500,
-                  cursor: selectedPeriods.size > 0 && !generatingPeriods ? 'pointer' : 'default',
-                }}
-              >
-                {generatingPeriods ? ts.generating : `${ts.generateBtn} (${selectedPeriods.size})`}
-              </button>
-              <button
-                onClick={() => handleGenerate(['all'])}
-                disabled={generatingPeriods || availablePeriods.length === 0}
-                style={{
-                  padding: '0.375rem 1rem',
-                  borderRadius: '0.375rem',
-                  border: '1px solid #2563eb',
-                  backgroundColor: 'white',
-                  color: '#2563eb',
-                  fontSize: '0.8125rem',
-                  fontWeight: 500,
-                  cursor: generatingPeriods ? 'default' : 'pointer',
-                }}
-              >
-                {ts.generateAllBtn}
-              </button>
-            </div>
-          </div>
-
-          {notGeneratedPeriods.length === 0 ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: '#9ca3af', fontSize: '0.875rem' }}>
-              {ts.noSummaries}
-            </div>
-          ) : (
-            notGeneratedPeriods.map(period => (
-              <div
-                key={period.summary_id}
-                style={{
-                  padding: '0.75rem 1.25rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  borderBottom: '1px solid #f3f4f6',
-                  cursor: 'pointer',
-                  backgroundColor: selectedPeriods.has(period.summary_id) ? '#eff6ff' : 'transparent',
-                }}
-                onClick={() => togglePeriodSelection(period.summary_id)}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedPeriods.has(period.summary_id)}
-                  onChange={() => togglePeriodSelection(period.summary_id)}
-                  style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                />
-                <span style={{
-                  display: 'inline-block',
-                  padding: '0.25rem 0.625rem',
-                  backgroundColor: '#fef3c7',
-                  color: '#92400e',
-                  borderRadius: '0.375rem',
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
-                }}>
-                  {period.summary_id}
-                </span>
-                <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                  {period.period_start} ~ {period.period_end}
-                </span>
-                <span style={{
-                  marginLeft: 'auto',
-                  fontSize: '0.75rem',
-                  color: '#9ca3af',
-                  padding: '0.125rem 0.5rem',
-                  backgroundColor: '#f3f4f6',
-                  borderRadius: '0.25rem',
-                }}>
-                  {ts.notGenerated}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Already Generated Periods */}
-        {generatedPeriods.length > 0 && (
-          <div style={{
-            backgroundColor: 'white',
-            borderRadius: '0.75rem',
-            border: '1px solid #e5e7eb',
-            overflow: 'hidden',
-          }}>
-            <div style={{
-              padding: '1rem 1.25rem',
-              borderBottom: '1px solid #e5e7eb',
-              fontWeight: 600,
-              fontSize: '0.9375rem',
-              color: '#111827',
-            }}>
-              {ts.generated} ({generatedPeriods.length})
-            </div>
-
-            {generatedPeriods.map(period => (
-              <div
-                key={period.summary_id}
-                style={{
-                  padding: '0.75rem 1.25rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  borderBottom: '1px solid #f3f4f6',
-                }}
-              >
-                <span style={{
-                  display: 'inline-block',
-                  padding: '0.25rem 0.625rem',
-                  backgroundColor: '#dcfce7',
-                  color: '#166534',
-                  borderRadius: '0.375rem',
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
-                }}>
-                  {period.summary_id}
-                </span>
-                <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                  {period.period_start} ~ {period.period_end}
-                </span>
-                <span style={{
-                  fontSize: '0.75rem',
-                  color: '#059669',
-                  padding: '0.125rem 0.5rem',
-                  backgroundColor: '#ecfdf5',
-                  borderRadius: '0.25rem',
-                }}>
-                  {ts.generated}
-                </span>
-                <button
-                  onClick={() => handleGenerate([period.summary_id])}
-                  disabled={generatingPeriods}
-                  style={{
-                    marginLeft: 'auto',
-                    padding: '0.25rem 0.75rem',
-                    borderRadius: '0.375rem',
-                    border: '1px solid #d1d5db',
-                    backgroundColor: 'white',
-                    fontSize: '0.75rem',
-                    cursor: generatingPeriods ? 'default' : 'pointer',
-                    color: '#6b7280',
-                  }}
-                >
-                  {ts.regenerate}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* API info for external agents */}
-        <div style={{
-          backgroundColor: '#faf5ff',
-          border: '1px solid #e9d5ff',
-          borderRadius: '0.75rem',
-          padding: '1rem 1.25rem',
-          fontSize: '0.8125rem',
-          color: '#581c87',
-        }}>
-          <strong>API for OpenClaw / External Agents:</strong>
-          <pre style={{
-            margin: '0.5rem 0 0',
-            padding: '0.75rem',
-            backgroundColor: '#f5f3ff',
-            borderRadius: '0.375rem',
-            fontSize: '0.75rem',
-            overflow: 'auto',
-            color: '#4c1d95',
-          }}>
-{`POST /api/reimbursement-summaries/generate
-Authorization: Bearer <api_key>
-
-# Generate specific periods:
-{ "summary_ids": ["REIMB-SUM-202601-B"] }
-
-# Generate all available:
-{ "summary_ids": ["all"] }
-
-# Generate by year/month:
-{ "year": 2026, "month": 2 }
-{ "year": 2026, "month": 2, "half": "B" }`}
-          </pre>
-        </div>
-      </div>
-    );
-  };
-
-  // ============================================================================
   // Tab: Mapping Rules
   // ============================================================================
 
@@ -1542,7 +1177,7 @@ Authorization: Bearer <api_key>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '0', borderBottom: '2px solid #e5e7eb' }}>
-        {(['summaries', 'details', 'generate', 'mapping'] as const).map(tab => (
+        {(['summaries', 'details', 'mapping'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -1559,7 +1194,7 @@ Authorization: Bearer <api_key>
               transition: 'all 0.15s',
             }}
           >
-            {tab === 'summaries' ? ts.tabSummaries : tab === 'details' ? ts.tabDetails : tab === 'generate' ? ts.tabGenerate : ts.tabMapping}
+            {tab === 'summaries' ? ts.tabSummaries : tab === 'details' ? ts.tabDetails : ts.tabMapping}
           </button>
         ))}
       </div>
@@ -1567,7 +1202,6 @@ Authorization: Bearer <api_key>
       {/* Tab content */}
       {activeTab === 'summaries' && renderSummariesTab()}
       {activeTab === 'details' && renderDetailsTab()}
-      {activeTab === 'generate' && renderGenerateTab()}
       {activeTab === 'mapping' && renderMappingTab()}
     </div>
   );
