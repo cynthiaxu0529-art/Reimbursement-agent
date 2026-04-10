@@ -214,8 +214,19 @@ const EXPENSE_TYPE_RULES: ExpenseTypeRule[] = [
   },
   {
     expenseType: 'advertising',
-    categories: [],
-    keywords: ['广告', 'advertising', 'promotion', '推广', '营销', 'marketing'],
+    // 'marketing' is the canonical category for KOL / 红包 / promotional spends
+    categories: ['marketing'],
+    keywords: [
+      '广告', 'advertising', 'promotion', '推广', '营销', 'marketing',
+      // KOL / influencer
+      'kol', '达人', '博主', '网红', '主播', 'influencer', 'creator', 'sponsor', '赞助',
+      // Operational red-packets & incentives
+      '红包', '运营红包', '奖励', '激励', '福利', '优惠券', 'coupon', 'incentive',
+      // Social / community / growth
+      '社媒', '社群', '运营', '增长', 'growth', 'community',
+      // Events
+      '活动', 'event', '展览', 'expo', '发布会',
+    ],
   },
 ];
 
@@ -230,45 +241,49 @@ const EXPENSE_TYPE_RULES: ExpenseTypeRule[] = [
  * @param description    报销的 description 字段
  * @param costCenter     部门显式设定的费用性质（rd/sm/ga，优先使用）
  * @param departmentName 部门名称（当 costCenter 未设时降级推断）
- * @returns { accountCode, accountName }
+ * @returns { accountCode, accountName, is_fallback, matched_by }
+ *
+ * is_fallback=true 表示没有精确匹配到任何规则，使用了兜底的 miscellaneous 科目，
+ * 财务需要在 Dashboard 的 To-Do 面板中确认或手动更正。
  */
 export async function mapExpenseToAccount(
   category: string,
   description: string,
   costCenter?: string | null,
   departmentName?: string | null,
-): Promise<{ accountCode: string; accountName: string }> {
+): Promise<{ accountCode: string; accountName: string; is_fallback: boolean; matched_by: 'category' | 'keyword' | 'fallback' }> {
   const fn = classifyDepartment(costCenter, departmentName);
-  const expenseType = matchExpenseType(category, description);
+  const { expenseType, matched_by } = matchExpenseType(category, description);
   const codes = EXPENSE_TYPE_ACCOUNTS[expenseType];
   const accountCode = codes[fn];
   const fallbackName = codes[`${fn}Name` as keyof AccountCodeSet] as string;
   const accountName = await resolveAccountName(accountCode, fallbackName);
-  return { accountCode, accountName };
+  return { accountCode, accountName, is_fallback: expenseType === 'miscellaneous', matched_by };
 }
 
 /**
  * 根据 category + description 匹配费用类型
+ * 返回匹配到的 expenseType 以及匹配方式 (category / keyword / fallback)
  */
-function matchExpenseType(category: string, description: string): ExpenseType {
+function matchExpenseType(category: string, description: string): { expenseType: ExpenseType; matched_by: 'category' | 'keyword' | 'fallback' } {
   const categoryLower = (category || '').toLowerCase();
   const descLower = (description || '').toLowerCase();
 
   for (const rule of EXPENSE_TYPE_RULES) {
     if (rule.categories.includes(categoryLower)) {
-      return rule.expenseType;
+      return { expenseType: rule.expenseType, matched_by: 'category' };
     }
   }
 
   for (const rule of EXPENSE_TYPE_RULES) {
     for (const keyword of rule.keywords) {
       if (descLower.includes(keyword.toLowerCase())) {
-        return rule.expenseType;
+        return { expenseType: rule.expenseType, matched_by: 'keyword' };
       }
     }
   }
 
-  return 'miscellaneous';
+  return { expenseType: 'miscellaneous', matched_by: 'fallback' };
 }
 
 /**
@@ -288,7 +303,7 @@ async function resolveAccountName(accountCode: string, fallbackName: string): Pr
  */
 export async function mapExpenseItems(
   items: { category: string; description: string; costCenter?: string | null; departmentName?: string | null }[]
-): Promise<{ accountCode: string; accountName: string }[]> {
+): Promise<{ accountCode: string; accountName: string; is_fallback: boolean; matched_by: 'category' | 'keyword' | 'fallback' }[]> {
   return Promise.all(
     items.map(item => mapExpenseToAccount(item.category, item.description, item.costCenter, item.departmentName))
   );
