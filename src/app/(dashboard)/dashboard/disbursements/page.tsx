@@ -80,9 +80,14 @@ export default function DisbursementsPage() {
   const [customPaymentAmounts, setCustomPaymentAmounts] = useState<Record<string, number>>({});
   const [editingAmountId, setEditingAmountId] = useState<string | null>(null);
 
-  // 预览附件：将base64 data URL转为Blob URL以提高渲染性能
+  // 预览附件：将base64 data URL转为Blob URL以提高渲染性能；PDF直接在新标签页打开
   const handlePreviewReceipt = (url: string | null | undefined) => {
     if (!url) return;
+    // PDF 文件无法在 <img> 中显示，直接在新标签页打开
+    if (url.match(/\.pdf(\?.*)?$/i) || url.startsWith('data:application/pdf')) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
     if (url.startsWith('data:')) {
       try {
         const parts = url.split(',');
@@ -103,14 +108,18 @@ export default function DisbursementsPage() {
         console.error('Failed to convert data URL:', e);
       }
     }
+    setImgLoadError(false);
     setPreviewImage(url);
   };
+
+  const [imgLoadError, setImgLoadError] = useState(false);
 
   const closePreview = () => {
     if (previewImage && previewImage.startsWith('blob:')) {
       URL.revokeObjectURL(previewImage);
     }
     setPreviewImage(null);
+    setImgLoadError(false);
   };
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [roleChecked, setRoleChecked] = useState(false);
@@ -1233,11 +1242,27 @@ export default function DisbursementsPage() {
           style={{ zIndex: 9999 }}
         >
           <div className="relative max-w-[90vw] max-h-[90vh]">
-            <img
-              src={previewImage}
-              alt="凭证预览"
-              className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
-            />
+            {imgLoadError ? (
+              <div className="text-center text-white p-10">
+                <p className="mb-4 text-base">图片无法加载</p>
+                <a
+                  href={previewImage!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-blue-400 underline text-sm"
+                >
+                  在新标签页中打开
+                </a>
+              </div>
+            ) : (
+              <img
+                src={previewImage!}
+                alt="凭证预览"
+                onError={() => setImgLoadError(true)}
+                className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+              />
+            )}
             <button
               onClick={(e) => { e.stopPropagation(); closePreview(); }}
               className="absolute -top-10 right-0 text-white text-2xl p-2 hover:text-gray-300"

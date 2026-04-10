@@ -90,9 +90,14 @@ export default function ReimbursementsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 预览附件：将base64 data URL转为Blob URL以提高渲染性能
+  // 预览附件：将base64 data URL转为Blob URL以提高渲染性能；PDF直接在新标签页打开
   const handlePreviewReceipt = (url: string | null | undefined) => {
     if (!url) return;
+    // PDF 文件无法在 <img> 中显示，直接在新标签页打开
+    if (url.match(/\.pdf(\?.*)?$/i) || url.startsWith('data:application/pdf')) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
     if (url.startsWith('data:')) {
       try {
         const parts = url.split(',');
@@ -113,14 +118,18 @@ export default function ReimbursementsPage() {
         console.error('Failed to convert data URL:', e);
       }
     }
+    setImgLoadError(false);
     setPreviewImage(url);
   };
+
+  const [imgLoadError, setImgLoadError] = useState(false);
 
   const closePreview = () => {
     if (previewImage && previewImage.startsWith('blob:')) {
       URL.revokeObjectURL(previewImage);
     }
     setPreviewImage(null);
+    setImgLoadError(false);
   };
   const [itemActionLoading, setItemActionLoading] = useState<string | null>(null);
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null);
@@ -968,17 +977,33 @@ export default function ReimbursementsPage() {
           }}
         >
           <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
-            <img
-              src={previewImage}
-              alt={t.reimbursements.receiptPreview}
-              style={{
-                maxWidth: '100%',
-                maxHeight: '90vh',
-                objectFit: 'contain',
-                borderRadius: '8px',
-                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-              }}
-            />
+            {imgLoadError ? (
+              <div style={{ textAlign: 'center', color: 'white', padding: '40px 20px' }}>
+                <p style={{ marginBottom: '16px', fontSize: '16px' }}>图片无法加载</p>
+                <a
+                  href={previewImage!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ color: '#60a5fa', textDecoration: 'underline', fontSize: '14px' }}
+                >
+                  在新标签页中打开
+                </a>
+              </div>
+            ) : (
+              <img
+                src={previewImage!}
+                alt={t.reimbursements.receiptPreview}
+                onError={() => setImgLoadError(true)}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '90vh',
+                  objectFit: 'contain',
+                  borderRadius: '8px',
+                  boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                }}
+              />
+            )}
             <button
               onClick={(e) => { e.stopPropagation(); closePreview(); }}
               style={{

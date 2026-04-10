@@ -46,9 +46,114 @@ export async function POST(request: NextRequest) {
     }
     const authCtx = authResult.context;
 
-    // 解析 FormData
+    const contentType = request.headers.get('content-type') || '';
+    let file: File | null = null;
+    let uploadOnly = false;
+
+    if (contentType.includes('application/json')) {
+      // JSON 模式：Agent 传入图片 URL，服务端拉取并转存到 Vercel Blob
+      const body = await request.json();
+      const imageUrl: string | undefined = body.imageUrl;
+      uploadOnly = body.mode === 'upload_only';
+
+      if (!imageUrl) {
+        return apiError('请提供 imageUrl 字段', 400, 'MISSING_REQUIRED_FIELDS');
+      }
+
+      let fetchedResponse: Response;
+      try {
+        fetchedResponse = await fetch(imageUrl);
+      } catch {
+        return apiError('无法获取图片 URL，请检查链接是否有效', 400, 'IMAGE_FETCH_FAILED');
+      }
+      if (!fetchedResponse.ok) {
+        return apiError(`图片 URL 返回错误: ${fetchedResponse.status}`, 400, 'IMAGE_FETCH_FAILED');
+      }
+
+      const fetchedType = fetchedResponse.headers.get('content-type') || 'image/jpeg';
+      const mimeType = fetchedType.split(';')[0].trim();
+      if (!ALLOWED_TYPES.includes(mimeType)) {
+        return apiError(`不支持的文件类型: ${mimeType}。支持: JPG, PNG, WebP, GIF, PDF`, 400, 'INVALID_FILE_TYPE');
+      }
+
+      const arrayBuffer = await fetchedResponse.arrayBuffer();
+      if (arrayBuffer.byteLength > MAX_FILE_SIZE) {
+        return apiError(`文件过大，最大支持 ${MAX_FILE_SIZE / 1024 / 1024}MB`, 400, 'FILE_TOO_LARGE');
+      }
+
+      // 从 URL 推断扩展名
+      const urlPath = new URL(imageUrl).pathname;
+      const extension = urlPath.split('.').pop()?.split('?')[0] || (mimeType.split('/')[1] || 'jpg');
+      const timestamp = Date.now();
+      const randomStr = Math.random().toString(36).substring(2, 8);
+      const filename = `receipts/${authCtx.userId}/${timestamp}-${randomStr}.${extension}`;
+
+      const blob = await put(filename, new Blob([arrayBuffer], { type: mimeType }), {
+        access: 'public',
+        addRandomSuffix: false,
+      });
+
+      // 基础返回数据
+      const responseData: Record<string, unknown> = {
+        success: true,
+        url: blob.url,
+        filename: urlPath.split('/').pop() || filename,
+        size: arrayBuffer.byteLength,
+        type: mimeType,
+      };
+
+      // Agent 模式：自动触发 OCR（除非 upload_only）
+      if (authCtx.authType === 'api_key' && !uploadOnly) {
+        try {
+          const ocrAgent = createReceiptOCRAgent();
+          const ocrResult = await ocrAgent.recognize({ imageUrl: blob.url });
+          const ocrData: Record<string, unknown> = {
+            type: ocrResult.type, category: ocrResult.category, amount: ocrResult.amount,
+            currency: ocrResult.currency, vendor: ocrResult.vendor, date: ocrResult.date,
+            confidence: ocrResult.confidence,
+            description: ocrResult.items?.map((i: { name: string }) => i.name).join(', ') || undefined,
+            departure: ocrResult.departure, destination: ocrResult.destination,
+            trainNumber: ocrResult.trainNumber, flightNumber: ocrResult.flightNumber,
+            seatClass: ocrResult.seatClass,
+            checkInDate: ocrResult.checkInDate, checkOutDate: ocrResult.checkOutDate, nights: ocrResult.nights,
+          };
+          if (ocrResult.amount && ocrResult.currency && authCtx.tenantId) {
+            try {
+              await loadMonthlyRatesFromDB();
+              const tenantRecord = await db.query.tenants.findFirst({
+                where: eq(tenants.id, authCtx.tenantId),
+                columns: { baseCurrency: true },
+              });
+              const baseCurrency = (tenantRecord?.baseCurrency || 'USD') as CurrencyType;
+              const itemCurrency = ocrResult.currency as CurrencyType;
+              if (itemCurrency === baseCurrency) {
+                ocrData.exchangeRate = 1;
+                ocrData.amountInBaseCurrency = ocrResult.amount;
+                ocrData.baseCurrency = baseCurrency;
+              } else {
+                const conversion = await exchangeRateService.convert({ amount: ocrResult.amount, fromCurrency: itemCurrency, toCurrency: baseCurrency });
+                ocrData.exchangeRate = conversion.exchangeRate;
+                ocrData.amountInBaseCurrency = conversion.convertedAmount;
+                ocrData.baseCurrency = baseCurrency;
+              }
+            } catch (err) {
+              console.warn('Exchange rate conversion failed during upload OCR:', err);
+            }
+          }
+          responseData.ocr = ocrData;
+        } catch (err) {
+          console.warn('Auto-OCR failed during upload:', err);
+          responseData.ocr = null;
+          responseData.ocr_error = 'OCR 识别失败，请手动填写费用信息';
+        }
+      }
+
+      return NextResponse.json(responseData);
+    }
+
+    // 解析 FormData（multipart/form-data 模式）
     const formData = await request.formData();
-    const file = formData.get('file') as File | null;
+    file = formData.get('file') as File | null;
 
     if (!file) {
       return apiError('请选择要上传的文件', 400, 'MISSING_REQUIRED_FIELDS');
@@ -78,7 +183,7 @@ export async function POST(request: NextRequest) {
 
     // 检查是否为仅上传模式（跳过 OCR 和汇率转换）
     const mode = formData.get('mode') as string | null;
-    const uploadOnly = mode === 'upload_only';
+    uploadOnly = mode === 'upload_only';
 
     // 基础返回数据
     const responseData: Record<string, unknown> = {
