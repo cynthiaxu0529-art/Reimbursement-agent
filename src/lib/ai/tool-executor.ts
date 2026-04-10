@@ -11,6 +11,7 @@ import { users, reimbursements, reimbursementItems, tenants, policies } from '@/
 import { eq, and, gte, lte, inArray, sql, desc } from 'drizzle-orm';
 import { getUserRoles, isAdmin, canApprove, canProcessPayment } from '@/lib/auth/roles';
 import { getVisibleUserIds } from '@/lib/department/department-service';
+import { SYSTEM_MAX_AMOUNT_USD, SYSTEM_DAILY_LIMIT_USD } from '@/lib/auto-approval/risk-checker';
 
 /**
  * Tool execution context
@@ -957,10 +958,200 @@ export async function executeTool(
     case 'search_policies':
       return executeSearchPolicies(params, context);
 
+    case 'configure_auto_approval':
+      return executeConfigureAutoApproval(params, context);
+
+    case 'configure_auto_payment':
+      return executeConfigureAutoPayment(params, context);
+
     default:
       // Try to execute as a skill if tool name not found
       return executeSkillTool(`skill_${toolName}`, params, context);
   }
+}
+
+// ─────────────────────────────────────────────
+// configure_auto_approval handler
+// ─────────────────────────────────────────────
+async function executeConfigureAutoApproval(
+  params: {
+    isEnabled?: boolean;
+    maxAmountCapUSD?: number;
+    cancellationWindowMinutes?: number;
+    rules: Array<{ name: string; priority?: number; conditions?: object; action?: string }>;
+  },
+  context: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const { autoApprovalProfiles, autoApprovalRules } = await import('@/lib/db/schema');
+
+  const cappedAmount = Math.min(params.maxAmountCapUSD ?? SYSTEM_MAX_AMOUNT_USD, SYSTEM_MAX_AMOUNT_USD);
+
+  const maxExpiry = new Date();
+  maxExpiry.setMonth(maxExpiry.getMonth() + 6);
+
+  const now = new Date();
+
+  // Upsert profile
+  const existing = await db
+    .select({ id: autoApprovalProfiles.id })
+    .from(autoApprovalProfiles)
+    .where(
+      and(
+        eq(autoApprovalProfiles.userId, context.userId),
+        eq(autoApprovalProfiles.tenantId, context.tenantId)
+      )
+    )
+    .limit(1);
+
+  let profileId: string;
+
+  if (existing.length > 0) {
+    profileId = existing[0].id;
+    await db
+      .update(autoApprovalProfiles)
+      .set({
+        isEnabled: params.isEnabled !== false,
+        maxAmountCapUSD: cappedAmount,
+        dailyLimitUSD: SYSTEM_DAILY_LIMIT_USD,
+        cancellationWindowMinutes: params.cancellationWindowMinutes ?? 60,
+        expiresAt: maxExpiry,
+        createdViaChat: true,
+        updatedAt: now,
+      })
+      .where(eq(autoApprovalProfiles.id, profileId));
+  } else {
+    const [inserted] = await db
+      .insert(autoApprovalProfiles)
+      .values({
+        tenantId: context.tenantId,
+        userId: context.userId,
+        isEnabled: params.isEnabled !== false,
+        maxAmountCapUSD: cappedAmount,
+        dailyLimitUSD: SYSTEM_DAILY_LIMIT_USD,
+        cancellationWindowMinutes: params.cancellationWindowMinutes ?? 60,
+        expiresAt: maxExpiry,
+        createdViaChat: true,
+        updatedAt: now,
+      })
+      .returning({ id: autoApprovalProfiles.id });
+    profileId = inserted.id;
+  }
+
+  // Replace rules
+  await db.delete(autoApprovalRules).where(eq(autoApprovalRules.profileId, profileId));
+
+  if (params.rules && params.rules.length > 0) {
+    await db.insert(autoApprovalRules).values(
+      params.rules.map((r, i) => ({
+        profileId,
+        priority: r.priority ?? (i + 1) * 10,
+        name: r.name,
+        conditions: r.conditions ?? {},
+        action: r.action ?? 'approve',
+        isActive: true,
+        updatedAt: now,
+      }))
+    );
+  }
+
+  return {
+    success: true,
+    data: {
+      profileId,
+      isEnabled: params.isEnabled !== false,
+      maxAmountCapUSD: cappedAmount,
+      dailyLimitUSD: SYSTEM_DAILY_LIMIT_USD,
+      cancellationWindowMinutes: params.cancellationWindowMinutes ?? 60,
+      expiresAt: maxExpiry.toISOString(),
+      rulesCount: params.rules?.length ?? 0,
+      message: `自动审批已${params.isEnabled !== false ? '启用' : '配置'}，共 ${params.rules?.length ?? 0} 条规则，单笔上限 $${cappedAmount}，缓冲期 ${params.cancellationWindowMinutes ?? 60} 分钟，6个月后到期`,
+    },
+  };
+}
+
+// ─────────────────────────────────────────────
+// configure_auto_payment handler
+// ─────────────────────────────────────────────
+async function executeConfigureAutoPayment(
+  params: {
+    isEnabled?: boolean;
+    maxAmountPerReimbursementUSD?: number;
+    maxDailyTotalUSD?: number;
+    minHoursAfterFinalApproval?: number;
+    employeeMinTenureDays?: number;
+    allowedDepartmentIds?: string[];
+  },
+  context: ToolExecutionContext
+): Promise<ToolExecutionResult> {
+  const { autoPaymentProfiles } = await import('@/lib/db/schema');
+
+  // Check permission
+  const [currentUser] = await db
+    .select({ role: users.role, roles: users.roles })
+    .from(users)
+    .where(eq(users.id, context.userId))
+    .limit(1);
+
+  if (!canProcessPayment(getUserRoles(currentUser || {}))) {
+    return { success: false, error: '需要财务或管理员权限才能配置自动付款' };
+  }
+
+  const SYSTEM_MAX_PAYMENT_USD = 500;
+  const maxAmount = Math.min(params.maxAmountPerReimbursementUSD ?? 200, SYSTEM_MAX_PAYMENT_USD);
+
+  const maxExpiry = new Date();
+  maxExpiry.setMonth(maxExpiry.getMonth() + 6);
+
+  const conditions = {
+    maxAmountPerReimbursementUSD: maxAmount,
+    maxDailyTotalUSD: params.maxDailyTotalUSD ?? 1000,
+    minHoursAfterFinalApproval: params.minHoursAfterFinalApproval ?? 24,
+    requirePolicyPassed: true,
+    employeeMinTenureDays: params.employeeMinTenureDays ?? 90,
+    ...(params.allowedDepartmentIds?.length ? { allowedDepartmentIds: params.allowedDepartmentIds } : {}),
+  };
+
+  const now = new Date();
+
+  const existing = await db
+    .select({ id: autoPaymentProfiles.id })
+    .from(autoPaymentProfiles)
+    .where(eq(autoPaymentProfiles.tenantId, context.tenantId))
+    .limit(1);
+
+  let profileId: string;
+
+  if (existing.length > 0) {
+    profileId = existing[0].id;
+    await db
+      .update(autoPaymentProfiles)
+      .set({ isEnabled: params.isEnabled !== false, conditions, expiresAt: maxExpiry, updatedAt: now })
+      .where(eq(autoPaymentProfiles.id, profileId));
+  } else {
+    const [inserted] = await db
+      .insert(autoPaymentProfiles)
+      .values({
+        tenantId: context.tenantId,
+        createdByUserId: context.userId,
+        isEnabled: params.isEnabled !== false,
+        conditions,
+        expiresAt: maxExpiry,
+        updatedAt: now,
+      })
+      .returning({ id: autoPaymentProfiles.id });
+    profileId = inserted.id;
+  }
+
+  return {
+    success: true,
+    data: {
+      profileId,
+      isEnabled: params.isEnabled !== false,
+      conditions,
+      expiresAt: maxExpiry.toISOString(),
+      message: `自动付款已${params.isEnabled !== false ? '启用' : '配置'}，单笔上限 $${maxAmount}，审批通过后等待 ${conditions.minHoursAfterFinalApproval} 小时自动打款，6个月后到期`,
+    },
+  };
 }
 
 export default executeTool;

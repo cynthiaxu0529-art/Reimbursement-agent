@@ -287,6 +287,167 @@ export const searchPoliciesTool: Tool = {
 };
 
 /**
+ * Tool: Configure Auto-Approval
+ * 通过 Chat 对话配置自动审批规则
+ */
+export const configureAutoApprovalTool: Tool = {
+  type: 'function',
+  function: {
+    name: 'configure_auto_approval',
+    description: `配置当前用户（审批人）的自动审批规则。
+当用户说"帮我设置自动审批"、"配置自动审批"、"我想自动审批"等时调用此工具。
+
+此工具会：
+1. 更新或创建审批人的自动审批配置（profile）
+2. 替换所有规则（rules）
+
+重要约束（硬限制，不可修改）：
+- 单笔金额上限：$500 USD
+- 单日累计上限：$2,000 USD
+- 新员工（在职<90天）永远走人工审批
+- 合规检查必须通过才可自动审批
+- 缓冲期（1小时）内审批人可取消任意自动审批
+
+示例触发场景：
+- "设置自动审批，500美金以内、有票据就批"
+- "我想让差旅报销自动通过，金额别太大"
+- "帮我配置：研发团队的报销不超过300美金自动批"`,
+    parameters: {
+      type: 'object',
+      properties: {
+        isEnabled: {
+          type: 'boolean',
+          description: '是否启用自动审批，默认 true',
+          default: true,
+        },
+        maxAmountCapUSD: {
+          type: 'number',
+          description: '单笔自动审批金额上限（USD），最大 500，默认 500',
+          default: 500,
+        },
+        cancellationWindowMinutes: {
+          type: 'integer',
+          description: '缓冲撤销期（分钟），默认 60 分钟',
+          default: 60,
+        },
+        rules: {
+          type: 'array',
+          description: '自动审批规则列表（会替换所有旧规则）',
+          items: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                description: '规则名称，如"差旅报销自动批"',
+              },
+              priority: {
+                type: 'integer',
+                description: '优先级，数字越小越先匹配，默认 100',
+                default: 100,
+              },
+              conditions: {
+                type: 'object',
+                description: '匹配条件',
+                properties: {
+                  maxAmountUSD: {
+                    type: 'number',
+                    description: '该规则的金额上限（USD）',
+                  },
+                  allowedCategories: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: '允许的报销类别，如 ["flight","hotel","meal"]',
+                  },
+                  blockedCategories: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: '禁止的报销类别',
+                  },
+                  allowedDepartmentIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: '仅允许指定部门的报销',
+                  },
+                  requireReceiptsAttached: {
+                    type: 'boolean',
+                    description: '是否要求有票据（默认 true）',
+                    default: true,
+                  },
+                },
+              },
+              action: {
+                type: 'string',
+                enum: ['approve', 'skip'],
+                description: '命中后动作：approve=自动批，skip=不处理（人工）',
+                default: 'approve',
+              },
+            },
+            required: ['name', 'conditions'],
+          },
+        },
+      },
+      required: ['rules'],
+    },
+  },
+};
+
+/**
+ * Tool: Configure Auto-Payment
+ * 通过 Chat 对话配置自动付款条件（仅财务/管理员）
+ */
+export const configureAutoPaymentTool: Tool = {
+  type: 'function',
+  function: {
+    name: 'configure_auto_payment',
+    description: `配置租户级别的自动付款条件（仅财务/管理员可用）。
+当财务说"设置自动打款"、"配置自动付款"、"审批完了自动打"等时调用此工具。
+
+重要约束：
+- 单笔上限最高 $500 USD（建议 ≤ $200）
+- 最终审批通过后最少等待 24 小时才自动打
+- 员工须在职满 90 天
+- 合规检查须通过
+- 紧急时可一键暂停所有自动付款`,
+    parameters: {
+      type: 'object',
+      properties: {
+        isEnabled: {
+          type: 'boolean',
+          description: '是否启用自动付款',
+          default: true,
+        },
+        maxAmountPerReimbursementUSD: {
+          type: 'number',
+          description: '单笔自动付款上限（USD），最大 500，建议 ≤ 200',
+          default: 200,
+        },
+        maxDailyTotalUSD: {
+          type: 'number',
+          description: '每日自动付款总额上限（USD）',
+          default: 1000,
+        },
+        minHoursAfterFinalApproval: {
+          type: 'integer',
+          description: '最终审批通过后等待多少小时再自动打款，默认 24',
+          default: 24,
+        },
+        employeeMinTenureDays: {
+          type: 'integer',
+          description: '员工最短在职天数，默认 90',
+          default: 90,
+        },
+        allowedDepartmentIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '只自动付款给指定部门（留空=所有部门）',
+        },
+      },
+      required: [],
+    },
+  },
+};
+
+/**
  * All available tools
  */
 export const allTools: Tool[] = [
@@ -295,6 +456,8 @@ export const allTools: Tool[] = [
   detectAnomaliesTool,
   analyzeTimelinessTool,
   searchPoliciesTool,
+  configureAutoApprovalTool,
+  configureAutoPaymentTool,
 ];
 
 /**
@@ -306,6 +469,8 @@ export const toolMap: Record<string, Tool> = {
   detect_anomalies: detectAnomaliesTool,
   analyze_timeliness: analyzeTimelinessTool,
   search_policies: searchPoliciesTool,
+  configure_auto_approval: configureAutoApprovalTool,
+  configure_auto_payment: configureAutoPaymentTool,
 };
 
 export default allTools;

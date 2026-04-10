@@ -872,6 +872,193 @@ export const correctionApplications = pgTable('correction_applications', {
 });
 
 // ============================================================================
+// 自动审批 & 自动付款（Auto-Approval / Auto-Payment）
+// ============================================================================
+
+/**
+ * 审批人自动审批总配置表
+ * 每个审批人一条记录，控制是否启用及全局参数
+ */
+export const autoApprovalProfiles = pgTable('auto_approval_profiles', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  isEnabled: boolean('is_enabled').notNull().default(false),
+
+  // 金额控制（不可超过系统硬上限 $500）
+  maxAmountCapUSD: real('max_amount_cap_usd').notNull().default(500),
+  // 单日累计上限
+  dailyLimitUSD: real('daily_limit_usd').notNull().default(2000),
+  // 缓冲撤销期（分钟），默认60分钟
+  cancellationWindowMinutes: integer('cancellation_window_minutes').notNull().default(60),
+
+  // 规则过期时间（最长6个月）
+  expiresAt: timestamp('expires_at'),
+
+  // 统计
+  lastTriggeredAt: timestamp('last_triggered_at'),
+  totalAutoApprovedCount: integer('total_auto_approved_count').notNull().default(0),
+  totalAutoApprovedUSD: real('total_auto_approved_usd').notNull().default(0),
+
+  // 是否通过 Chat 对话创建
+  createdViaChat: boolean('created_via_chat').notNull().default(false),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => [
+  index('idx_auto_approval_profiles_user').on(table.userId, table.tenantId),
+]);
+
+/**
+ * Memory 模式规则表
+ * 每个 profile 可配置多条规则，按 priority 排序匹配
+ */
+export const autoApprovalRules = pgTable('auto_approval_rules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  profileId: uuid('profile_id')
+    .notNull()
+    .references(() => autoApprovalProfiles.id, { onDelete: 'cascade' }),
+
+  // 规则优先级（越小越先匹配）
+  priority: integer('priority').notNull().default(100),
+  name: text('name').notNull(),
+
+  // 匹配条件（jsonb）
+  // {
+  //   maxAmountUSD?: number,          // 金额上限
+  //   allowedCategories?: string[],   // 允许类别
+  //   blockedCategories?: string[],   // 拒绝类别
+  //   allowedEmployeeIds?: string[],  // 员工白名单
+  //   allowedDepartmentIds?: string[],// 部门白名单
+  //   requirePolicyPassed?: boolean,  // 是否要求合规通过（默认 true）
+  //   requireReceiptsAttached?: boolean, // 是否要求有票据（默认 true）
+  // }
+  conditions: jsonb('conditions').notNull().default({}),
+
+  // 命中后动作：approve=自动审批，skip=跳过不处理（人工）
+  action: text('action').notNull().default('approve'),
+
+  isActive: boolean('is_active').notNull().default(true),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => [
+  index('idx_auto_approval_rules_profile').on(table.profileId, table.priority),
+]);
+
+/**
+ * 自动审批决策日志（核心审计表）
+ * 每次自动审批评估都记录一条，无论通过还是跳过
+ */
+export const autoApprovalLogs = pgTable('auto_approval_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  reimbursementId: uuid('reimbursement_id')
+    .notNull()
+    .references(() => reimbursements.id),
+  approvalChainStepId: uuid('approval_chain_step_id')
+    .notNull()
+    .references(() => approvalChain.id),
+  approverId: uuid('approver_id')
+    .notNull()
+    .references(() => users.id),
+  profileId: uuid('profile_id')
+    .references(() => autoApprovalProfiles.id),
+
+  // 决策状态
+  // queued    = 条件满足，等待缓冲期结束
+  // executed  = 缓冲期过后已执行自动审批
+  // cancelled = 审批人在缓冲期内手动取消
+  // skipped   = 风控/规则未命中，不自动处理
+  decision: text('decision').notNull(),
+
+  // 跳过原因（decision=skipped 时）
+  skipReason: text('skip_reason'),
+
+  // 风控检查详情（jsonb）
+  // { amountCheck: true, selfApprovalCheck: true, tenureCheck: false, ... }
+  riskCheckResults: jsonb('risk_check_results').notNull().default({}),
+
+  // 命中的规则名称（decision=queued/executed 时）
+  ruleMatchedName: text('rule_matched_name'),
+  ruleMatchedId: uuid('rule_matched_id'),
+
+  // 缓冲期截止时间（queued/executed 时有值）
+  cancelWindowEndsAt: timestamp('cancel_window_ends_at'),
+
+  // 取消信息
+  cancelledByUserId: uuid('cancelled_by_user_id')
+    .references(() => users.id),
+  cancelledAt: timestamp('cancelled_at'),
+
+  // 最终执行时间
+  executedAt: timestamp('executed_at'),
+
+  // 报销金额快照（便于查询时不用 JOIN）
+  amountUSD: real('amount_usd'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => [
+  index('idx_auto_approval_logs_reimbursement').on(table.reimbursementId),
+  index('idx_auto_approval_logs_approver').on(table.approverId, table.decision),
+  index('idx_auto_approval_logs_queued').on(table.decision, table.cancelWindowEndsAt),
+  index('idx_auto_approval_logs_tenant').on(table.tenantId, table.createdAt),
+]);
+
+/**
+ * 财务自动付款配置表
+ * 租户级别，一个租户一条（或多条，按优先级匹配）
+ */
+export const autoPaymentProfiles = pgTable('auto_payment_profiles', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+  createdByUserId: uuid('created_by_user_id')
+    .notNull()
+    .references(() => users.id),
+
+  isEnabled: boolean('is_enabled').notNull().default(false),
+
+  // 紧急暂停开关（财务可一键暂停所有自动付款）
+  emergencyPause: boolean('emergency_pause').notNull().default(false),
+  emergencyPausedBy: uuid('emergency_paused_by')
+    .references(() => users.id),
+  emergencyPausedAt: timestamp('emergency_paused_at'),
+
+  // 付款条件（jsonb）
+  // {
+  //   maxAmountPerReimbursementUSD: number,  // 单笔上限（≤ $500）
+  //   maxDailyTotalUSD: number,              // 单日总额上限
+  //   minHoursAfterFinalApproval: number,    // 最短等待时间（默认24h）
+  //   requirePolicyPassed: boolean,          // 默认 true
+  //   employeeMinTenureDays: number,         // 员工最短在职天数（默认90）
+  //   allowedDepartmentIds?: string[],
+  //   blockedCategories?: string[],
+  // }
+  conditions: jsonb('conditions').notNull().default({}),
+
+  // 有效期
+  expiresAt: timestamp('expires_at'),
+
+  // 统计
+  totalAutoPaymentCount: integer('total_auto_payment_count').notNull().default(0),
+  totalAutoPaymentUSD: real('total_auto_payment_usd').notNull().default(0),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => [
+  index('idx_auto_payment_profiles_tenant').on(table.tenantId),
+]);
+
+// ============================================================================
 // Relations
 // ============================================================================
 
