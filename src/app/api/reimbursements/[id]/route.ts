@@ -677,10 +677,73 @@ export async function PATCH(
       return apiError('无权操作此报销单', 403);
     }
 
-    // API Key 认证的 Agent 只能操作自己的报销单（提交/撤回），不能审批
+    // API Key 认证的 Agent 请求处理
     const isAgentRequest = authCtx.authType === 'api_key';
     if (isAgentRequest) {
-      // Agent 只能对自己的报销单做 draft→pending 或 pending→draft 的状态变更
+      const isApprovalAction = newStatus === 'approved' || newStatus === 'rejected';
+
+      // 如果是审批操作，检查是否有 approval:approve scope
+      if (isApprovalAction) {
+        const hasApprovalScope = authCtx.apiKey?.scopes.includes(API_SCOPES.APPROVAL_APPROVE);
+        if (!hasApprovalScope) {
+          return apiError('API Key 缺少审批权限 (approval:approve)', 403);
+        }
+
+        // 使用审批链逻辑执行审批
+        const existingChain = await db.query.approvalChain.findMany({
+          where: eq(approvalChain.reimbursementId, id),
+          orderBy: [asc(approvalChain.stepOrder)],
+        });
+
+        if (existingChain.length === 0) {
+          return apiError('该报销单没有审批链，无法通过 API Key 执行审批', 400, 'NO_APPROVAL_CHAIN');
+        }
+
+        try {
+          const action = newStatus === 'approved' ? 'approve' : 'reject';
+          const result = await processApprovalAction(id, authCtx.userId, action, comment || rejectReason);
+
+          const updated = await db.query.reimbursements.findFirst({
+            where: eq(reimbursements.id, id),
+          });
+
+          let paymentResult = null;
+          if (result.completed && result.approved && updated) {
+            paymentResult = await triggerPayment(updated, existing.userId);
+          }
+
+          const updatedChain = await getApprovalChain(id);
+
+          if (authCtx.apiKey) {
+            logAgentAction({
+              tenantId: authCtx.tenantId!,
+              apiKeyId: authCtx.apiKey.id,
+              userId: authCtx.userId,
+              action: `reimbursement:${action}`,
+              method: 'PATCH',
+              path: `/api/reimbursements/${id}`,
+              statusCode: 200,
+              agentType: authCtx.apiKey.agentType,
+              requestSummary: { newStatus, comment },
+              entityType: 'reimbursement',
+              entityId: id,
+            });
+          }
+
+          return NextResponse.json({
+            success: true,
+            data: updated,
+            approvalChain: updatedChain,
+            approvalResult: result,
+            payment: paymentResult,
+          });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : '审批操作失败';
+          return apiError(errorMessage, 400, 'APPROVAL_FAILED');
+        }
+      }
+
+      // 非审批操作：Agent 只能对自己的报销单做 draft→pending 或 pending→draft 的状态变更
       if (existing.userId !== authCtx.userId) {
         return apiError('API Key 只能操作绑定用户的报销单', 403);
       }

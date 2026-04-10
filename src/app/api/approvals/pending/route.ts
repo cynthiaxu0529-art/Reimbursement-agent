@@ -25,7 +25,17 @@ export async function GET(request: NextRequest) {
   const { context } = authResult;
 
   try {
-    // 查询该用户作为审批人、状态为 pending 的审批链步骤
+    // 获取用户角色，用于匹配基于角色的审批步骤
+    const userRoles = context.user.roles || (context.user.role ? [context.user.role] : []);
+
+    // 查询该用户作为审批人（直接指定或通过角色匹配）、状态为 pending 的审批链步骤
+    const approverCondition = userRoles.length > 0
+      ? or(
+          eq(approvalChain.approverId, context.userId),
+          inArray(approvalChain.approverRole, userRoles)
+        )
+      : eq(approvalChain.approverId, context.userId);
+
     const pendingSteps = await db
       .select({
         chainId: approvalChain.id,
@@ -38,8 +48,8 @@ export async function GET(request: NextRequest) {
       .from(approvalChain)
       .where(
         and(
-          eq(approvalChain.approverId, context.userId),
-          eq(approvalChain.status, 'pending')
+          eq(approvalChain.status, 'pending'),
+          approverCondition
         )
       );
 
