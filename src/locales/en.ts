@@ -492,6 +492,9 @@ const en: Translations = {
     batchChangeTo: 'Change to',
     batchApply: 'Batch Apply ({count})',
     batchSuccess: 'Successfully updated {count} item(s)',
+    generating: 'Processing...',
+    selectAll: 'Select All',
+    deselectAll: 'Deselect All',
   },
 
   // Language
