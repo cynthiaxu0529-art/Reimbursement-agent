@@ -357,60 +357,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 安全网 2：检测 Agent 错误地将 CNY 金额标为 USD 提交
-    // 常见表现：currency=USD, exchangeRate=1, vendor 含中文字符 → 实际应该是 CNY
-    // 检测逻辑：如果 currency == 本位币 且 exchangeRate ≈ 1 且 vendor/description 主要由中文/日文/韩文构成
-    //
-    // 注意：必须是"主要由 CJK 构成"（占字母类字符 >30%），而非"含有任意 CJK 字符"。
-    // 否则英文夹杂单个汉字的描述（如 "gas费"）会误触发，把合法的 USD 金额错误换算成 CNY。
-    const isMostlyCJK = (text: string): boolean => {
-      if (!text || text.trim().length === 0) return false;
-      const cjkCount = (text.match(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g) || []).length;
-      const alphaCount = (text.match(/[a-zA-Z\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g) || []).length;
-      return alphaCount > 0 && cjkCount / alphaCount > 0.3;
-    };
-    for (const item of items) {
-      const itemCurrency = (item.currency || '') as string;
-      const itemAmount = parseFloat(item.amount) || 0;
-      const rate = parseFloat(item.exchangeRate) || 0;
-
-      // 条件：标记为本位币(USD) + 汇率为1(或无汇率) + vendor或description主要由中文/日文/韩文构成
-      if (
-        itemCurrency === tenantBaseCurrency &&
-        (rate === 0 || Math.abs(rate - 1) < 0.01) &&
-        itemAmount > 0 &&
-        (isMostlyCJK(item.vendor || '') || isMostlyCJK(item.description || ''))
-      ) {
-        // 高度可疑：本来应该是 CNY 但被标为 USD
-        // 推断实际币种（中文 vendor → CNY，日文 → JPY，韩文 → KRW）
-        const vendorText = (item.vendor || '') + (item.description || '');
-        let actualCurrency: CurrencyType = 'CNY'; // 默认推断为 CNY
-        if (/[\u3040-\u309f\u30a0-\u30ff]/.test(vendorText)) actualCurrency = 'JPY';
-        if (/[\uac00-\ud7af]/.test(vendorText)) actualCurrency = 'KRW';
-
-        console.warn(`[CurrencyAutoFix] Item "${item.vendor || item.description}" submitted as ${tenantBaseCurrency} with rate=${rate}, but vendor contains CJK chars. Correcting to ${actualCurrency}`);
-
-        // 纠正币种并重新转换
-        item.currency = actualCurrency;
-        try {
-          const conversion = await exchangeRateService.convert({
-            amount: itemAmount,
-            fromCurrency: actualCurrency,
-            toCurrency: tenantBaseCurrency as CurrencyType,
-          });
-          item.exchangeRate = conversion.exchangeRate;
-          item.amountInBaseCurrency = conversion.convertedAmount;
-          console.log(`[CurrencyAutoFix] Corrected: ${actualCurrency} ${itemAmount} → ${tenantBaseCurrency} ${conversion.convertedAmount} (rate: ${conversion.exchangeRate})`);
-        } catch (err) {
-          console.error(`[CurrencyAutoFix] Conversion failed, using fallback`, err);
-          const fallbackRates: Record<string, number> = { CNY: 0.138, JPY: 0.0067, KRW: 0.00073 };
-          const fallbackRate = fallbackRates[actualCurrency] || 0.138;
-          item.exchangeRate = fallbackRate;
-          item.amountInBaseCurrency = Math.round(itemAmount * fallbackRate * 100) / 100;
-        }
-      }
-    }
-
     // 服务端字段兼容：将 Agent 可能误传的 quantity/unit 映射为标准 nights 字段
     // OpenClaw 等 Bot 可能传 { quantity: 2, unit: "晚" } 而非 { nights: 2 }
     for (const item of items) {
