@@ -120,39 +120,37 @@ export default function NewReimbursementPage() {
   // 更新费用明细并计算汇率（使用本位币转换 Hook，无需手动指定目标货币）
   const updateLineItemWithExchange = useCallback(
     (id: string, field: keyof LineItem, value: string) => {
-      const item = lineItems.find((i) => i.id === id);
-      if (!item) return;
+      setLineItems((prevItems) => {
+        const item = prevItems.find((i) => i.id === id);
+        if (!item) return prevItems;
 
-      const updatedItem = { ...item, [field]: value };
+        const updatedItem = { ...item, [field]: value };
 
-      // 如果金额或币种变化，重新计算本位币金额
-      if (field === 'amount' || field === 'currency') {
-        const amount = parseFloat(field === 'amount' ? value : item.amount) || 0;
-        const currency = (field === 'currency' ? value : item.currency) as CurrencyType;
+        // 如果金额或币种变化，重新计算本位币金额
+        if (field === 'amount' || field === 'currency') {
+          const amount = parseFloat(field === 'amount' ? value : item.amount) || 0;
+          const currency = (field === 'currency' ? value : item.currency) as CurrencyType;
 
-        if (amount > 0 && currency) {
-          // 使用封装好的本位币转换，无需手动指定目标货币
-          const conversion = convertToBase(amount, currency);
+          if (amount > 0 && currency) {
+            // 使用封装好的本位币转换，无需手动指定目标货币
+            const conversion = convertToBase(amount, currency);
 
-          if (conversion.success) {
-            updatedItem.exchangeRate = conversion.rate;
-            updatedItem.amountInUSD = conversion.amount;
-          } else {
-            // 汇率获取失败，显示警告
-            updatedItem.exchangeRate = undefined;
-            updatedItem.amountInUSD = undefined;
-            console.warn(conversion.error);
-            // 显示用户提示
-            alert(`汇率警告：${conversion.error}`);
+            if (conversion.success) {
+              updatedItem.exchangeRate = conversion.rate;
+              updatedItem.amountInUSD = conversion.amount;
+            } else {
+              // 汇率获取失败，清除换算结果并记录警告
+              updatedItem.exchangeRate = undefined;
+              updatedItem.amountInUSD = undefined;
+              console.warn(conversion.error);
+            }
           }
         }
-      }
 
-      setLineItems((prevItems) =>
-        prevItems.map((i) => (i.id === id ? updatedItem : i))
-      );
+        return prevItems.map((i) => (i.id === id ? updatedItem : i));
+      });
     },
-    [lineItems, convertToBase]
+    [convertToBase]
   );
 
   // 从 sessionStorage 读取 OCR 数据并预填表单
@@ -502,8 +500,8 @@ export default function NewReimbursementPage() {
   };
 
   const addLineItem = () => {
-    setLineItems([
-      ...lineItems,
+    setLineItems(prevItems => [
+      ...prevItems,
       {
         id: Date.now().toString(),
         description: '',
@@ -517,13 +515,16 @@ export default function NewReimbursementPage() {
   };
 
   const removeLineItem = (id: string) => {
-    if (lineItems.length > 1) {
-      setLineItems(lineItems.filter(item => item.id !== id));
-    }
+    setLineItems(prevItems => {
+      if (prevItems.length > 1) {
+        return prevItems.filter(item => item.id !== id);
+      }
+      return prevItems;
+    });
   };
 
   const updateLineItem = (id: string, field: keyof LineItem, value: string) => {
-    setLineItems(lineItems.map(item =>
+    setLineItems(prevItems => prevItems.map(item =>
       item.id === id ? { ...item, [field]: value } : item
     ));
   };
@@ -551,7 +552,7 @@ export default function NewReimbursementPage() {
   // 更新酒店入住信息
   const updateHotelDates = (id: string, checkIn: string, checkOut: string) => {
     const nights = calculateNights(checkIn, checkOut);
-    setLineItems(lineItems.map(item =>
+    setLineItems(prevItems => prevItems.map(item =>
       item.id === id ? { ...item, checkInDate: checkIn, checkOutDate: checkOut, nights, date: checkIn } : item
     ));
   };
