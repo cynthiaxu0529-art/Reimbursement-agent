@@ -100,32 +100,33 @@ export default function EditReimbursementPage() {
   // 更新费用明细并计算汇率
   const updateLineItemWithExchange = useCallback(
     (id: string, field: keyof LineItem, value: string) => {
-      const item = lineItems.find(i => i.id === id);
-      if (!item) return;
+      setLineItems(prevItems => {
+        const item = prevItems.find(i => i.id === id);
+        if (!item) return prevItems;
 
-      const updatedItem = { ...item, [field]: value };
+        const updatedItem = { ...item, [field]: value };
 
-      if (field === 'amount' || field === 'currency') {
-        const amount = parseFloat(field === 'amount' ? value : item.amount) || 0;
-        const currency = (field === 'currency' ? value : item.currency) as CurrencyType;
+        if (field === 'amount' || field === 'currency') {
+          const amount = parseFloat(field === 'amount' ? value : item.amount) || 0;
+          const currency = (field === 'currency' ? value : item.currency) as CurrencyType;
 
-        if (amount > 0 && currency) {
-          const conversion = convertToBase(amount, currency);
-          if (conversion.success) {
-            updatedItem.exchangeRate = conversion.rate;
-            updatedItem.amountInUSD = conversion.amount;
-          } else {
-            updatedItem.exchangeRate = undefined;
-            updatedItem.amountInUSD = undefined;
+          if (amount > 0 && currency) {
+            const conversion = convertToBase(amount, currency);
+            if (conversion.success) {
+              updatedItem.exchangeRate = conversion.rate;
+              updatedItem.amountInUSD = conversion.amount;
+            } else {
+              updatedItem.exchangeRate = undefined;
+              updatedItem.amountInUSD = undefined;
+              console.warn(conversion.error);
+            }
           }
         }
-      }
 
-      setLineItems(prevItems =>
-        prevItems.map(i => i.id === id ? updatedItem : i)
-      );
+        return prevItems.map(i => i.id === id ? updatedItem : i);
+      });
     },
-    [lineItems, convertToBase]
+    [convertToBase]
   );
 
   // ============== OCR / Upload helpers ==============
@@ -416,8 +417,8 @@ export default function EditReimbursementPage() {
   // ============== Item CRUD ==============
 
   const addLineItem = () => {
-    setLineItems([
-      ...lineItems,
+    setLineItems(prevItems => [
+      ...prevItems,
       {
         id: Date.now().toString(),
         description: '',
@@ -431,13 +432,16 @@ export default function EditReimbursementPage() {
   };
 
   const removeLineItem = (id: string) => {
-    if (lineItems.length > 1) {
-      setLineItems(lineItems.filter(item => item.id !== id));
-    }
+    setLineItems(prevItems => {
+      if (prevItems.length > 1) {
+        return prevItems.filter(item => item.id !== id);
+      }
+      return prevItems;
+    });
   };
 
   const updateLineItem = (id: string, field: keyof LineItem, value: string) => {
-    setLineItems(lineItems.map(item =>
+    setLineItems(prevItems => prevItems.map(item =>
       item.id === id ? { ...item, [field]: value } : item
     ));
   };
