@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems, users, departments, correctionApplications, expenseCorrections } from '@/lib/db/schema';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, and } from 'drizzle-orm';
 import { getUserRoles } from '@/lib/auth/roles';
 import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
 import { ensureAccountsSynced } from '@/lib/accounting/chart-of-accounts-sync';
@@ -96,14 +96,19 @@ export async function GET(request: NextRequest) {
     }
 
     const userRoles = getUserRoles(currentUser);
-    const hasAccess = userRoles.some(r => ['finance', 'super_admin'].includes(r));
+    const hasAccess = userRoles.some(r => ['finance', 'super_admin', 'admin'].includes(r));
     if (!hasAccess) {
-      return NextResponse.json({ error: '需要财务权限' }, { status: 403 });
+      return NextResponse.json({ error: '需要财务或管理员权限' }, { status: 403 });
+    }
+
+    const tenantId = currentUser.tenantId;
+    if (!tenantId) {
+      return NextResponse.json({ error: '用户未关联公司' }, { status: 403 });
     }
 
     await ensureAccountsSynced();
 
-    // 获取已审批 + 已付款的报销
+    // 获取已审批 + 已付款的报销（按 tenant 隔离）
     const approvedReimbs = await db
       .select({
         id: reimbursements.id,
@@ -113,7 +118,7 @@ export async function GET(request: NextRequest) {
         title: reimbursements.title,
       })
       .from(reimbursements)
-      .where(eq(reimbursements.status, 'approved'));
+      .where(and(eq(reimbursements.status, 'approved'), eq(reimbursements.tenantId, tenantId)));
 
     const paidReimbs = await db
       .select({
@@ -124,7 +129,7 @@ export async function GET(request: NextRequest) {
         title: reimbursements.title,
       })
       .from(reimbursements)
-      .where(eq(reimbursements.status, 'paid'));
+      .where(and(eq(reimbursements.status, 'paid'), eq(reimbursements.tenantId, tenantId)));
 
     const allReimbs = [...approvedReimbs, ...paidReimbs];
 
@@ -137,14 +142,14 @@ export async function GET(request: NextRequest) {
 
     const userIds = [...new Set(allReimbs.map(r => r.userId))];
     const userRecords = userIds.length > 0
-      ? await db.select({ id: users.id, name: users.name, departmentId: users.departmentId, department: users.department }).from(users).where(inArray(users.id, userIds))
+      ? await db.select({ id: users.id, name: users.name, departmentId: users.departmentId, department: users.department }).from(users).where(and(inArray(users.id, userIds), eq(users.tenantId, tenantId)))
       : [];
     const userMap = new Map(userRecords.map((u: { id: string; name: string }) => [u.id, u.name]));
 
     // 查询部门信息（名称 + costCenter）
     const deptIds = [...new Set(userRecords.map(u => u.departmentId).filter(Boolean))] as string[];
     const deptRecords = deptIds.length > 0
-      ? await db.select({ id: departments.id, name: departments.name, costCenter: departments.costCenter }).from(departments).where(inArray(departments.id, deptIds))
+      ? await db.select({ id: departments.id, name: departments.name, costCenter: departments.costCenter }).from(departments).where(and(inArray(departments.id, deptIds), eq(departments.tenantId, tenantId)))
       : [];
     const deptMap = new Map(deptRecords.map(d => [d.id, { name: d.name, costCenter: d.costCenter }]));
 
@@ -220,14 +225,17 @@ export async function GET(request: NextRequest) {
       group.recordCount += 1;
     }
 
-    // 查询所有冲差抵扣记录，补充调整分录
+    // 查询冲差抵扣记录（按 tenant 隔离）
     const allApplications = await db
       .select({
         application: correctionApplications,
         correction: expenseCorrections,
       })
       .from(correctionApplications)
-      .innerJoin(expenseCorrections, eq(correctionApplications.correctionId, expenseCorrections.id));
+      .innerJoin(expenseCorrections, and(
+        eq(correctionApplications.correctionId, expenseCorrections.id),
+        eq(expenseCorrections.tenantId, tenantId)
+      ));
 
     for (const row of allApplications) {
       const { application, correction } = row;
