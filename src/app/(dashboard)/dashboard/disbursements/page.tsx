@@ -209,8 +209,9 @@ export default function DisbursementsPage() {
   }, [router]);
 
   useEffect(() => {
-    fetchReimbursements();
-    fetchPaymentStats();
+    // 先加载列表（会同步更新统计卡片），再异步刷新 stats API
+    // 顺序执行避免 stats API 覆盖列表推算出的正确数值
+    fetchReimbursements().then(() => fetchPaymentStats());
   }, [activeTab]);
 
   const fetchPaymentStats = async () => {
