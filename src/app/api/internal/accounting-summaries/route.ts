@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems, users, departments, correctionApplications, expenseCorrections } from '@/lib/db/schema';
-import { eq, inArray, and } from 'drizzle-orm';
+import { eq, inArray, and, or, isNull } from 'drizzle-orm';
 import { getUserRoles } from '@/lib/auth/roles';
 import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
 import { ensureAccountsSynced } from '@/lib/accounting/chart-of-accounts-sync';
@@ -108,6 +108,23 @@ export async function GET(request: NextRequest) {
 
     await ensureAccountsSynced();
 
+    // 获取同租户用户 ID 列表，用于包含 tenantId=null 的历史游离报销
+    const tenantUserIds = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.tenantId, tenantId))
+      .then(rows => rows.map(r => r.id));
+
+    // 报销归属条件：
+    //   1. 直接归属该租户（tenantId 匹配）
+    //   2. 或：游离报销（tenantId=null）但提交人属于该租户（历史数据兼容）
+    const reimbTenantCondition = tenantUserIds.length > 0
+      ? or(
+          eq(reimbursements.tenantId, tenantId),
+          and(isNull(reimbursements.tenantId), inArray(reimbursements.userId, tenantUserIds))
+        )
+      : eq(reimbursements.tenantId, tenantId);
+
     // 获取已审批 + 已付款的报销（按 tenant 隔离）
     const approvedReimbs = await db
       .select({
@@ -118,7 +135,7 @@ export async function GET(request: NextRequest) {
         title: reimbursements.title,
       })
       .from(reimbursements)
-      .where(and(eq(reimbursements.status, 'approved'), eq(reimbursements.tenantId, tenantId)));
+      .where(and(eq(reimbursements.status, 'approved'), reimbTenantCondition));
 
     const paidReimbs = await db
       .select({
@@ -129,7 +146,7 @@ export async function GET(request: NextRequest) {
         title: reimbursements.title,
       })
       .from(reimbursements)
-      .where(and(eq(reimbursements.status, 'paid'), eq(reimbursements.tenantId, tenantId)));
+      .where(and(eq(reimbursements.status, 'paid'), reimbTenantCondition));
 
     const allReimbs = [...approvedReimbs, ...paidReimbs];
 

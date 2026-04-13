@@ -272,6 +272,27 @@ export default function DisbursementsPage() {
 
         setReimbursements(data);
 
+        // 用列表实际数据同步统计卡片，避免 stats API 静默失败时显示 $0
+        if (activeTab === 'ready') {
+          const pendingTotal = data.reduce(
+            (sum: number, r: Reimbursement) => sum + (r.totalAmountInBaseCurrency || r.totalAmount || 0),
+            0
+          );
+          setPaymentStats(prev => ({
+            ...prev,
+            pendingCount: data.length,
+            pendingTotal,
+          }));
+        } else if (activeTab === 'processing') {
+          setPaymentStats(prev => ({ ...prev, processingCount: data.length }));
+        } else if (activeTab === 'history') {
+          const paidItems = data.filter((r: Reimbursement) => r.status === 'paid');
+          setPaymentStats(prev => ({
+            ...prev,
+            totalPaidCount: paidItems.length,
+          }));
+        }
+
         // 从报销单的 aiSuggestions 中读取已保存的自定义打款金额
         const savedAmounts: Record<string, number> = {};
         for (const item of data) {

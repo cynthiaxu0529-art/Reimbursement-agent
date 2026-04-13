@@ -114,6 +114,10 @@ export default function DashboardLayout({
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState<string>('');
   const [userEmail, setUserEmail] = useState<string>('');
+  const [hasTenant, setHasTenant] = useState<boolean>(true);
+  const [setupCompanyName, setSetupCompanyName] = useState<string>('');
+  const [settingUpCompany, setSettingUpCompany] = useState<boolean>(false);
+  const [setupError, setSetupError] = useState<string>('');
   const { t } = useLanguage();
 
   // 初始化：从数据库获取角色数组和用户信息
@@ -142,6 +146,11 @@ export default function DashboardLayout({
         if (meResult.success && meResult.data) {
           setUserName(meResult.data.name || '');
           setUserEmail(meResult.data.email || '');
+          // 检查是否已关联公司
+          setHasTenant(!!meResult.data.tenantId);
+          if (!meResult.data.tenantId) {
+            setSetupCompanyName(meResult.data.name ? `${meResult.data.name}的公司` : '');
+          }
         }
       } catch {
         setRoles(['employee']);
@@ -171,6 +180,31 @@ export default function DashboardLayout({
     return t.roles[key] || role;
   };
   const roleLabels = roles.map(r => getRoleLabel(r)).filter(Boolean).join(' / ');
+
+  const handleCreateCompany = async () => {
+    if (!setupCompanyName.trim()) return;
+    setSettingUpCompany(true);
+    setSetupError('');
+    try {
+      const res = await fetch('/api/setup/create-company', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyName: setupCompanyName.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setHasTenant(true);
+        // 刷新页面使所有统计数据重新加载
+        window.location.reload();
+      } else {
+        setSetupError(data.error || '创建失败，请重试');
+      }
+    } catch {
+      setSetupError('网络错误，请重试');
+    } finally {
+      setSettingUpCompany(false);
+    }
+  };
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
@@ -371,6 +405,68 @@ export default function DashboardLayout({
             )}
           </div>
         </header>
+
+        {/* 无公司提示 Banner */}
+        {!loading && !hasTenant && (
+          <div style={{
+            margin: '1.5rem',
+            padding: '1.5rem',
+            backgroundColor: '#fff7ed',
+            border: '1px solid #fed7aa',
+            borderRadius: '0.75rem',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+              <span style={{ fontSize: '1.5rem', flexShrink: 0 }}>🏢</span>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontWeight: 600, color: '#9a3412', marginBottom: '0.25rem', fontSize: '0.9375rem' }}>
+                  您的账号尚未关联公司
+                </p>
+                <p style={{ color: '#c2410c', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                  统计数据、记账汇总等功能需要关联公司后才能正常使用。请填写公司名称完成初始化，或联系管理员通过邀请链接加入已有公司。
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    value={setupCompanyName}
+                    onChange={(e) => setSetupCompanyName(e.target.value)}
+                    placeholder="输入公司名称"
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateCompany()}
+                    style={{
+                      padding: '0.5rem 0.875rem',
+                      border: '1px solid #fed7aa',
+                      borderRadius: '0.5rem',
+                      fontSize: '0.875rem',
+                      outline: 'none',
+                      width: '200px',
+                      backgroundColor: 'white',
+                    }}
+                  />
+                  <button
+                    onClick={handleCreateCompany}
+                    disabled={!setupCompanyName.trim() || settingUpCompany}
+                    style={{
+                      padding: '0.5rem 1.25rem',
+                      backgroundColor: settingUpCompany || !setupCompanyName.trim() ? '#d1d5db' : '#ea580c',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '0.5rem',
+                      fontSize: '0.875rem',
+                      fontWeight: 500,
+                      cursor: settingUpCompany || !setupCompanyName.trim() ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {settingUpCompany ? '创建中...' : '创建公司'}
+                  </button>
+                </div>
+                {setupError && (
+                  <p style={{ color: '#dc2626', fontSize: '0.8125rem', marginTop: '0.5rem' }}>
+                    {setupError}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Page content */}
         <main style={{ padding: '1.5rem' }}>
