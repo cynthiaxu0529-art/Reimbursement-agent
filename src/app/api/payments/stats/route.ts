@@ -15,22 +15,26 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const session = await auth();
-    if (!session?.user?.tenantId) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
 
-    // 从数据库查询用户角色和 tenantId（与列表 API 保持一致，避免 session JWT 过期导致 tenantId 不准）
+    // 从数据库查询用户角色和 tenantId（以 DB 为准，避免 JWT 缓存导致 tenantId 过期或为空）
     const [currentUser] = await db.select({ role: users.role, roles: users.roles, tenantId: users.tenantId })
       .from(users)
       .where(eq(users.id, session.user.id))
       .limit(1);
 
-    const userRoles = getUserRoles(currentUser || {});
+    if (!currentUser) {
+      return NextResponse.json({ error: '用户不存在' }, { status: 401 });
+    }
+
+    const userRoles = getUserRoles(currentUser);
     if (!canProcessPayment(userRoles)) {
       return NextResponse.json({ error: '没有权限查看付款统计' }, { status: 403 });
     }
 
-    const tenantId = currentUser?.tenantId || session.user.tenantId;
+    const tenantId = currentUser.tenantId;
     if (!tenantId) {
       return NextResponse.json({ error: '无法获取租户信息' }, { status: 400 });
     }
