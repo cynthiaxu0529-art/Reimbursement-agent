@@ -106,7 +106,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '用户未关联公司' }, { status: 403 });
     }
 
-    await ensureAccountsSynced();
+    await ensureAccountsSynced().catch(err => {
+      // 科目同步失败不影响汇总数据展示，仅记录警告
+      console.warn('[accounting-summaries] ensureAccountsSynced failed (non-blocking):', err?.message);
+    });
 
     // 获取同租户用户 ID 列表，用于包含 tenantId=null 的历史游离报销
     const tenantUserIds = await db
@@ -151,7 +154,8 @@ export async function GET(request: NextRequest) {
     const allReimbs = [...approvedReimbs, ...paidReimbs];
 
     if (allReimbs.length === 0) {
-      return NextResponse.json({ success: true, summaries: [] });
+      console.log(`[accounting-summaries] tenantId=${tenantId}, tenantUserIds=${tenantUserIds.length}, approvedReimbs=0, paidReimbs=0`);
+      return NextResponse.json({ success: true, summaries: [], _debug: { tenantId, tenantUserCount: tenantUserIds.length, approvedCount: 0, paidCount: 0 } });
     }
 
     const reimbIds = allReimbs.map(r => r.id);
@@ -159,7 +163,7 @@ export async function GET(request: NextRequest) {
 
     const userIds = [...new Set(allReimbs.map(r => r.userId))];
     const userRecords = userIds.length > 0
-      ? await db.select({ id: users.id, name: users.name, departmentId: users.departmentId, department: users.department }).from(users).where(and(inArray(users.id, userIds), eq(users.tenantId, tenantId)))
+      ? await db.select({ id: users.id, name: users.name, departmentId: users.departmentId, department: users.department }).from(users).where(inArray(users.id, userIds))
       : [];
     const userMap = new Map(userRecords.map((u: { id: string; name: string }) => [u.id, u.name]));
 
