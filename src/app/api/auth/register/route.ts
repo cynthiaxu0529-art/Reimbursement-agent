@@ -27,6 +27,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 非邀请注册必须提供公司名称，防止创建游离用户（tenantId=null）
+    if (!inviteToken && !companyName?.trim()) {
+      return NextResponse.json(
+        { error: '请填写公司名称，或使用邀请链接加入已有公司' },
+        { status: 400 }
+      );
+    }
+
     // 检查邮箱是否已存在
     const existingUser = await db.query.users.findFirst({
       where: eq(users.email, email),
