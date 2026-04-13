@@ -17,6 +17,8 @@ interface ReimbursementItem {
   receiptUrl?: string;
   receiptFileName?: string;
   vendor?: string;
+  coaCode?: string;
+  coaName?: string;
 }
 
 interface Reimbursement {
@@ -44,15 +46,40 @@ interface Reimbursement {
 }
 
 const categoryLabels: Record<string, { label: string; icon: string; color: string }> = {
+  // 差旅费
   flight: { label: '机票', icon: '✈️', color: '#3b82f6' },
   train: { label: '火车票', icon: '🚄', color: '#8b5cf6' },
   hotel: { label: '酒店住宿', icon: '🏨', color: '#f59e0b' },
   meal: { label: '餐饮', icon: '🍽️', color: '#ef4444' },
-  taxi: { label: '交通', icon: '🚕', color: '#10b981' },
+  taxi: { label: '市内交通', icon: '🚕', color: '#10b981' },
+  car_rental: { label: '租车', icon: '🚗', color: '#06b6d4' },
+  fuel: { label: '燃油费', icon: '⛽', color: '#f97316' },
+  parking: { label: '停车费', icon: '🅿️', color: '#64748b' },
+  toll: { label: '过路费', icon: '🛣️', color: '#78716c' },
+  // 办公费
   office_supplies: { label: '办公用品', icon: '📎', color: '#6b7280' },
+  equipment: { label: '设备采购', icon: '🖥️', color: '#4f46e5' },
+  software: { label: '软件订阅', icon: '💿', color: '#7c3aed' },
+  // 技术费用
   ai_token: { label: 'AI 服务', icon: '🤖', color: '#8b5cf6' },
   cloud_resource: { label: '云资源', icon: '☁️', color: '#0ea5e9' },
+  api_service: { label: 'API 服务', icon: '🔌', color: '#0284c7' },
+  hosting: { label: '托管服务', icon: '🖧', color: '#0891b2' },
+  domain: { label: '域名费', icon: '🌐', color: '#0e7490' },
+  // 行政费用
+  admin_general: { label: '行政综合', icon: '🏢', color: '#6b7280' },
+  courier: { label: '快递费', icon: '📦', color: '#92400e' },
+  printing: { label: '打印复印', icon: '🖨️', color: '#78716c' },
+  phone: { label: '通讯费', icon: '📱', color: '#16a34a' },
+  internet: { label: '网络费', icon: '📡', color: '#0891b2' },
+  utilities: { label: '水电费', icon: '💡', color: '#ca8a04' },
+  // 业务费用
   client_entertainment: { label: '客户招待', icon: '🤝', color: '#f97316' },
+  marketing: { label: '市场推广', icon: '📢', color: '#db2777' },
+  training: { label: '培训费', icon: '📚', color: '#7c3aed' },
+  conference: { label: '会议费', icon: '🎤', color: '#2563eb' },
+  membership: { label: '会员订阅', icon: '🏷️', color: '#0f766e' },
+  // 其他
   other: { label: '其他', icon: '📦', color: '#6b7280' },
 };
 
@@ -87,6 +114,17 @@ export default function DisbursementsPage() {
   const [reversalAmount, setReversalAmount] = useState<number | ''>('');
   const [reversalCategory, setReversalCategory] = useState('full');
   const [reversalProcessing, setReversalProcessing] = useState(false);
+
+  // 财务调整入账科目相关状态
+  const [adjustingItem, setAdjustingItem] = useState<{
+    reimbursementId: string;
+    itemId: string;
+    currentCategory: string;
+    currentCoaCode?: string;
+    currentCoaName?: string;
+  } | null>(null);
+  const [adjustNewCategory, setAdjustNewCategory] = useState('');
+  const [adjusting, setAdjusting] = useState(false);
 
   // 预览附件：将base64 data URL转为Blob URL以提高渲染性能；PDF直接在新标签页打开
   const handlePreviewReceipt = (url: string | null | undefined) => {
@@ -630,6 +668,50 @@ export default function DisbursementsPage() {
     }
   };
 
+  const handleAdjustCategory = async () => {
+    if (!adjustingItem || !adjustNewCategory) return;
+    setAdjusting(true);
+    try {
+      const response = await fetch(
+        `/api/reimbursements/${adjustingItem.reimbursementId}/items/${adjustingItem.itemId}/adjust-category`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category: adjustNewCategory }),
+        }
+      );
+      const result = await response.json();
+      if (result.success) {
+        // 本地更新：避免重新拉取整个列表
+        setReimbursements((prev) =>
+          prev.map((r) => {
+            if (r.id !== adjustingItem.reimbursementId) return r;
+            return {
+              ...r,
+              items: r.items.map((it) => {
+                if (it.id !== adjustingItem.itemId) return it;
+                return {
+                  ...it,
+                  category: result.data.category,
+                  coaCode: result.data.coaCode,
+                  coaName: result.data.coaName,
+                };
+              }),
+            };
+          })
+        );
+        setAdjustingItem(null);
+        setAdjustNewCategory('');
+      } else {
+        alert(result.error || '调整科目失败');
+      }
+    } catch {
+      alert('调整科目失败，请重试');
+    } finally {
+      setAdjusting(false);
+    }
+  };
+
   const toggleSelect = (id: string) => {
     setSelectedIds(prev =>
       prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]
@@ -1122,9 +1204,9 @@ export default function DisbursementsPage() {
                                   <div className="text-sm text-gray-900">
                                     {lineItem.description || catInfo.label}
                                   </div>
-                                  <div>
+                                  <div className="flex flex-col gap-1">
                                     <span
-                                      className="text-xs px-2 py-1 rounded-full"
+                                      className="text-xs px-2 py-1 rounded-full inline-block w-fit"
                                       style={{
                                         backgroundColor: `${catInfo.color}15`,
                                         color: catInfo.color
@@ -1132,6 +1214,25 @@ export default function DisbursementsPage() {
                                     >
                                       {catInfo.label}
                                     </span>
+                                    {lineItem.coaCode && (
+                                      <span className="text-xs text-gray-400 pl-1">{lineItem.coaCode}</span>
+                                    )}
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setAdjustingItem({
+                                          reimbursementId: item.id,
+                                          itemId: lineItem.id,
+                                          currentCategory: lineItem.category,
+                                          currentCoaCode: lineItem.coaCode,
+                                          currentCoaName: lineItem.coaName,
+                                        });
+                                        setAdjustNewCategory(lineItem.category);
+                                      }}
+                                      className="text-xs text-blue-500 hover:text-blue-700 text-left pl-1 leading-tight"
+                                    >
+                                      调整科目
+                                    </button>
                                   </div>
                                   <div className="text-right text-sm font-medium text-gray-900">
                                     ${itemUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
@@ -1452,6 +1553,124 @@ export default function DisbursementsPage() {
         )}
       </Card>
       </>)}
+
+      {/* 财务调整入账科目 Modal */}
+      {adjustingItem && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center" style={{ zIndex: 9998 }}>
+          <div className="bg-white rounded-xl shadow-2xl w-[520px] max-w-[90vw] p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">调整会计入账科目</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              财务可对已审批报销单的费用行调整入账分类，调整后系统自动匹配对应科目代码。
+            </p>
+
+            <div className="space-y-4">
+              {/* 当前科目 */}
+              <div className="p-3 bg-gray-50 rounded-lg text-sm space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">当前分类</span>
+                  <span className="font-medium">
+                    {categoryLabels[adjustingItem.currentCategory]?.label || adjustingItem.currentCategory}
+                  </span>
+                </div>
+                {adjustingItem.currentCoaCode && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">当前科目代码</span>
+                    <span className="font-mono text-xs text-gray-700">{adjustingItem.currentCoaCode}</span>
+                  </div>
+                )}
+                {adjustingItem.currentCoaName && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">当前科目名称</span>
+                    <span className="text-gray-700">{adjustingItem.currentCoaName}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* 新分类选择 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  调整为 <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={adjustNewCategory}
+                  onChange={(e) => setAdjustNewCategory(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <optgroup label="差旅费 (6601)">
+                    <option value="flight">机票 — 6601.01</option>
+                    <option value="train">火车票 — 6601.02</option>
+                    <option value="hotel">酒店住宿 — 6601.03</option>
+                    <option value="meal">餐饮 — 6601.04</option>
+                    <option value="taxi">市内交通 — 6601.05</option>
+                    <option value="car_rental">租车 — 6601.06</option>
+                    <option value="fuel">燃油费 — 6601.07</option>
+                    <option value="parking">停车费 — 6601.08</option>
+                    <option value="toll">过路费 — 6601.09</option>
+                  </optgroup>
+                  <optgroup label="办公费 (6602)">
+                    <option value="office_supplies">办公用品 — 6602.01</option>
+                    <option value="equipment">设备采购 — 6602.02</option>
+                    <option value="software">软件订阅 — 6602.03</option>
+                  </optgroup>
+                  <optgroup label="技术费用 (6603)">
+                    <option value="ai_token">AI 服务 — 6603.01</option>
+                    <option value="cloud_resource">云资源 — 6603.02</option>
+                    <option value="api_service">API 服务 — 6603.03</option>
+                    <option value="hosting">托管服务 — 6603.04</option>
+                    <option value="domain">域名费 — 6603.05</option>
+                  </optgroup>
+                  <optgroup label="行政费用 (6604)">
+                    <option value="admin_general">行政综合 — 6604.01</option>
+                    <option value="courier">快递费 — 6604.02</option>
+                    <option value="printing">打印复印 — 6604.03</option>
+                    <option value="phone">通讯费 — 6604.04</option>
+                    <option value="internet">网络费 — 6604.05</option>
+                    <option value="utilities">水电费 — 6604.06</option>
+                  </optgroup>
+                  <optgroup label="业务费用 (6605)">
+                    <option value="client_entertainment">客户招待 — 6605.01</option>
+                    <option value="marketing">市场推广 — 6605.02</option>
+                    <option value="training">培训费 — 6605.03</option>
+                    <option value="conference">会议费 — 6605.04</option>
+                    <option value="membership">会员订阅 — 6605.05</option>
+                  </optgroup>
+                  <optgroup label="其他 (6699)">
+                    <option value="other">其他费用 — 6699.01</option>
+                  </optgroup>
+                </select>
+              </div>
+
+              {/* 调整后科目预览 */}
+              {adjustNewCategory && adjustNewCategory !== adjustingItem.currentCategory && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+                  <p className="text-blue-700 font-medium mb-1">调整后入账科目</p>
+                  <p className="text-blue-600">
+                    {categoryLabels[adjustNewCategory]?.label || adjustNewCategory}
+                  </p>
+                </div>
+              )}
+
+              {/* 按钮 */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => { setAdjustingItem(null); setAdjustNewCategory(''); }}
+                  disabled={adjusting}
+                  className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleAdjustCategory}
+                  disabled={!adjustNewCategory || adjustNewCategory === adjustingItem.currentCategory || adjusting}
+                  className="flex-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                >
+                  {adjusting ? '保存中...' : '确认调整'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Reversal Confirmation Modal */}
       {reversalTarget && (
