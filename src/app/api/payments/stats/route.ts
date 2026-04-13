@@ -19,8 +19,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
 
-    // 权限检查：从数据库查询当前用户角色
-    const [currentUser] = await db.select({ role: users.role, roles: users.roles })
+    // 从数据库查询用户角色和 tenantId（与列表 API 保持一致，避免 session JWT 过期导致 tenantId 不准）
+    const [currentUser] = await db.select({ role: users.role, roles: users.roles, tenantId: users.tenantId })
       .from(users)
       .where(eq(users.id, session.user.id))
       .limit(1);
@@ -30,7 +30,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '没有权限查看付款统计' }, { status: 403 });
     }
 
-    const tenantId = session.user.tenantId;
+    const tenantId = currentUser?.tenantId || session.user.tenantId;
+    if (!tenantId) {
+      return NextResponse.json({ error: '无法获取租户信息' }, { status: 400 });
+    }
 
     // 获取今天的开始和结束时间（UTC）
     const now = new Date();
