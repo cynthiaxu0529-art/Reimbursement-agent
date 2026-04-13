@@ -209,8 +209,9 @@ export default function DisbursementsPage() {
   }, [router]);
 
   useEffect(() => {
-    fetchReimbursements();
-    fetchPaymentStats();
+    // 先加载列表（会同步更新统计卡片），再异步刷新 stats API
+    // 顺序执行避免 stats API 覆盖列表推算出的正确数值
+    fetchReimbursements().then(() => fetchPaymentStats());
   }, [activeTab]);
 
   const fetchPaymentStats = async () => {
@@ -227,12 +228,17 @@ export default function DisbursementsPage() {
 
   const fetchReimbursements = async () => {
     setLoading(true);
+    setReimbursements([]); // 切换 tab 时立即清空，防止旧数据残留
     try {
       let status = 'approved';
       if (activeTab === 'processing') status = 'processing';
       if (activeTab === 'history') status = 'paid,reversed';
 
       const response = await fetch(`/api/reimbursements?status=${status}&role=finance`);
+      if (!response.ok) {
+        console.error('[disbursements] API error:', response.status);
+        return;
+      }
       const result = await response.json();
       if (result.success) {
         let data = result.data || [];

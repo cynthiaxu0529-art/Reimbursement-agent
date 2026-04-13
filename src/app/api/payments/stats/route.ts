@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { reimbursements, advances, users } from '@/lib/db/schema';
-import { eq, and, sql, gte, lt } from 'drizzle-orm';
+import { eq, and, sql, gte, lt, or, isNull, inArray } from 'drizzle-orm';
 import { getUserRoles, canProcessPayment } from '@/lib/auth/roles';
 
 export const dynamic = 'force-dynamic';
@@ -45,6 +45,21 @@ export async function GET(request: NextRequest) {
     const todayEnd = new Date(todayStart);
     todayEnd.setDate(todayEnd.getDate() + 1);
 
+    // 同租户用户 ID 列表（用于包含 tenantId=null 的历史游离报销）
+    const tenantUserIds = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.tenantId, tenantId))
+      .then(rows => rows.map(r => r.id));
+
+    // 报销归属条件：直接归属该租户，或游离报销（tenantId=null）但提交人属于同租户
+    const reimbTenantCondition = tenantUserIds.length > 0
+      ? or(
+          eq(reimbursements.tenantId, tenantId),
+          and(isNull(reimbursements.tenantId), inArray(reimbursements.userId, tenantUserIds))
+        )
+      : eq(reimbursements.tenantId, tenantId);
+
     // 查询待付款（approved）的报销单数量和总额
     const pendingResult = await db.select({
       count: sql<number>`count(*)::int`,
@@ -52,7 +67,7 @@ export async function GET(request: NextRequest) {
     })
       .from(reimbursements)
       .where(and(
-        eq(reimbursements.tenantId, tenantId),
+        reimbTenantCondition,
         eq(reimbursements.status, 'approved')
       ));
 
@@ -75,10 +90,7 @@ export async function GET(request: NextRequest) {
       count: sql<number>`count(*)::int`,
     })
       .from(reimbursements)
-      .where(and(
-        eq(reimbursements.tenantId, tenantId),
-        eq(reimbursements.status, 'processing')
-      ));
+      .where(and(reimbTenantCondition, eq(reimbursements.status, 'processing')));
 
     const processingCount = processingResult[0]?.count || 0;
 
@@ -87,10 +99,7 @@ export async function GET(request: NextRequest) {
       count: sql<number>`count(*)::int`,
     })
       .from(reimbursements)
-      .where(and(
-        eq(reimbursements.tenantId, tenantId),
-        eq(reimbursements.status, 'paid')
-      ));
+      .where(and(reimbTenantCondition, eq(reimbursements.status, 'paid')));
 
     const totalPaidCount = totalPaidResult[0]?.count || 0;
 
@@ -100,7 +109,7 @@ export async function GET(request: NextRequest) {
     })
       .from(reimbursements)
       .where(and(
-        eq(reimbursements.tenantId, tenantId),
+        reimbTenantCondition,
         eq(reimbursements.status, 'paid'),
         gte(reimbursements.paidAt, todayStart),
         lt(reimbursements.paidAt, todayEnd)
@@ -113,10 +122,7 @@ export async function GET(request: NextRequest) {
       count: sql<number>`count(*)::int`,
     })
       .from(reimbursements)
-      .where(and(
-        eq(reimbursements.tenantId, tenantId),
-        eq(reimbursements.status, 'reversed')
-      ));
+      .where(and(reimbTenantCondition, eq(reimbursements.status, 'reversed')));
 
     const reversedCount = reversedResult[0]?.count || 0;
 

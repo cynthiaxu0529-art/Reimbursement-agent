@@ -160,6 +160,9 @@ export default function AccountingSummariesPage() {
       const data = await res.json();
       if (data.success) {
         setSummaries(data.summaries || []);
+        if ((data.summaries || []).length === 0 && data._debug) {
+          console.log('[记账汇总] 无数据诊断:', data._debug);
+        }
       } else {
         setFetchError(data.error || '获取汇总数据失败，请稍后重试。');
         setSummaries([]);
