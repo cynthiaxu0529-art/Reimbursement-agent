@@ -114,6 +114,7 @@ export default function AccountingSummariesPage() {
   const [activeTab, setActiveTab] = useState<'summaries' | 'details' | 'mapping'>('summaries');
   const [summaries, setSummaries] = useState<Summary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [expandedSummaryId, setExpandedSummaryId] = useState<string | null>(null);
   const [expandedAccountCode, setExpandedAccountCode] = useState<string | null>(null);
   const [filterPeriod, setFilterPeriod] = useState<string>('all');
@@ -138,17 +139,34 @@ export default function AccountingSummariesPage() {
   const fetchSummaries = useCallback(async () => {
     try {
       setLoading(true);
+      setFetchError(null);
       const res = await fetch('/api/internal/accounting-summaries');
       if (res.status === 401) {
         router.push('/login');
         return;
       }
+      if (res.status === 403) {
+        const data = await res.json().catch(() => ({}));
+        setFetchError(data.error || '您没有权限查看记账汇总，或当前账号尚未关联公司。');
+        setSummaries([]);
+        return;
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setFetchError(data.error || `请求失败 (${res.status})，请稍后重试。`);
+        setSummaries([]);
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         setSummaries(data.summaries || []);
+      } else {
+        setFetchError(data.error || '获取汇总数据失败，请稍后重试。');
+        setSummaries([]);
       }
     } catch (error) {
       console.error('Failed to fetch summaries:', error);
+      setFetchError('网络请求失败，请检查连接后重试。');
     } finally {
       setLoading(false);
     }
@@ -345,7 +363,37 @@ export default function AccountingSummariesPage() {
         </button>
       </div>
 
-      {filteredSummaries.length === 0 ? (
+      {fetchError ? (
+        <div style={{
+          padding: '1.25rem 1.5rem',
+          backgroundColor: '#fef2f2',
+          border: '1px solid #fca5a5',
+          borderRadius: '0.75rem',
+          color: '#dc2626',
+          fontSize: '0.875rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+        }}>
+          <span style={{ fontSize: '1.25rem' }}>⚠️</span>
+          <span>{fetchError}</span>
+          <button
+            onClick={fetchSummaries}
+            style={{
+              marginLeft: 'auto',
+              padding: '0.375rem 0.75rem',
+              borderRadius: '0.375rem',
+              border: '1px solid #fca5a5',
+              backgroundColor: 'white',
+              color: '#dc2626',
+              fontSize: '0.8125rem',
+              cursor: 'pointer',
+            }}
+          >
+            重试
+          </button>
+        </div>
+      ) : filteredSummaries.length === 0 ? (
         <div style={{
           textAlign: 'center',
           padding: '3rem',
@@ -1118,6 +1166,39 @@ export default function AccountingSummariesPage() {
           {ts.description}
         </p>
       </div>
+
+      {/* Fetch error banner */}
+      {fetchError && (
+        <div style={{
+          padding: '0.875rem 1.25rem',
+          backgroundColor: '#fef2f2',
+          border: '1px solid #fca5a5',
+          borderRadius: '0.75rem',
+          color: '#dc2626',
+          fontSize: '0.875rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+        }}>
+          <span>⚠️</span>
+          <span>{fetchError}</span>
+          <button
+            onClick={fetchSummaries}
+            style={{
+              marginLeft: 'auto',
+              padding: '0.375rem 0.75rem',
+              borderRadius: '0.375rem',
+              border: '1px solid #fca5a5',
+              backgroundColor: 'white',
+              color: '#dc2626',
+              fontSize: '0.8125rem',
+              cursor: 'pointer',
+            }}
+          >
+            重试
+          </button>
+        </div>
+      )}
 
       {/* Stats overview */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
