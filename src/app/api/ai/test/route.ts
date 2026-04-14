@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server';
 import { createChatCompletion } from '@/lib/ai/openrouter-client';
 
+export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 /**
@@ -48,7 +49,7 @@ export async function GET() {
         content: 'Hello! Please respond with just "OK" to confirm the connection.'
       }
     ], {
-      model: 'anthropic/claude-3.5-sonnet',
+      model: 'anthropic/claude-sonnet-4',
       temperature: 0.1,
       max_tokens: 50,
     });
