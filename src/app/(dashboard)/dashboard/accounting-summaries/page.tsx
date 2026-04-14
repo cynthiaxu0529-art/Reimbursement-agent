@@ -658,7 +658,11 @@ export default function AccountingSummariesPage() {
   // ============================================================================
 
   const renderDetailsTab = () => {
-    const summary = selectedSummary || (filteredSummaries.length > 0 ? filteredSummaries[0] : null);
+    // 始终从最新 summaries 中按 ID 查找，避免 selectedSummary 引用旧对象
+    // 导致科目修改后详情页不刷新（保存成功但看起来没生效）
+    const selectedId = selectedSummary?.summary_id;
+    const summary = (selectedId ? summaries.find(s => s.summary_id === selectedId) : null)
+      || (summaries.length > 0 ? summaries[0] : null);
 
     if (!summary) {
       return (
