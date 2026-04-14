@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 // ============================================================================
@@ -72,7 +72,6 @@ function fmtDate(dateStr: string) {
 
 export default function CorrectionsPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { t } = useLanguage();
   const tc = t.corrections;
 
@@ -137,8 +136,9 @@ export default function CorrectionsPage() {
   useEffect(() => { fetchCorrections(); }, [fetchCorrections]);
 
   // Pre-fill reimbursement ID from ?reimbId= query param (coming from disbursements page)
+  // Use window.location.search directly to avoid useSearchParams Suspense requirement
   useEffect(() => {
-    const reimbId = searchParams?.get('reimbId');
+    const reimbId = new URLSearchParams(window.location.search).get('reimbId');
     if (reimbId) {
       resetCreateModal();
       setCreateReimbId(reimbId);
