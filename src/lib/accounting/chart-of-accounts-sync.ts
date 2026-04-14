@@ -8,7 +8,7 @@
 
 import { db } from '@/lib/db';
 import { syncedAccounts } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, notInArray } from 'drizzle-orm';
 
 // ============================================================================
 // 类型定义
@@ -117,6 +117,8 @@ export async function syncChartOfAccounts(): Promise<SyncResult> {
  * Upsert 科目到数据库
  */
 async function upsertAccounts(accounts: AccountingAccount[]): Promise<void> {
+  const incomingCodes = accounts.map(a => a.account_code);
+
   for (const account of accounts) {
     const existing = await db.query.syncedAccounts.findFirst({
       where: eq(syncedAccounts.accountCode, account.account_code),
@@ -139,6 +141,13 @@ async function upsertAccounts(accounts: AccountingAccount[]): Promise<void> {
         syncedAt: new Date(),
       });
     }
+  }
+
+  // 清理远端已移除的科目，避免本地残留过期 code
+  if (incomingCodes.length > 0) {
+    await db
+      .delete(syncedAccounts)
+      .where(notInArray(syncedAccounts.accountCode, incomingCodes));
   }
 }
 
