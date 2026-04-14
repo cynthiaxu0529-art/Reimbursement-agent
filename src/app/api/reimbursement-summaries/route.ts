@@ -31,9 +31,18 @@ export const dynamic = 'force-dynamic';
 // ============================================================================
 
 interface SummaryDetail {
+  item_id: string;
+  reimbursement_id: string;
   employee_name: string;
   amount: number;
   description: string;
+  category: string;
+  /** Previous account code if COA was changed (for dedup — update existing JE instead of creating new) */
+  previous_account_code?: string;
+  /** Timestamp when the COA was last changed */
+  coa_changed_at?: string;
+  /** External JE ID if this item has already been synced */
+  synced_je_id?: string;
 }
 
 interface SummaryItem {
@@ -269,18 +278,27 @@ export async function GET(request: NextRequest) {
 
       const period = getHalfMonthPeriod(approvedAt);
 
-      // 映射科目（传入部门 costCenter 和名称）
+      // Use stored coaCode if available (set by finance adjust), otherwise map dynamically
       const userId = reimbToUser.get(item.reimbursementId);
       const deptInfo = userId ? userDeptMap.get(userId) : undefined;
-      const mapping = await mapExpenseToAccount(item.category, item.description, deptInfo?.costCenter, deptInfo?.name);
 
-      const groupKey = `${period.summaryId}::${mapping.accountCode}`;
+      let accountCode = item.coaCode;
+      let accountName = item.coaName;
+      let mapping: { accountCode: string; accountName: string; is_fallback?: boolean } | null = null;
+
+      if (!accountCode) {
+        mapping = await mapExpenseToAccount(item.category, item.description, deptInfo?.costCenter, deptInfo?.name);
+        accountCode = mapping.accountCode;
+        accountName = mapping.accountName;
+      }
+
+      const groupKey = `${period.summaryId}::${accountCode}`;
 
       if (!groups.has(groupKey)) {
         groups.set(groupKey, {
           period,
-          accountCode: mapping.accountCode,
-          accountName: mapping.accountName,
+          accountCode: accountCode!,
+          accountName: accountName || '',
           details: [],
           totalAmount: 0,
           recordCount: 0,
@@ -292,16 +310,33 @@ export async function GET(request: NextRequest) {
       const group = groups.get(groupKey)!;
       const employeeName = userId ? (userMap.get(userId) || '未知') : '未知';
 
-      group.details.push({
+      // Build detail with item-level tracking for dedup
+      const detail: SummaryDetail = {
+        item_id: item.id,
+        reimbursement_id: item.reimbursementId,
         employee_name: String(employeeName),
         amount: Number((item.amountInBaseCurrency || item.amount).toFixed(2)),
         description: item.description,
-      });
+        category: item.category,
+      };
+
+      // Include COA change info so accounting agent can update existing JEs
+      if (item.previousCoaCode && item.coaChangedAt) {
+        detail.previous_account_code = item.previousCoaCode;
+        detail.coa_changed_at = item.coaChangedAt.toISOString();
+      }
+
+      // Include synced JE ID if already synced
+      if (item.syncedJeId) {
+        detail.synced_je_id = item.syncedJeId;
+      }
+
+      group.details.push(detail);
       group.totalAmount += item.amountInBaseCurrency || item.amount;
       group.recordCount += 1;
 
       // Track fallback mappings for finance to-do
-      if (mapping.is_fallback) {
+      if (mapping?.is_fallback) {
         group.isFallback = true;
         const hint = `${item.category}${item.description ? ': ' + item.description.slice(0, 40) : ''}`;
         if (!group.fallbackHints.includes(hint) && group.fallbackHints.length < 5) {
@@ -366,7 +401,39 @@ export async function GET(request: NextRequest) {
     // 按 period_start 排序
     summaries.sort((a, b) => a.period_start.localeCompare(b.period_start));
 
-    const response = NextResponse.json({ summaries });
+    // 10. Build coa_changes list — items whose account codes have changed.
+    //     The accounting agent should UPDATE existing JEs for these items
+    //     instead of creating new ones (prevents duplicates).
+    const coaChanges: Array<{
+      item_id: string;
+      reimbursement_id: string;
+      previous_account_code: string;
+      current_account_code: string;
+      current_account_name: string;
+      changed_at: string;
+      synced_je_id: string | null;
+    }> = [];
+
+    for (const item of allItems) {
+      if (item.previousCoaCode && item.coaChangedAt) {
+        coaChanges.push({
+          item_id: item.id,
+          reimbursement_id: item.reimbursementId,
+          previous_account_code: item.previousCoaCode,
+          current_account_code: item.coaCode || '',
+          current_account_name: item.coaName || '',
+          changed_at: item.coaChangedAt.toISOString(),
+          synced_je_id: item.syncedJeId || null,
+        });
+      }
+    }
+
+    const response = NextResponse.json({
+      summaries,
+      // Items whose account codes changed — accounting agent must UPDATE
+      // existing JEs for these items, not create new ones
+      coa_changes: coaChanges.length > 0 ? coaChanges : undefined,
+    });
 
     // API Key 审计日志 + Rate Limit headers
     if (authCtx?.authType === 'api_key' && authCtx.apiKey) {

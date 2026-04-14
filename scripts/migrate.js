@@ -32,6 +32,7 @@ async function main() {
       '0007_add_password_reset_tokens.sql',
       '0009_add_auto_approval.sql',
       '0010_add_expense_corrections.sql',
+      '0011_add_coa_change_tracking.sql',
     ];
 
     for (const file of migrations) {

@@ -49,6 +49,7 @@ export const API_SCOPES = {
 
   // 记账汇总（财务/会计专用）
   ACCOUNTING_SUMMARY_READ: 'accounting_summary:read',
+  ACCOUNTING_SUMMARY_WRITE: 'accounting_summary:write',
   ACCOUNT_MAPPING_READ: 'account_mapping:read',
   ACCOUNT_MAPPING_UPDATE: 'account_mapping:update',
 
@@ -177,6 +178,13 @@ export const SCOPE_METADATA: Record<ApiScope, ScopeMetadata> = {
     category: 'sensitive',
     requiredRoles: ['finance', 'admin', 'super_admin'],
   },
+  [API_SCOPES.ACCOUNTING_SUMMARY_WRITE]: {
+    scope: API_SCOPES.ACCOUNTING_SUMMARY_WRITE,
+    label: '标记汇总同步状态',
+    description: '标记报销明细的 JE 同步状态（供 Accounting Agent 写回同步结果）',
+    category: 'sensitive',
+    requiredRoles: ['finance', 'admin', 'super_admin'],
+  },
   [API_SCOPES.ACCOUNT_MAPPING_READ]: {
     scope: API_SCOPES.ACCOUNT_MAPPING_READ,
     label: '查看科目映射',
@@ -255,9 +263,10 @@ export const SCOPE_PRESETS = {
     API_SCOPES.PROFILE_READ,
   ],
 
-  /** Accounting Agent：读取记账汇总 + 科目映射（供外部会计系统拉取数据） */
+  /** Accounting Agent：读取记账汇总 + 科目映射 + 写回同步状态（供外部会计系统拉取数据） */
   ACCOUNTING_AGENT: [
     API_SCOPES.ACCOUNTING_SUMMARY_READ,
+    API_SCOPES.ACCOUNTING_SUMMARY_WRITE,
     API_SCOPES.ACCOUNT_MAPPING_READ,
     API_SCOPES.REIMBURSEMENT_READ,
     API_SCOPES.RECEIPT_READ,
@@ -329,6 +338,9 @@ export const ROUTE_SCOPE_MAP: Record<string, { method: string; scope: ApiScope }
   ],
   '/api/reimbursement-summaries': [
     { method: 'GET', scope: API_SCOPES.ACCOUNTING_SUMMARY_READ },
+  ],
+  '/api/reimbursement-summaries/mark-synced': [
+    { method: 'POST', scope: API_SCOPES.ACCOUNTING_SUMMARY_WRITE },
   ],
   '/api/internal/accounting-summaries': [
     { method: 'GET', scope: API_SCOPES.ACCOUNTING_SUMMARY_READ },

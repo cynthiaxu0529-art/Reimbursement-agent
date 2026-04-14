@@ -101,16 +101,36 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    // Fetch current COA values so we can track changes for dedup
+    const currentItems = await db
+      .select({
+        id: reimbursementItems.id,
+        coaCode: reimbursementItems.coaCode,
+        coaName: reimbursementItems.coaName,
+      })
+      .from(reimbursementItems)
+      .where(inArray(reimbursementItems.id, itemIds));
+    const currentCoaMap = new Map(currentItems.map(i => [i.id, { coaCode: i.coaCode, coaName: i.coaName }]));
+
     // 逐条更新（因为每条可能有不同的 account_code/account_name）
     const results: { id: string; coaCode: string | null; coaName: string | null }[] = [];
     const now = new Date();
 
     for (const u of updates) {
+      const current = currentCoaMap.get(u.item_id);
+      const coaChanged = current && u.account_code !== current.coaCode;
+
       const [updated] = await db
         .update(reimbursementItems)
         .set({
           coaCode: u.account_code,
           coaName: u.account_name,
+          // Track previous COA for accounting agent duplicate prevention
+          ...(coaChanged && {
+            previousCoaCode: current.coaCode || null,
+            previousCoaName: current.coaName || null,
+            coaChangedAt: now,
+          }),
           updatedAt: now,
         })
         .where(eq(reimbursementItems.id, u.item_id))

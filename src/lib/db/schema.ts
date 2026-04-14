@@ -393,6 +393,15 @@ export const reimbursementItems = pgTable('reimbursement_items', {
   coaCode: text('coa_code'),
   coaName: text('coa_name'),
 
+  // COA change tracking — for duplicate prevention when account codes change
+  previousCoaCode: text('previous_coa_code'),
+  previousCoaName: text('previous_coa_name'),
+  coaChangedAt: timestamp('coa_changed_at'),
+
+  // Sync tracking — records which external JE this item has been synced to
+  syncedJeId: text('synced_je_id'),
+  syncedAt: timestamp('synced_at'),
+
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
