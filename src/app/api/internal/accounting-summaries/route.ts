@@ -319,16 +319,22 @@ export async function GET(request: NextRequest) {
     }
 
     // 查询冲差抵扣记录（按 tenant 隔离）
-    const allApplications = await db
-      .select({
-        application: correctionApplications,
-        correction: expenseCorrections,
-      })
-      .from(correctionApplications)
-      .innerJoin(expenseCorrections, and(
-        eq(correctionApplications.correctionId, expenseCorrections.id),
-        eq(expenseCorrections.tenantId, tenantId)
-      ));
+    // 用 try-catch 包裹：若迁移尚未运行导致表不存在，不影响主汇总数据展示
+    let allApplications: Array<{ application: typeof correctionApplications.$inferSelect; correction: typeof expenseCorrections.$inferSelect }> = [];
+    try {
+      allApplications = await db
+        .select({
+          application: correctionApplications,
+          correction: expenseCorrections,
+        })
+        .from(correctionApplications)
+        .innerJoin(expenseCorrections, and(
+          eq(correctionApplications.correctionId, expenseCorrections.id),
+          eq(expenseCorrections.tenantId, tenantId)
+        ));
+    } catch (correctionErr) {
+      console.warn('[accounting-summaries] correction_applications query failed (table may not exist yet):', (correctionErr as Error)?.message);
+    }
 
     for (const row of allApplications) {
       const { application, correction } = row;
