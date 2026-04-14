@@ -74,6 +74,13 @@ const zh = {
     cloud_resource: '云资源',
     client_entertainment: '客户招待',
     software: '软件订阅',
+    marketing: '市场推广',
+    content_seo: '内容 & SEO',
+    pr_communications: '公关 & 传播',
+    training: '培训费',
+    conference: '会议/活动',
+    courier: '快递费',
+    phone: '通讯费',
     other: '其他',
   },
 

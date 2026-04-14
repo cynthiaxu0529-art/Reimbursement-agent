@@ -111,7 +111,15 @@ const categoryLabels: Record<string, string> = {
   office_supplies: '办公用品',
   ai_token: 'AI 服务',
   cloud_resource: '云资源',
+  software: '软件订阅',
   client_entertainment: '客户招待',
+  marketing: '市场推广',
+  content_seo: '内容 & SEO',
+  pr_communications: '公关 & 传播',
+  training: '培训费',
+  conference: '会议/活动',
+  courier: '快递费',
+  phone: '通讯费',
   other: '其他',
 };
 

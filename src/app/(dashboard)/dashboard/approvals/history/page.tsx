@@ -49,8 +49,16 @@ const categoryLabels: Record<string, { label: string; icon: string }> = {
   office_supplies: { label: '办公用品', icon: '📎' },
   ai_token: { label: 'AI 服务', icon: '🤖' },
   cloud_resource: { label: '云资源', icon: '☁️' },
+  software: { label: '软件订阅', icon: '💿' },
   client_entertainment: { label: '客户招待', icon: '🤝' },
-  other: { label: '其他', icon: '📦' },
+  marketing: { label: '市场推广', icon: '📢' },
+  content_seo: { label: '内容 & SEO', icon: '📝' },
+  pr_communications: { label: '公关 & 传播', icon: '📰' },
+  training: { label: '培训费', icon: '📚' },
+  conference: { label: '会议/活动', icon: '🎤' },
+  courier: { label: '快递费', icon: '📦' },
+  phone: { label: '通讯费', icon: '📱' },
+  other: { label: '其他', icon: '📋' },
 };
 
 const currencySymbols: Record<string, string> = {
