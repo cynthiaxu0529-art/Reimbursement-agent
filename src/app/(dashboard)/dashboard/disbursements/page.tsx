@@ -79,6 +79,9 @@ const categoryLabels: Record<string, { label: string; icon: string; color: strin
   training: { label: '培训费', icon: '📚', color: '#7c3aed' },
   conference: { label: '会议费', icon: '🎤', color: '#2563eb' },
   membership: { label: '会员订阅', icon: '🏷️', color: '#0f766e' },
+  // S&M 销售与市场费用
+  content_seo: { label: '内容 & SEO', icon: '📝', color: '#059669' },
+  pr_communications: { label: '公关 & 传播', icon: '📰', color: '#7c3aed' },
   // 其他
   other: { label: '其他', icon: '📦', color: '#6b7280' },
 };

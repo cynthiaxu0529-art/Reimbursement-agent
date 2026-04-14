@@ -420,11 +420,40 @@ export class ReceiptOCRAgent {
         combined.includes('广告') ||
         combined.includes('投放') ||
         combined.includes('红包活动') ||
-        combined.includes('品牌') ||
         combined.includes('活动费') ||
         combined.includes('marketing')
       ) {
         return ExpenseCategory.MARKETING;
+      }
+      // 内容 & SEO：文案、内容制作、SEO/SEM、视频拍摄、博客等
+      if (
+        combined.includes('内容') ||
+        combined.includes('文案') ||
+        combined.includes('copywriting') ||
+        combined.includes('seo') ||
+        combined.includes('sem') ||
+        combined.includes('搜索优化') ||
+        combined.includes('视频制作') ||
+        combined.includes('拍摄') ||
+        combined.includes('博客') ||
+        combined.includes('blog') ||
+        combined.includes('content')
+      ) {
+        return ExpenseCategory.CONTENT_SEO;
+      }
+      // 公关 & 传播：新闻稿、媒体、公关、品牌传播等
+      if (
+        combined.includes('公关') ||
+        combined.includes('新闻稿') ||
+        combined.includes('press') ||
+        combined.includes('媒体') ||
+        combined.includes('传播') ||
+        combined.includes('品牌传播') ||
+        combined.includes('外宣') ||
+        combined.includes('舆情') ||
+        combined.includes('pr ')
+      ) {
+        return ExpenseCategory.PR_COMMUNICATIONS;
       }
     }
 

@@ -15,8 +15,16 @@ const expenseCategories = [
   { value: 'office_supplies', label: '办公用品', icon: '📎' },
   { value: 'ai_token', label: 'AI 服务', icon: '🤖' },
   { value: 'cloud_resource', label: '云资源', icon: '☁️' },
+  { value: 'software', label: '软件订阅', icon: '💿' },
   { value: 'client_entertainment', label: '客户招待', icon: '🤝' },
-  { value: 'other', label: '其他', icon: '📦' },
+  { value: 'marketing', label: '市场推广', icon: '📢' },
+  { value: 'content_seo', label: '内容 & SEO', icon: '📝' },
+  { value: 'pr_communications', label: '公关 & 传播', icon: '📰' },
+  { value: 'training', label: '培训费', icon: '📚' },
+  { value: 'conference', label: '会议/活动', icon: '🎤' },
+  { value: 'courier', label: '快递费', icon: '📦' },
+  { value: 'phone', label: '通讯费', icon: '📱' },
+  { value: 'other', label: '其他', icon: '📋' },
 ];
 
 const receiptTypeToCategory: Record<string, string> = {
