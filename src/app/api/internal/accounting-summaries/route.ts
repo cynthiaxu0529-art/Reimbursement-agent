@@ -99,15 +99,15 @@ function mapExpenseToAccountSync(
     categories: string[];
     codes: { rd: string; sm: string; ga: string; rdName: string; smName: string; gaName: string };
   }> = [
-    { expenseType: 'travel', categories: ['taxi','car_rental','fuel','parking','toll','flight','train','hotel'], codes: { rd:'6440', sm:'6130', ga:'6270', rdName:'R&D - Travel & Entertainment', smName:'S&M - Travel & Entertainment', gaName:'G&A - Travel & Entertainment' } },
-    { expenseType: 'meals', categories: ['meal','client_entertainment'], codes: { rd:'6450', sm:'6140', ga:'6280', rdName:'R&D - Meals & Entertainment', smName:'S&M - Meals & Client Entertainment', gaName:'G&A - Meals & Entertainment' } },
-    { expenseType: 'office_supplies', categories: ['office_supplies','equipment','printing'], codes: { rd:'6460', sm:'6150', ga:'6230', rdName:'R&D - Office Supplies', smName:'S&M - Office Supplies', gaName:'G&A - Office Supplies' } },
-    { expenseType: 'training', categories: ['training','conference'], codes: { rd:'6470', sm:'6160', ga:'6330', rdName:'R&D - Training & Conferences', smName:'S&M - Training & Conferences', gaName:'G&A - Training & Development' } },
+    { expenseType: 'travel', categories: ['taxi','car_rental','fuel','parking','toll','flight','train','hotel'], codes: { rd:'6440', sm:'6170', ga:'6270', rdName:'R&D - Travel & Entertainment', smName:'S&M - Travel & Entertainment', gaName:'G&A - Travel & Entertainment' } },
+    { expenseType: 'meals', categories: ['meal','client_entertainment'], codes: { rd:'6450', sm:'6180', ga:'6280', rdName:'R&D - Meals & Entertainment', smName:'S&M - Meals & Entertainment', gaName:'G&A - Meals & Entertainment' } },
+    { expenseType: 'office_supplies', categories: ['office_supplies','equipment','printing'], codes: { rd:'6460', sm:'6190', ga:'6230', rdName:'R&D - Office Supplies', smName:'S&M - Miscellaneous Expense', gaName:'G&A - Office Supplies' } },
+    { expenseType: 'training', categories: ['training','conference'], codes: { rd:'6470', sm:'6140', ga:'6330', rdName:'R&D - Training & Conferences', smName:'S&M - Events & Conferences', gaName:'G&A - Training & Development' } },
     { expenseType: 'shipping', categories: ['courier'], codes: { rd:'6490', sm:'6190', ga:'6370', rdName:'R&D - Miscellaneous Expense', smName:'S&M - Miscellaneous Expense', gaName:'G&A - Shipping & Postage' } },
     { expenseType: 'telecom', categories: ['phone','internet'], codes: { rd:'6490', sm:'6190', ga:'6290', rdName:'R&D - Miscellaneous Expense', smName:'S&M - Miscellaneous Expense', gaName:'G&A - Telephone & Internet' } },
-    { expenseType: 'cloud', categories: ['cloud_resource','ai_token'], codes: { rd:'6420', sm:'6190', ga:'6390', rdName:'R&D - Cloud & Infrastructure', smName:'S&M - Miscellaneous Expense', gaName:'G&A - Miscellaneous Expense' } },
-    { expenseType: 'software', categories: ['software'], codes: { rd:'6430', sm:'6190', ga:'6390', rdName:'R&D - Software & Subscriptions', smName:'S&M - Miscellaneous Expense', gaName:'G&A - Miscellaneous Expense' } },
-    { expenseType: 'advertising', categories: ['marketing'], codes: { rd:'6490', sm:'6120', ga:'6390', rdName:'R&D - Miscellaneous Expense', smName:'S&M - Advertising & Promotion', gaName:'G&A - Miscellaneous Expense' } },
+    { expenseType: 'cloud', categories: ['cloud_resource','ai_token'], codes: { rd:'6420', sm:'6150', ga:'6390', rdName:'R&D - Cloud & Infrastructure', smName:'S&M - CRM & Sales Tools', gaName:'G&A - Miscellaneous Expense' } },
+    { expenseType: 'software', categories: ['software'], codes: { rd:'6430', sm:'6150', ga:'6390', rdName:'R&D - Software & Subscriptions', smName:'S&M - CRM & Sales Tools', gaName:'G&A - Miscellaneous Expense' } },
+    { expenseType: 'advertising', categories: ['marketing'], codes: { rd:'6490', sm:'6120', ga:'6390', rdName:'R&D - Miscellaneous Expense', smName:'S&M - Digital Advertising', gaName:'G&A - Miscellaneous Expense' } },
   ];
 
   const catLower = (category || '').toLowerCase();
