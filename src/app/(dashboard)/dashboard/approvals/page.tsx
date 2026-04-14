@@ -92,8 +92,16 @@ const categoryLabels: Record<string, { label: string; icon: string }> = {
   office_supplies: { label: '办公用品', icon: '📎' },
   ai_token: { label: 'AI 服务', icon: '🤖' },
   cloud_resource: { label: '云资源', icon: '☁️' },
+  software: { label: '软件订阅', icon: '💿' },
   client_entertainment: { label: '客户招待', icon: '🤝' },
-  other: { label: '其他', icon: '📦' },
+  marketing: { label: '市场推广', icon: '📢' },
+  content_seo: { label: '内容 & SEO', icon: '📝' },
+  pr_communications: { label: '公关 & 传播', icon: '📰' },
+  training: { label: '培训费', icon: '📚' },
+  conference: { label: '会议/活动', icon: '🎤' },
+  courier: { label: '快递费', icon: '📦' },
+  phone: { label: '通讯费', icon: '📱' },
+  other: { label: '其他', icon: '📋' },
 };
 
 const currencySymbols: Record<string, string> = {
@@ -278,8 +286,16 @@ export default function ApprovalsPage() {
     office_supplies: { label: t.categories.office_supplies, icon: '📎' },
     ai_token: { label: t.categories.ai_token, icon: '🤖' },
     cloud_resource: { label: t.categories.cloud_resource, icon: '☁️' },
+    software: { label: t.categories.software, icon: '💿' },
     client_entertainment: { label: t.categories.client_entertainment, icon: '🤝' },
-    other: { label: t.categories.other, icon: '📦' },
+    marketing: { label: t.categories.marketing, icon: '📢' },
+    content_seo: { label: t.categories.content_seo, icon: '📝' },
+    pr_communications: { label: t.categories.pr_communications, icon: '📰' },
+    training: { label: t.categories.training, icon: '📚' },
+    conference: { label: t.categories.conference, icon: '🎤' },
+    courier: { label: t.categories.courier, icon: '📦' },
+    phone: { label: t.categories.phone, icon: '📱' },
+    other: { label: t.categories.other, icon: '📋' },
   };
 
   const localRiskLevelConfig: Record<string, { icon: string; label: string; bgClass: string; textClass: string; borderClass: string }> = {

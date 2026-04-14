@@ -370,6 +370,34 @@ export const DEFAULT_COA_MAPPINGS: COAMapping[] = [
   },
 
   // ============================================
+  // 6606 - S&M 销售与市场费用 (新增)
+  // ============================================
+  {
+    category: ExpenseCategory.CONTENT_SEO,
+    coaCode: '6606.01',
+    coaName: '销售市场费-内容与SEO',
+    coaNameEn: 'S&M - Content & SEO',
+    parentCode: '6606',
+    description: '文案撰写、视频制作、SEO/SEM优化、博客内容等',
+    isActive: true,
+    requiresReceipt: true,
+    requiresApproval: true,
+    defaultTaxRate: 0.06,
+  },
+  {
+    category: ExpenseCategory.PR_COMMUNICATIONS,
+    coaCode: '6606.02',
+    coaName: '销售市场费-公关与传播',
+    coaNameEn: 'S&M - PR & Communications',
+    parentCode: '6606',
+    description: '新闻稿、媒体关系、品牌传播、危机公关等',
+    isActive: true,
+    requiresReceipt: true,
+    requiresApproval: true,
+    defaultTaxRate: 0.06,
+  },
+
+  // ============================================
   // 6699 - 其他费用
   // ============================================
   {
@@ -435,5 +463,6 @@ export const COA_PARENT_NAMES: Record<string, { name: string; nameEn: string }> 
   '6603': { name: '技术费用', nameEn: 'Technology Expenses' },
   '6604': { name: '行政费用', nameEn: 'Administrative Expenses' },
   '6605': { name: '业务费用', nameEn: 'Business Expenses' },
+  '6606': { name: '销售市场费', nameEn: 'Sales & Marketing Expenses' },
   '6699': { name: '其他费用', nameEn: 'Other Expenses' },
 };

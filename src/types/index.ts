@@ -49,6 +49,10 @@ export const ExpenseCategory = {
   CONFERENCE: 'conference',               // 会议费用
   MEMBERSHIP: 'membership',               // 会员费/订阅
 
+  // S&M 销售与市场费用
+  CONTENT_SEO: 'content_seo',             // 内容制作 & SEO（文案、视频、博客、搜索优化）
+  PR_COMMUNICATIONS: 'pr_communications', // 公关 & 传播（新闻稿、媒体、品牌传播）
+
   // 其他
   OTHER: 'other',                         // 其他费用
 } as const;

@@ -76,8 +76,16 @@ export default function ReimbursementsPage() {
     office_supplies: { label: t.categories.office_supplies, icon: '📎' },
     ai_token: { label: t.categories.ai_token, icon: '🤖' },
     cloud_resource: { label: t.categories.cloud_resource, icon: '☁️' },
+    software: { label: t.categories.software, icon: '💿' },
     client_entertainment: { label: t.categories.client_entertainment, icon: '🤝' },
-    other: { label: t.categories.other, icon: '📦' },
+    marketing: { label: t.categories.marketing, icon: '📢' },
+    content_seo: { label: t.categories.content_seo, icon: '📝' },
+    pr_communications: { label: t.categories.pr_communications, icon: '📰' },
+    training: { label: t.categories.training, icon: '📚' },
+    conference: { label: t.categories.conference, icon: '🎤' },
+    courier: { label: t.categories.courier, icon: '📦' },
+    phone: { label: t.categories.phone, icon: '📱' },
+    other: { label: t.categories.other, icon: '📋' },
   };
 
   const [filter, setFilter] = useState('all');

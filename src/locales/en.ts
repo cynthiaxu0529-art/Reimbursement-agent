@@ -76,6 +76,13 @@ const en: Translations = {
     cloud_resource: 'Cloud Resources',
     client_entertainment: 'Client Entertainment',
     software: 'Software',
+    marketing: 'Marketing',
+    content_seo: 'Content & SEO',
+    pr_communications: 'PR & Communications',
+    training: 'Training',
+    conference: 'Events & Conferences',
+    courier: 'Courier',
+    phone: 'Phone',
     other: 'Other',
   },
 
