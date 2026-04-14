@@ -105,13 +105,23 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     // ---- 更新明细行 ----
+    // Track previous COA values for sync duplicate prevention
+    const now = new Date();
+    const coaChanged = finalCoaCode && finalCoaCode !== item.coaCode;
+
     const [updated] = await db
       .update(reimbursementItems)
       .set({
         category,
         coaCode: finalCoaCode,
         coaName: finalCoaName,
-        updatedAt: new Date(),
+        // Record previous COA when account code changes (for accounting agent dedup)
+        ...(coaChanged && {
+          previousCoaCode: item.coaCode || null,
+          previousCoaName: item.coaName || null,
+          coaChangedAt: now,
+        }),
+        updatedAt: now,
       })
       .where(eq(reimbursementItems.id, itemId))
       .returning();

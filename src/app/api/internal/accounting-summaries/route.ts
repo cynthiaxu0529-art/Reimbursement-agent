@@ -28,6 +28,9 @@ interface SummaryDetail {
   category: string;
   account_code: string;
   account_name: string;
+  previous_account_code?: string;
+  coa_changed_at?: string;
+  synced_je_id?: string;
 }
 
 interface SummaryItem {
@@ -307,7 +310,7 @@ export async function GET(request: NextRequest) {
       const group = groups.get(groupKey)!;
       const employeeName = userId ? String(userMap.get(userId) || '未知') : '未知';
 
-      group.details.push({
+      const detail: SummaryDetail = {
         employee_name: employeeName,
         department: deptInfo?.name || '-',
         amount: Number((item.amountInBaseCurrency || item.amount).toFixed(2)),
@@ -317,7 +320,18 @@ export async function GET(request: NextRequest) {
         category: item.category,
         account_code: accountCode!,
         account_name: accountName || '',
-      });
+      };
+
+      // Include COA change tracking for dedup awareness
+      if (item.previousCoaCode && item.coaChangedAt) {
+        detail.previous_account_code = item.previousCoaCode;
+        detail.coa_changed_at = item.coaChangedAt.toISOString();
+      }
+      if (item.syncedJeId) {
+        detail.synced_je_id = item.syncedJeId;
+      }
+
+      group.details.push(detail);
       group.totalAmount += item.amountInBaseCurrency || item.amount;
       group.recordCount += 1;
     }
