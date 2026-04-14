@@ -13,7 +13,7 @@ import { db } from '@/lib/db';
 import { reimbursements, reimbursementItems, users, departments, correctionApplications, expenseCorrections, syncedAccounts } from '@/lib/db/schema';
 import { eq, inArray, and, or, isNull } from 'drizzle-orm';
 import { getUserRoles } from '@/lib/auth/roles';
-import { classifyDepartment } from '@/lib/accounting/expense-account-mapping';
+import { mapExpenseWithAccountNameResolver } from '@/lib/accounting/expense-account-mapping';
 import { ensureAccountsSynced } from '@/lib/accounting/chart-of-accounts-sync';
 
 export const dynamic = 'force-dynamic';
@@ -82,70 +82,6 @@ function getHalfMonthPeriod(date: Date): HalfMonthPeriod {
 
 function formatDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-/**
- * 同步版科目映射（使用预加载的 syncedAccountMap，无 DB 查询）
- * 替代 mapExpenseToAccount 在循环内的 N+1 调用
- */
-function mapExpenseToAccountSync(
-  category: string,
-  description: string,
-  costCenter: string | null | undefined,
-  departmentName: string | null | undefined,
-  syncedAccountMap: Map<string, string>,
-): { accountCode: string; accountName: string } {
-  const fn = classifyDepartment(costCenter, departmentName);
-
-  const EXPENSE_TYPE_RULES: Array<{
-    expenseType: string;
-    categories: string[];
-    codes: { rd: string; sm: string; ga: string; rdName: string; smName: string; gaName: string };
-  }> = [
-    { expenseType: 'travel', categories: ['taxi','car_rental','fuel','parking','toll','flight','train','hotel'], codes: { rd:'6440', sm:'6170', ga:'6270', rdName:'R&D - Travel & Entertainment', smName:'S&M - Travel & Entertainment', gaName:'G&A - Travel & Entertainment' } },
-    { expenseType: 'meals', categories: ['meal','client_entertainment'], codes: { rd:'6450', sm:'6180', ga:'6280', rdName:'R&D - Meals & Entertainment', smName:'S&M - Meals & Entertainment', gaName:'G&A - Meals & Entertainment' } },
-    { expenseType: 'office_supplies', categories: ['office_supplies','equipment','printing'], codes: { rd:'6460', sm:'6190', ga:'6230', rdName:'R&D - Office Supplies', smName:'S&M - Miscellaneous Expense', gaName:'G&A - Office Supplies' } },
-    { expenseType: 'training', categories: ['training','conference'], codes: { rd:'6470', sm:'6140', ga:'6330', rdName:'R&D - Training & Conferences', smName:'S&M - Events & Conferences', gaName:'G&A - Training & Development' } },
-    { expenseType: 'shipping', categories: ['courier'], codes: { rd:'6490', sm:'6190', ga:'6370', rdName:'R&D - Miscellaneous Expense', smName:'S&M - Miscellaneous Expense', gaName:'G&A - Shipping & Postage' } },
-    { expenseType: 'telecom', categories: ['phone','internet'], codes: { rd:'6490', sm:'6190', ga:'6290', rdName:'R&D - Miscellaneous Expense', smName:'S&M - Miscellaneous Expense', gaName:'G&A - Telephone & Internet' } },
-    { expenseType: 'cloud', categories: ['cloud_resource','ai_token'], codes: { rd:'6420', sm:'6150', ga:'6390', rdName:'R&D - Cloud & Infrastructure', smName:'S&M - CRM & Sales Tools', gaName:'G&A - Miscellaneous Expense' } },
-    { expenseType: 'software', categories: ['software'], codes: { rd:'6430', sm:'6150', ga:'6390', rdName:'R&D - Software & Subscriptions', smName:'S&M - CRM & Sales Tools', gaName:'G&A - Miscellaneous Expense' } },
-    { expenseType: 'advertising', categories: ['marketing'], codes: { rd:'6490', sm:'6120', ga:'6390', rdName:'R&D - Miscellaneous Expense', smName:'S&M - Digital Advertising', gaName:'G&A - Miscellaneous Expense' } },
-    { expenseType: 'content_seo', categories: ['content','seo'], codes: { rd:'6490', sm:'6130', ga:'6390', rdName:'R&D - Miscellaneous Expense', smName:'S&M - Content & SEO', gaName:'G&A - Miscellaneous Expense' } },
-    { expenseType: 'pr_communications', categories: ['pr','communications'], codes: { rd:'6490', sm:'6160', ga:'6390', rdName:'R&D - Miscellaneous Expense', smName:'S&M - PR & Communications', gaName:'G&A - Miscellaneous Expense' } },
-  ];
-
-  const catLower = (category || '').toLowerCase();
-  const descLower = (description || '').toLowerCase();
-  const MISC_CODES = { rd: '6490', sm: '6190', ga: '6390', rdName: 'R&D - Miscellaneous Expense', smName: 'S&M - Miscellaneous Expense', gaName: 'G&A - Miscellaneous Expense' };
-
-  let codes = MISC_CODES;
-  for (const rule of EXPENSE_TYPE_RULES) {
-    if (rule.categories.includes(catLower)) { codes = rule.codes; break; }
-  }
-  if (codes === MISC_CODES) {
-    const keywords: Record<string, typeof MISC_CODES> = {
-      '交通|打车|出差|taxi|uber|机票|flight|住宿|酒店|hotel|差旅|travel': EXPENSE_TYPE_RULES[0].codes,
-      '餐饮|餐费|招待|meals|food|午餐|晚餐|早餐|dinner|lunch|breakfast': EXPENSE_TYPE_RULES[1].codes,
-      '办公用品|文具|office|stationery': EXPENSE_TYPE_RULES[2].codes,
-      '培训|课程|training|conference|会议|学习': EXPENSE_TYPE_RULES[3].codes,
-      '快递|邮寄|shipping|postage|物流': EXPENSE_TYPE_RULES[4].codes,
-      '通讯|电话|internet|phone|网络|telecom': EXPENSE_TYPE_RULES[5].codes,
-      '云|cloud|aws|gcp|azure|server|服务器|ai token|openai|anthropic': EXPENSE_TYPE_RULES[6].codes,
-      '软件|software|license|许可|saas|subscription|订阅': EXPENSE_TYPE_RULES[7].codes,
-      '广告|advertising|promotion|推广|营销|marketing|kol|红包': EXPENSE_TYPE_RULES[8].codes,
-      '内容|content|文案|copywriting|seo|sem|搜索优化|视频制作|博客|blog': EXPENSE_TYPE_RULES[9].codes,
-      '公关|pr|public relations|媒体关系|新闻稿|press release|传播|品牌传播|外宣|舆情': EXPENSE_TYPE_RULES[10].codes,
-    };
-    for (const [kwGroup, c] of Object.entries(keywords)) {
-      if (kwGroup.split('|').some(kw => descLower.includes(kw))) { codes = c; break; }
-    }
-  }
-
-  const accountCode = codes[fn];
-  const fallbackName = codes[`${fn}Name` as 'rdName' | 'smName' | 'gaName'];
-  const accountName = syncedAccountMap.get(accountCode) || fallbackName;
-  return { accountCode, accountName };
 }
 
 export async function GET(request: NextRequest) {
@@ -288,8 +224,14 @@ export async function GET(request: NextRequest) {
       let accountCode = item.coaCode;
       let accountName = item.coaName;
       if (!accountCode) {
-        // 直接用内存 Map 查科目名，不再逐条查库（N+1 修复）
-        const mapping = mapExpenseToAccountSync(item.category, item.description, deptInfo?.costCenter, deptInfo?.name, syncedAccountMap);
+        // 复用统一映射规则，并使用预加载科目名，避免循环内 N+1 查询
+        const mapping = await mapExpenseWithAccountNameResolver(
+          item.category,
+          item.description,
+          deptInfo?.costCenter,
+          deptInfo?.name,
+          async (code, fallbackName) => syncedAccountMap.get(code) || fallbackName,
+        );
         accountCode = mapping.accountCode;
         accountName = mapping.accountName;
       }

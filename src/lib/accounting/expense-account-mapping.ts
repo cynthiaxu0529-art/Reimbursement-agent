@@ -294,12 +294,32 @@ export async function mapExpenseToAccount(
   costCenter?: string | null,
   departmentName?: string | null,
 ): Promise<{ accountCode: string; accountName: string; is_fallback: boolean; matched_by: 'category' | 'keyword' | 'fallback' }> {
+  return mapExpenseWithAccountNameResolver(
+    category,
+    description,
+    costCenter,
+    departmentName,
+    async (accountCode, fallbackName) => resolveAccountName(accountCode, fallbackName),
+  );
+}
+
+/**
+ * 与 mapExpenseToAccount 共用同一套规则，但由调用方提供科目名称解析器。
+ * 可用于批量场景（例如提前加载 syncedAccountMap）避免循环内 N+1 查询。
+ */
+export async function mapExpenseWithAccountNameResolver(
+  category: string,
+  description: string,
+  costCenter: string | null | undefined,
+  departmentName: string | null | undefined,
+  resolveName: (accountCode: string, fallbackName: string) => Promise<string>,
+): Promise<{ accountCode: string; accountName: string; is_fallback: boolean; matched_by: 'category' | 'keyword' | 'fallback' }> {
   const fn = classifyDepartment(costCenter, departmentName);
   const { expenseType, matched_by } = matchExpenseType(category, description);
   const codes = EXPENSE_TYPE_ACCOUNTS[expenseType];
   const accountCode = codes[fn];
   const fallbackName = codes[`${fn}Name` as keyof AccountCodeSet] as string;
-  const accountName = await resolveAccountName(accountCode, fallbackName);
+  const accountName = await resolveName(accountCode, fallbackName);
   return { accountCode, accountName, is_fallback: expenseType === 'miscellaneous', matched_by };
 }
 
