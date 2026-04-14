@@ -89,27 +89,27 @@ type ExpenseType =
 
 const EXPENSE_TYPE_ACCOUNTS: Record<ExpenseType, AccountCodeSet> = {
   travel: {
-    rd: '6440', sm: '6130', ga: '6270',
+    rd: '6440', sm: '6170', ga: '6270',
     rdName: 'R&D - Travel & Entertainment',
     smName: 'S&M - Travel & Entertainment',
     gaName: 'G&A - Travel & Entertainment',
   },
   meals: {
-    rd: '6450', sm: '6140', ga: '6280',
+    rd: '6450', sm: '6180', ga: '6280',
     rdName: 'R&D - Meals & Entertainment',
-    smName: 'S&M - Meals & Client Entertainment',
+    smName: 'S&M - Meals & Entertainment',
     gaName: 'G&A - Meals & Entertainment',
   },
   office_supplies: {
-    rd: '6460', sm: '6150', ga: '6230',
+    rd: '6460', sm: '6190', ga: '6230',
     rdName: 'R&D - Office Supplies',
-    smName: 'S&M - Office Supplies',
+    smName: 'S&M - Miscellaneous Expense',
     gaName: 'G&A - Office Supplies',
   },
   training: {
-    rd: '6470', sm: '6160', ga: '6330',
+    rd: '6470', sm: '6140', ga: '6330',
     rdName: 'R&D - Training & Conferences',
-    smName: 'S&M - Training & Conferences',
+    smName: 'S&M - Events & Conferences',
     gaName: 'G&A - Training & Development',
   },
   shipping: {
@@ -131,21 +131,21 @@ const EXPENSE_TYPE_ACCOUNTS: Record<ExpenseType, AccountCodeSet> = {
     gaName: 'G&A - Insurance',
   },
   cloud: {
-    rd: '6420', sm: '6190', ga: '6390',
+    rd: '6420', sm: '6150', ga: '6390',
     rdName: 'R&D - Cloud & Infrastructure',
-    smName: 'S&M - Miscellaneous Expense',
+    smName: 'S&M - CRM & Sales Tools',
     gaName: 'G&A - Miscellaneous Expense',
   },
   software: {
-    rd: '6430', sm: '6190', ga: '6390',
+    rd: '6430', sm: '6150', ga: '6390',
     rdName: 'R&D - Software & Subscriptions',
-    smName: 'S&M - Miscellaneous Expense',
+    smName: 'S&M - CRM & Sales Tools',
     gaName: 'G&A - Miscellaneous Expense',
   },
   advertising: {
     rd: '6490', sm: '6120', ga: '6390',
     rdName: 'R&D - Miscellaneous Expense',
-    smName: 'S&M - Advertising & Promotion',
+    smName: 'S&M - Digital Advertising',
     gaName: 'G&A - Miscellaneous Expense',
   },
   miscellaneous: {
