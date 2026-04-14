@@ -85,6 +85,8 @@ type ExpenseType =
   | 'cloud'
   | 'software'
   | 'advertising'
+  | 'content_seo'
+  | 'pr_communications'
   | 'miscellaneous';
 
 const EXPENSE_TYPE_ACCOUNTS: Record<ExpenseType, AccountCodeSet> = {
@@ -146,6 +148,18 @@ const EXPENSE_TYPE_ACCOUNTS: Record<ExpenseType, AccountCodeSet> = {
     rd: '6490', sm: '6120', ga: '6390',
     rdName: 'R&D - Miscellaneous Expense',
     smName: 'S&M - Digital Advertising',
+    gaName: 'G&A - Miscellaneous Expense',
+  },
+  content_seo: {
+    rd: '6490', sm: '6130', ga: '6390',
+    rdName: 'R&D - Miscellaneous Expense',
+    smName: 'S&M - Content & SEO',
+    gaName: 'G&A - Miscellaneous Expense',
+  },
+  pr_communications: {
+    rd: '6490', sm: '6160', ga: '6390',
+    rdName: 'R&D - Miscellaneous Expense',
+    smName: 'S&M - PR & Communications',
     gaName: 'G&A - Miscellaneous Expense',
   },
   miscellaneous: {
@@ -223,9 +237,37 @@ const EXPENSE_TYPE_RULES: ExpenseTypeRule[] = [
       // Operational red-packets & incentives
       '红包', '运营红包', '奖励', '激励', '福利', '优惠券', 'coupon', 'incentive',
       // Social / community / growth
-      '社媒', '社群', '运营', '增长', 'growth', 'community',
+      '社媒', '社群', '增长', 'growth', 'community',
       // Events
       '活动', 'event', '展览', 'expo', '发布会',
+    ],
+  },
+  {
+    expenseType: 'content_seo',
+    categories: ['content', 'seo'],
+    keywords: [
+      // Content creation
+      '内容', 'content', '文案', 'copywriting', '撰稿', '写作',
+      // SEO / SEM
+      'seo', 'sem', '搜索优化', '搜索引擎',
+      // Video / media production
+      '视频制作', '拍摄', 'video production', '素材', '设计外包',
+      // Blog / article
+      '博客', 'blog', '文章', 'article',
+    ],
+  },
+  {
+    expenseType: 'pr_communications',
+    categories: ['pr', 'communications'],
+    keywords: [
+      // PR
+      '公关', 'pr', 'public relations', '媒体关系', 'media relations',
+      // Press
+      '新闻稿', 'press release', '通稿', '媒体', 'media',
+      // Communications
+      '传播', 'communications', '品牌传播', 'brand communications',
+      // External comms
+      '外宣', '舆情', '危机公关',
     ],
   },
 ];

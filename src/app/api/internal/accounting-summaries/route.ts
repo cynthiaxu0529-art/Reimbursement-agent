@@ -108,6 +108,8 @@ function mapExpenseToAccountSync(
     { expenseType: 'cloud', categories: ['cloud_resource','ai_token'], codes: { rd:'6420', sm:'6150', ga:'6390', rdName:'R&D - Cloud & Infrastructure', smName:'S&M - CRM & Sales Tools', gaName:'G&A - Miscellaneous Expense' } },
     { expenseType: 'software', categories: ['software'], codes: { rd:'6430', sm:'6150', ga:'6390', rdName:'R&D - Software & Subscriptions', smName:'S&M - CRM & Sales Tools', gaName:'G&A - Miscellaneous Expense' } },
     { expenseType: 'advertising', categories: ['marketing'], codes: { rd:'6490', sm:'6120', ga:'6390', rdName:'R&D - Miscellaneous Expense', smName:'S&M - Digital Advertising', gaName:'G&A - Miscellaneous Expense' } },
+    { expenseType: 'content_seo', categories: ['content','seo'], codes: { rd:'6490', sm:'6130', ga:'6390', rdName:'R&D - Miscellaneous Expense', smName:'S&M - Content & SEO', gaName:'G&A - Miscellaneous Expense' } },
+    { expenseType: 'pr_communications', categories: ['pr','communications'], codes: { rd:'6490', sm:'6160', ga:'6390', rdName:'R&D - Miscellaneous Expense', smName:'S&M - PR & Communications', gaName:'G&A - Miscellaneous Expense' } },
   ];
 
   const catLower = (category || '').toLowerCase();
@@ -129,6 +131,8 @@ function mapExpenseToAccountSync(
       '云|cloud|aws|gcp|azure|server|服务器|ai token|openai|anthropic': EXPENSE_TYPE_RULES[6].codes,
       '软件|software|license|许可|saas|subscription|订阅': EXPENSE_TYPE_RULES[7].codes,
       '广告|advertising|promotion|推广|营销|marketing|kol|红包': EXPENSE_TYPE_RULES[8].codes,
+      '内容|content|文案|copywriting|seo|sem|搜索优化|视频制作|博客|blog': EXPENSE_TYPE_RULES[9].codes,
+      '公关|pr|public relations|媒体关系|新闻稿|press release|传播|品牌传播|外宣|舆情': EXPENSE_TYPE_RULES[10].codes,
     };
     for (const [kwGroup, c] of Object.entries(keywords)) {
       if (kwGroup.split('|').some(kw => descLower.includes(kw))) { codes = c; break; }
