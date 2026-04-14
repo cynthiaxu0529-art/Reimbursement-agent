@@ -1563,6 +1563,13 @@ export default function DisbursementsPage() {
                                     >
                                       <span className="mr-1">↩</span> 冲销 (转为员工应收)
                                     </Button>
+                                    <a
+                                      href={`/dashboard/corrections?reimbId=${item.id}`}
+                                      className="block w-full text-center text-sm font-medium py-1.5 px-3 rounded-md border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100"
+                                      style={{ textDecoration: 'none' }}
+                                    >
+                                      ⚠️ 标记金额有误（冲差）
+                                    </a>
                                   </>
                                 )}
                               </div>
