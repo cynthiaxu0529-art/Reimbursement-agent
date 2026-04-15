@@ -877,6 +877,12 @@ export const correctionApplications = pgTable('correction_applications', {
     .references(() => users.id),
   appliedAt: timestamp('applied_at').notNull().defaultNow(),
 
+  // Sync tracking — records which external JE this correction adjustment has been
+  // synced to. Mirrors reimbursement_items.synced_je_id so the accounting agent
+  // can idempotently post the 1220 correction adjustment line in accounting summaries.
+  syncedJeId: text('synced_je_id'),
+  syncedAt: timestamp('synced_at'),
+
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 

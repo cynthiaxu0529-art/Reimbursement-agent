@@ -16,7 +16,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users, departments } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, departments, correctionApplications, expenseCorrections } from '@/lib/db/schema';
 import { eq, and, gte, lte, inArray, sql } from 'drizzle-orm';
 import { authenticateServiceAccount, isServiceKeyRequest } from '@/lib/auth/service-account';
 import { authenticate, logAgentAction, type AuthContext } from '@/lib/auth/api-key';
@@ -41,8 +41,14 @@ interface SummaryDetail {
   previous_account_code?: string;
   /** Timestamp when the COA was last changed */
   coa_changed_at?: string;
-  /** External JE ID if this item has already been synced */
+  /** External JE ID if this item/correction has already been synced */
   synced_je_id?: string;
+  /**
+   * Distinguishes reimbursement line items from correction adjustments so
+   * the accounting agent routes mark-synced calls to the right table.
+   * Defaults to 'reimbursement_item' when absent.
+   */
+  item_type?: 'reimbursement_item' | 'correction_application';
 }
 
 interface SummaryItem {
@@ -343,6 +349,80 @@ export async function GET(request: NextRequest) {
           group.fallbackHints.push(hint);
         }
       }
+    }
+
+    // 7.5 冲差抵扣记录 — 产生科目 1220 的调整行
+    // 应用时间决定归属的半月期间，与已入账的原报销可能跨期。
+    // Try-catch 兜底：迁移未跑时表可能不存在，不影响主汇总数据返回。
+    let allApplications: Array<{
+      application: typeof correctionApplications.$inferSelect;
+      correction: typeof expenseCorrections.$inferSelect;
+    }> = [];
+    try {
+      allApplications = await db
+        .select({
+          application: correctionApplications,
+          correction: expenseCorrections,
+        })
+        .from(correctionApplications)
+        .innerJoin(
+          expenseCorrections,
+          eq(correctionApplications.correctionId, expenseCorrections.id),
+        );
+    } catch (correctionErr) {
+      console.warn(
+        '[reimbursement-summaries] correction_applications query failed (table may not exist yet):',
+        (correctionErr as Error)?.message,
+      );
+    }
+
+    for (const row of allApplications) {
+      const { application, correction } = row;
+      const appliedAt = application.appliedAt || new Date();
+      const period = getHalfMonthPeriod(appliedAt);
+
+      const adjustmentCode = '1220';
+      const adjustmentName = correction.differenceAmount > 0
+        ? '费用冲差调整（多付扣回）'
+        : '费用冲差调整（少付补付）';
+
+      const employeeName = String(userMap.get(correction.employeeId) || '未知');
+
+      const groupKey = `${period.summaryId}::${adjustmentCode}`;
+
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          period,
+          accountCode: adjustmentCode,
+          accountName: adjustmentName,
+          details: [],
+          totalAmount: 0,
+          recordCount: 0,
+          isFallback: false,
+          fallbackHints: [],
+        });
+      }
+
+      const group = groups.get(groupKey)!;
+      const adjustmentAmount = correction.differenceAmount > 0
+        ? -application.appliedAmount
+        : application.appliedAmount;
+
+      const correctionDetail: SummaryDetail = {
+        item_id: application.id,
+        reimbursement_id: correction.originalReimbursementId,
+        employee_name: employeeName,
+        amount: Number(adjustmentAmount.toFixed(2)),
+        description: `冲差调整: ${correction.reason}`,
+        category: 'correction_adjustment',
+        item_type: 'correction_application',
+      };
+      if (application.syncedJeId) {
+        correctionDetail.synced_je_id = application.syncedJeId;
+      }
+      group.details.push(correctionDetail);
+      group.totalAmount += adjustmentAmount;
+      group.recordCount += 1;
     }
 
     // 8. 组装成 Summary 结构
