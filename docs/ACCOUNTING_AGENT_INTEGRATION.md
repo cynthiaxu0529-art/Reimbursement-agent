@@ -7,6 +7,8 @@
 > - `src/app/api/reimbursement-summaries/mark-synced/route.ts` — 回写同步状态
 > - `src/lib/db/schema.ts` — `reimbursementItems` / `correctionApplications` 的 `synced_je_id` 字段
 > - `drizzle/0011_add_coa_change_tracking.sql` + `drizzle/0012_add_correction_sync_tracking.sql`
+> - `src/app/api/payments/process/route.ts` — 付款时自动抵扣冲差，写入 `correction_applications`
+> - `src/lib/corrections/correction-service.ts` — `calculateAdjustedPaymentAmount` / `applyCorrection` 核心逻辑
 
 ## 认证
 
@@ -106,6 +108,37 @@
 - 原报销的 JE **不动**，差额通过 1220 当期调整分录补平。会计政策上这是「本期调整」派的标准做法，不做跨期反转。
 - `item_id` 是 `correction_applications.id`（**不是**报销明细 id），mark-synced 必须带 `item_type: "correction_application"`。
 
+#### 冲差落库的两条路径
+
+`correction_applications` 表由以下两种方式插入，对 accounting agent 完全透明——都产生同样的 1220 明细：
+
+1. **付款时自动抵扣（默认路径）**
+   - 财务在「付款处理」页点「确认付款」且未传 `customAmount`
+   - `POST /api/payments/process` 调用 `calculateAdjustedPaymentAmount()` → 得出建议金额 → Fluxa 按建议金额打款 → 成功后循环 `applyCorrection()` 写入 `correction_applications`
+   - `appliedAt` ≈ 付款发起时间
+   - 绝大多数冲差应该走这条路径
+
+2. **冲差管理页手工抵扣（例外路径）**
+   - 财务在「冲差管理」页打开「应用冲差抵扣」弹窗，指定目标报销单 + 抵扣金额
+   - `POST /api/corrections/[id]/apply` 直接调用 `applyCorrection()`
+   - `appliedAt` = 手工应用时间
+   - 用于付款已经发生、或财务主动分多次抵扣的场景
+
+两条路径写入的记录在字段上完全一致（`applied_by` 都是当前会话用户），accounting agent 不需要区分。
+
+### 「付款已自动抵扣」场景的含义
+
+如果 accounting agent 看到：
+- 某个半月期间有报销明细 A（科目 6602，金额 100）
+- 同一/后续期间有 1220 调整明细 B（金额 -20，`reimbursement_id` 指回某个**已付款**的老报销）
+
+通常说明：当前期间对应员工的一笔新报销在付款时自动扣减了 $20 去抵以前的多付，所以：
+- 报销 A 的费用科目 JE 仍按**审批金额** 100 记（`detail.amount = 100`，不因为自动抵扣而缩水）
+- 1220 调整 JE 按 -20 单独记，抵减原多付的应付账款
+- 实际 Fluxa 打款金额 = 100 - 20 = 80（这是现金账视角，与 JE 无关）
+
+这样费用科目归集不受冲差影响，追溯原始费用时金额仍然正确。
+
 ## 2. 回写同步状态
 
 `POST /api/reimbursement-summaries/mark-synced`
@@ -176,6 +209,8 @@ for each summary:
 - **表不存在**：`correction_applications` 迁移未跑时，拉取接口内部用 try/catch 兜底，不返回冲差明细，不影响主汇总。
 - **冲差跨期**：1220 明细永远按 `applied_at` 归期，与原报销的 `approved_at` 不对齐；这是设计行为。
 - **冲差被取消**：目前取消冲差（correction `status = cancelled`）不回滚 application，已应用的 application 会继续出现在汇总里——如遇此类需求需在 `expense_corrections` 表加状态过滤。
+- **付款时 applyCorrection 部分失败**：付款 API 先调 Fluxa、再循环 `applyCorrection`。单条冲差写入失败时不回滚（Fluxa 已接单），失败信息写到 `reimbursements.aiSuggestions.appliedCorrections[].ok = false`。accounting agent 不会看到这条失败的 application（因为没入库），下一次汇总拉取自然也不会包含它；需要人工去冲差管理页补 apply。
+- **整单被全额冲差吃掉**：调整后金额 ≤ 0 时付款 API 直接 400，要求财务去冲差管理页手工 apply，不发起 $0 payout。手工 apply 同样写入 `correction_applications`，后续汇总里会出现 1220 明细，但**没有**对应的正费用明细（因为该报销单状态不会推进到 `paid`，不会出现在普通 6xxx 科目里）。
 
 ## 5. 上线 / Rollout Checklist
 
