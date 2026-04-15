@@ -176,3 +176,33 @@ for each summary:
 - **表不存在**：`correction_applications` 迁移未跑时，拉取接口内部用 try/catch 兜底，不返回冲差明细，不影响主汇总。
 - **冲差跨期**：1220 明细永远按 `applied_at` 归期，与原报销的 `approved_at` 不对齐；这是设计行为。
 - **冲差被取消**：目前取消冲差（correction `status = cancelled`）不回滚 application，已应用的 application 会继续出现在汇总里——如遇此类需求需在 `expense_corrections` 表加状态过滤。
+
+## 5. 上线 / Rollout Checklist
+
+这次改动需要配合两步操作才能生效：
+
+### 数据库迁移（必做）
+
+在目标环境跑一次：
+
+```sql
+-- drizzle/0012_add_correction_sync_tracking.sql
+ALTER TABLE "correction_applications" ADD COLUMN IF NOT EXISTS "synced_je_id" text;
+ALTER TABLE "correction_applications" ADD COLUMN IF NOT EXISTS "synced_at" timestamp;
+```
+
+幂等 (`IF NOT EXISTS`)，重复执行安全。迁移未跑时代码层有 try/catch 兜底，冲差明细不会出现在汇总里，主流程不受影响；只有迁移跑完才能真正幂等处理 1220 调整。
+
+### Accounting Agent 升级
+
+agent 端按两点调整即可（都是非破坏性增量）：
+
+1. **拉汇总时识别 `item_type`**
+   - 老逻辑默认所有 detail 都是 `reimbursement_item`，仍然兼容。
+   - 新逻辑：遇到 `item_type === 'correction_application'` 时，走冲差调整 JE 模板（科目 1220，按金额正负决定借贷方向）。
+
+2. **回调 `mark-synced` 时带上 `item_type`**
+   - 老请求体（无 `item_type`）默认写入 `reimbursement_items` 表，继续有效。
+   - 新请求体：为冲差那条 detail 传 `item_type: "correction_application"`，系统会写入 `correction_applications.synced_je_id`。
+
+不升级 agent 的后果：冲差调整**不会被过账**（因为 agent 看不懂 1220 那条），但不会产生重复 JE 或数据污染——最多就是财务需要手工补一条调整分录。
