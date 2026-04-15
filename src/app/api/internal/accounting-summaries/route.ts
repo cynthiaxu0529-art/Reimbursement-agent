@@ -31,6 +31,12 @@ interface SummaryDetail {
   previous_account_code?: string;
   coa_changed_at?: string;
   synced_je_id?: string;
+  /**
+   * Distinguishes reimbursement line items from correction adjustments so the
+   * accounting agent routes mark-synced calls to the right table. Defaults to
+   * 'reimbursement_item' when absent (backward compatible).
+   */
+  item_type?: 'reimbursement_item' | 'correction_application';
 }
 
 interface SummaryItem {
@@ -327,7 +333,7 @@ export async function GET(request: NextRequest) {
         ? -application.appliedAmount
         : application.appliedAmount;
 
-      group.details.push({
+      const correctionDetail: SummaryDetail = {
         employee_name: employeeName,
         department: deptInfo?.name || '-',
         amount: Number(adjustmentAmount.toFixed(2)),
@@ -337,7 +343,12 @@ export async function GET(request: NextRequest) {
         category: 'correction_adjustment',
         account_code: adjustmentCode,
         account_name: adjustmentName,
-      });
+        item_type: 'correction_application',
+      };
+      if (application.syncedJeId) {
+        correctionDetail.synced_je_id = application.syncedJeId;
+      }
+      group.details.push(correctionDetail);
       group.totalAmount += adjustmentAmount;
       group.recordCount += 1;
     }
