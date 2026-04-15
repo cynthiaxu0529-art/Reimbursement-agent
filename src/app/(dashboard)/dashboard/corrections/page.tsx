@@ -149,22 +149,39 @@ export default function CorrectionsPage() {
 
   // ── Reimb lookup helper ─────────────────────────────────────────────────────
 
-  async function lookupReimbursement(id: string): Promise<ReimbursementLookup | null> {
-    const trimmed = id.trim();
+  async function lookupReimbursement(input: string): Promise<ReimbursementLookup | null> {
+    const trimmed = input.trim();
     if (!trimmed) return null;
-    const res = await fetch(`/api/reimbursements/${trimmed}`);
+
+    // 如果用户粘贴的不是完整 UUID（例如 `#86208B80` 或 `#RF-2026-ABCDE`），
+    // 先走 resolve 接口解析成真实 UUID，再查详情。
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let realId = trimmed;
+    if (!UUID_RE.test(trimmed)) {
+      const resolveRes = await fetch(
+        `/api/reimbursements/resolve?code=${encodeURIComponent(trimmed)}`,
+      );
+      const resolveData = await resolveRes.json().catch(() => null);
+      if (!resolveRes.ok || !resolveData?.success || !resolveData.id) {
+        return null;
+      }
+      realId = resolveData.id;
+    }
+
+    const res = await fetch(`/api/reimbursements/${realId}`);
     if (!res.ok) return null;
     const data = await res.json();
-    if (!data.reimbursement) return null;
-    const r = data.reimbursement;
+    // 兼容 { data: {...} } 和 { reimbursement: {...} } 两种返回格式
+    const r = data.reimbursement || data.data;
+    if (!r) return null;
     return {
       id: r.id,
       title: r.title,
       status: r.status,
       totalAmount: r.totalAmount,
       totalAmountInBaseCurrency: r.totalAmountInBaseCurrency || r.totalAmount,
-      userName: r.userName || r.user?.name || '未知',
-      userId: r.userId || r.user?.id || '',
+      userName: r.userName || r.submitter?.name || r.user?.name || '未知',
+      userId: r.userId || r.submitter?.id || r.user?.id || '',
       submittedAt: r.submittedAt || r.createdAt,
     };
   }
