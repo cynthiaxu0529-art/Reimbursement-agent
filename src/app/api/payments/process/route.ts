@@ -8,6 +8,10 @@ import {
   FluxaPayoutClient,
 } from '@/lib/fluxa-payout';
 import { getUserRoles, canProcessPayment } from '@/lib/auth/roles';
+import {
+  calculateAdjustedPaymentAmount,
+  applyCorrection,
+} from '@/lib/corrections/correction-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -152,6 +156,56 @@ export async function POST(request: NextRequest) {
       isCustomAmount = true;
     }
 
+    // 冲差自动抵扣：仅在未提供 customAmount（财务未手工覆盖）时生效。
+    // 提供 customAmount 视为显式覆盖，跳过自动抵扣，由财务人工负责。
+    type PendingCorrection = {
+      correctionId: string;
+      appliedAmount: number;
+      direction: 'deduct' | 'supplement';
+      reason: string;
+    };
+    let pendingCorrections: PendingCorrection[] = [];
+    let correctionOriginalAmount = originalAmountUSD;
+    let correctionAdjustedAmount = originalAmountUSD;
+
+    if (!isCustomAmount) {
+      try {
+        const adj = await calculateAdjustedPaymentAmount(
+          session.user.tenantId,
+          reimbursementId,
+        );
+        correctionOriginalAmount = adj.originalAmount;
+        correctionAdjustedAmount = adj.adjustedAmount;
+
+        if (adj.corrections.length > 0) {
+          pendingCorrections = adj.corrections.map((c) => ({
+            correctionId: c.correctionId,
+            // suggestedDeduction 多付为正、少付为负；applyCorrection 只接受正数 appliedAmount
+            appliedAmount: Math.abs(c.suggestedDeduction),
+            direction: c.suggestedDeduction > 0 ? 'deduct' : 'supplement',
+            reason: c.reason,
+          }));
+          amountUSD = adj.adjustedAmount;
+        }
+      } catch (err) {
+        // 冲差查询失败时不阻断付款——按原金额走，并告警记录
+        console.warn('[Payment] calculateAdjustedPaymentAmount failed, paying original amount:', err);
+      }
+    }
+
+    // 自动抵扣后金额 ≤ 0：Fluxa 会拒绝 $0 payout。改为提示财务手工处理
+    // （建议去冲差管理页直接 apply，不走 Fluxa）。
+    if (amountUSD <= 0) {
+      return NextResponse.json({
+        success: false,
+        error: '抵扣后金额为 0',
+        message: `该报销单完全被冲差抵扣（原金额 $${originalAmountUSD.toFixed(2)}，冲差共 $${(originalAmountUSD - amountUSD).toFixed(2)}）。请到冲差管理页手工确认抵扣，无需发起 payout。`,
+        correctionOriginalAmount,
+        correctionAdjustedAmount: amountUSD,
+        pendingCorrectionCount: pendingCorrections.length,
+      }, { status: 400 });
+    }
+
     // 初始化 Fluxa Payout 服务
     const payoutService = createFluxaPayoutService();
 
@@ -180,6 +234,43 @@ export async function POST(request: NextRequest) {
     );
 
     if (result.success && result.payoutId) {
+      // 先记录冲差抵扣（此时报销状态仍为 approved，applyCorrection 才不会被拒）。
+      // 注意：payout 已经发起成功，如果这里失败，钱在路上但冲差无法回写——
+      // 不阻断后续 payment 记录与 status 更新，而是把失败信息写进 aiSuggestions 供人工跟进。
+      const appliedCorrections: Array<{
+        correctionId: string;
+        appliedAmount: number;
+        direction: 'deduct' | 'supplement';
+        ok: boolean;
+        error?: string;
+      }> = [];
+      for (const pc of pendingCorrections) {
+        try {
+          await applyCorrection({
+            correctionId: pc.correctionId,
+            targetReimbursementId: reimbursement.id,
+            appliedAmount: pc.appliedAmount,
+            note: '付款时自动抵扣',
+            appliedBy: session.user.id,
+          });
+          appliedCorrections.push({
+            correctionId: pc.correctionId,
+            appliedAmount: pc.appliedAmount,
+            direction: pc.direction,
+            ok: true,
+          });
+        } catch (err) {
+          console.error('[Payment] applyCorrection failed post-payout:', pc.correctionId, err);
+          appliedCorrections.push({
+            correctionId: pc.correctionId,
+            appliedAmount: pc.appliedAmount,
+            direction: pc.direction,
+            ok: false,
+            error: err instanceof Error ? err.message : 'unknown',
+          });
+        }
+      }
+
       // 创建支付记录
       await db.insert(payments).values({
         reimbursementId: reimbursement.id,
@@ -196,6 +287,14 @@ export async function POST(request: NextRequest) {
         initiatedBy: session.user.id,
         updatedAt: new Date(),
       });
+
+      // 计算 adjustmentReason
+      let adjustmentReason: string | undefined;
+      if (isCustomAmount) {
+        adjustmentReason = '财务根据政策限额调整打款金额';
+      } else if (appliedCorrections.length > 0) {
+        adjustmentReason = `自动抵扣 ${appliedCorrections.filter(c => c.ok).length} 笔冲差`;
+      }
 
       // 更新报销单状态为处理中
       await db.update(reimbursements)
@@ -214,11 +313,23 @@ export async function POST(request: NextRequest) {
               amountUSDC: amountUSD,
               originalAmountUSDC: originalAmountUSD,
               isCustomAmount,
-              adjustmentReason: isCustomAmount ? '财务根据政策限额调整打款金额' : undefined,
+              adjustmentReason,
+              appliedCorrections: appliedCorrections.length > 0 ? appliedCorrections : undefined,
             },
           ],
         })
         .where(eq(reimbursements.id, reimbursementId));
+
+      const correctionSuccessCount = appliedCorrections.filter(c => c.ok).length;
+      const correctionFailureCount = appliedCorrections.length - correctionSuccessCount;
+      let message: string;
+      if (isCustomAmount) {
+        message = `打款请求已创建（金额已调整为 $${amountUSD.toFixed(2)}），请点击审批链接在钱包中完成审批`;
+      } else if (correctionSuccessCount > 0) {
+        message = `打款请求已创建（已自动抵扣 ${correctionSuccessCount} 笔冲差，实际打款 $${amountUSD.toFixed(2)}）${correctionFailureCount > 0 ? `；另有 ${correctionFailureCount} 笔抵扣失败，请手工检查` : ''}，请点击审批链接在钱包中完成审批`;
+      } else {
+        message = '打款请求已创建，请点击审批链接在钱包中完成审批';
+      }
 
       return NextResponse.json({
         success: true,
@@ -230,10 +341,15 @@ export async function POST(request: NextRequest) {
         amountUSDC: amountUSD,
         originalAmountUSDC: originalAmountUSD,
         isCustomAmount,
+        appliedCorrections: appliedCorrections.length > 0 ? appliedCorrections : undefined,
+        correctionAdjustedAmount: !isCustomAmount && pendingCorrections.length > 0
+          ? correctionAdjustedAmount
+          : undefined,
+        correctionOriginalAmount: !isCustomAmount && pendingCorrections.length > 0
+          ? correctionOriginalAmount
+          : undefined,
         toAddress: walletInfo.walletAddress,
-        message: isCustomAmount
-          ? `打款请求已创建（金额已调整为 $${amountUSD.toFixed(2)}），请点击审批链接在钱包中完成审批`
-          : '打款请求已创建，请点击审批链接在钱包中完成审批',
+        message,
       });
     } else {
       const errorCode = result.error?.code || 'UNKNOWN';
