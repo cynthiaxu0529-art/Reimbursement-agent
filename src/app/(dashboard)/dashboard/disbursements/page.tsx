@@ -111,6 +111,19 @@ export default function DisbursementsPage() {
   // 自定义打款金额（财务可修改）
   const [customPaymentAmounts, setCustomPaymentAmounts] = useState<Record<string, number>>({});
   const [editingAmountId, setEditingAmountId] = useState<string | null>(null);
+  // 冲差抵扣预览（按 reimbursementId 缓存，展开行时拉取）
+  type CorrectionAdjustment = {
+    hasCorrections: boolean;
+    originalAmount: number;
+    adjustedAmount: number;
+    corrections: Array<{
+      correctionId: string;
+      suggestedDeduction: number;
+      remainingAmount: number;
+      reason: string;
+    }>;
+  };
+  const [correctionAdjustments, setCorrectionAdjustments] = useState<Record<string, CorrectionAdjustment>>({});
   // 冲销相关状态
   const [reversalTarget, setReversalTarget] = useState<Reimbursement | null>(null);
   const [reversalReason, setReversalReason] = useState('');
@@ -419,11 +432,48 @@ export default function DisbursementsPage() {
     }
   }, [activeTab, reimbursements.length, loading]);
 
-  // 获取报销单的打款金额（自定义金额或原金额）
+  // 获取报销单的打款金额（优先级：用户自定义 > 冲差抵扣预览 > 原金额）
   const getPaymentAmount = (item: Reimbursement) => {
     const originalAmount = item.totalAmountInBaseCurrency || 0;
-    return customPaymentAmounts[item.id] ?? originalAmount;
+    if (customPaymentAmounts[item.id] !== undefined) {
+      return customPaymentAmounts[item.id];
+    }
+    const adj = correctionAdjustments[item.id];
+    if (adj?.hasCorrections) {
+      return adj.adjustedAmount;
+    }
+    return originalAmount;
   };
+
+  // 展开行时查询该报销单是否需要冲差抵扣（不阻塞 UI）
+  useEffect(() => {
+    if (!expandedId) return;
+    if (activeTab !== 'ready') return; // 只在待付款 tab 查询
+    if (correctionAdjustments[expandedId]) return; // 已缓存
+    const item = reimbursements.find(r => r.id === expandedId);
+    if (!item || item.isAdvance) return; // 预借款走独立流程
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/corrections/check-adjustment?reimbursementId=${encodeURIComponent(expandedId)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !data.success) return;
+        setCorrectionAdjustments(prev => ({
+          ...prev,
+          [expandedId]: {
+            hasCorrections: !!data.hasCorrections,
+            originalAmount: data.originalAmount,
+            adjustedAmount: data.adjustedAmount,
+            corrections: data.corrections || [],
+          },
+        }));
+      } catch (err) {
+        console.warn('Failed to check correction adjustment:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [expandedId, activeTab, reimbursements, correctionAdjustments]);
 
   // 设置自定义打款金额（仅更新本地状态，不保存到后端）
   const setCustomAmount = (id: string, amount: number, maxAmount: number) => {
@@ -1209,6 +1259,79 @@ export default function DisbursementsPage() {
                       <div className="grid grid-cols-[1fr_300px] gap-6">
                         {/* Left: Line Items */}
                         <div>
+                          {/* 冲差抵扣提示横幅（仅 ready tab + 有待冲差） */}
+                          {activeTab === 'ready' && correctionAdjustments[item.id]?.hasCorrections && (() => {
+                            const adj = correctionAdjustments[item.id];
+                            const totalDeduction = Number((adj.originalAmount - adj.adjustedAmount).toFixed(2));
+                            const isDeduct = totalDeduction > 0;
+                            const overridden = customPaymentAmounts[item.id] !== undefined;
+                            return (
+                              <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <span className="text-base">⚠️</span>
+                                      <span className="text-sm font-semibold text-amber-800">
+                                        该员工有 {adj.corrections.length} 笔待冲差（{isDeduct ? '多付扣回' : '少付补付'}）
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-amber-700 mb-2">
+                                      原金额 <span className="line-through">${adj.originalAmount.toFixed(2)}</span>
+                                      {' → '}
+                                      建议打款 <strong>${adj.adjustedAmount.toFixed(2)}</strong>
+                                      {' '}
+                                      （{isDeduct ? '自动抵扣' : '自动补付'} <strong>${Math.abs(totalDeduction).toFixed(2)}</strong>）
+                                    </p>
+                                    <ul className="text-xs text-amber-700 space-y-0.5 pl-4 list-disc">
+                                      {adj.corrections.slice(0, 3).map(c => (
+                                        <li key={c.correctionId}>
+                                          {c.reason}（${Math.abs(c.suggestedDeduction).toFixed(2)}）
+                                        </li>
+                                      ))}
+                                      {adj.corrections.length > 3 && (
+                                        <li>…等 {adj.corrections.length} 笔</li>
+                                      )}
+                                    </ul>
+                                    {overridden && (
+                                      <p className="text-xs text-red-600 mt-2 font-medium">
+                                        ⚠️ 已手工覆盖打款金额为 ${customPaymentAmounts[item.id].toFixed(2)}，系统不会自动记录冲差抵扣。请到冲差管理页手工确认。
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-col gap-1.5 shrink-0">
+                                    <button
+                                      onClick={() => router.push('/dashboard/corrections')}
+                                      className="px-3 py-1 text-xs text-amber-700 border border-amber-300 rounded hover:bg-amber-100 whitespace-nowrap"
+                                    >
+                                      查看冲差详情
+                                    </button>
+                                    {overridden ? (
+                                      <button
+                                        onClick={async () => {
+                                          await resetCustomAmount(item.id);
+                                        }}
+                                        className="px-3 py-1 text-xs text-emerald-700 border border-emerald-300 rounded hover:bg-emerald-100 whitespace-nowrap"
+                                      >
+                                        恢复自动抵扣
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={async () => {
+                                          const saved = await saveCustomAmount(item.id, adj.originalAmount);
+                                          if (saved) {
+                                            setCustomPaymentAmounts(prev => ({ ...prev, [item.id]: adj.originalAmount }));
+                                          }
+                                        }}
+                                        className="px-3 py-1 text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-100 whitespace-nowrap"
+                                      >
+                                        改为原金额
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
                           <div className="flex items-center justify-between mb-3">
                             <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                               <span>📋</span> 报销明细 (REIMBURSEMENT BREAKDOWN)
@@ -1334,11 +1457,15 @@ export default function DisbursementsPage() {
                                         <span className="text-lg font-bold text-emerald-700">
                                           ${getPaymentAmount(item).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                         </span>
-                                        {customPaymentAmounts[item.id] !== undefined && (
+                                        {customPaymentAmounts[item.id] !== undefined ? (
                                           <span className="text-xs text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">
-                                            已调整
+                                            已手工调整
                                           </span>
-                                        )}
+                                        ) : correctionAdjustments[item.id]?.hasCorrections ? (
+                                          <span className="text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                                            已含冲差抵扣
+                                          </span>
+                                        ) : null}
                                         <button
                                           onClick={() => setEditingAmountId(item.id)}
                                           className="px-2 py-1 text-xs text-emerald-600 border border-emerald-300 rounded hover:bg-emerald-100"
