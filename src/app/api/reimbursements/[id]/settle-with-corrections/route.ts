@@ -108,6 +108,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return apiError('该报销单没有待冲差记录，无需结清', 400);
     }
 
+    // 多笔待冲差时不允许走自动结清——避免把不相关的冲差胡乱套到这张报销上。
+    // 财务需要先去冲差管理页人工选择哪笔抵扣到哪张报销，剩余 = 0 后才能走结清。
+    if (adj.pendingCorrectionCount > 1) {
+      return apiError(
+        `该员工有 ${adj.pendingCorrectionCount} 笔待冲差，自动结清已被精度门拦截。请到冲差管理页人工选择应用，确保只把相关的冲差套到这张报销。`,
+        400,
+      );
+    }
+
     if (adj.adjustedAmount > 0) {
       return apiError(
         `抵扣后仍有 $${adj.adjustedAmount.toFixed(2)} 需打款，请走常规付款流程`,
@@ -115,7 +124,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // 循环 apply。若单条失败则停止，并返回已应用列表供排查；不继续推进状态。
+    // 循环 apply。calculateAdjustedPaymentAmount 已过滤 0 抵扣项，但保留防御性 skip。
+    // 若单条失败则停止，并返回已应用列表供排查；不继续推进状态。
     const appliedCorrections: Array<{
       correctionId: string;
       appliedAmount: number;
@@ -126,6 +136,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     let totalOffset = 0;
     for (const c of adj.corrections) {
       const appliedAmount = Math.abs(c.suggestedDeduction);
+      // 防御：理论上 calculateAdjustedPaymentAmount 已过滤，但再保险一次
+      if (appliedAmount <= 0) continue;
       try {
         await applyCorrection({
           correctionId: c.correctionId,
