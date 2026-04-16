@@ -151,6 +151,8 @@ export default function CorrectionsPage() {
   // Triggered after corrections list loads (so we can find the correction by id).
   // Only fires once per matching URL — keyed by a ref so hot-reload / re-renders don't re-trigger.
   const autoAppliedRef = useRef<string | null>(null);
+  // Track whether the current apply modal session was auto-prefilled (for "从付款页带入" hint)
+  const [applyAutoPrefilled, setApplyAutoPrefilled] = useState(false);
   useEffect(() => {
     if (corrections.length === 0) return;
     const params = new URLSearchParams(window.location.search);
@@ -165,6 +167,7 @@ export default function CorrectionsPage() {
     resetApplyModal();
     setApplyTarget(correction);
     setApplyReimbId(targetReimbId);
+    setApplyAutoPrefilled(true);
 
     // Auto-lookup the target reimbursement and pre-fill amount
     (async () => {
@@ -359,6 +362,7 @@ export default function CorrectionsPage() {
     setApplyAmount('');
     setApplyNote('');
     setApplyError(null);
+    setApplyAutoPrefilled(false);
   }
 
   // ── Cancel correction ───────────────────────────────────────────────────────
@@ -764,13 +768,18 @@ export default function CorrectionsPage() {
             <div style={{ marginBottom: '1rem' }}>
               <label style={{ fontSize: '0.825rem', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '0.375rem' }}>
                 {tc.labelTargetReimbId}
+                {applyAutoPrefilled && (
+                  <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', fontWeight: 400, color: '#2563eb', background: '#eff6ff', padding: '0.125rem 0.5rem', borderRadius: '0.25rem' }}>
+                    📎 从付款页带入，直接点「确认抵扣」即可
+                  </span>
+                )}
               </label>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <input
                   value={applyReimbId}
-                  onChange={e => { setApplyReimbId(e.target.value); setApplyReimbInfo(null); }}
+                  onChange={e => { setApplyReimbId(e.target.value); setApplyReimbInfo(null); setApplyAutoPrefilled(false); }}
                   placeholder={tc.labelTargetReimbIdHint}
-                  style={{ flex: 1, padding: '0.5rem 0.75rem', border: '1px solid #d1d5db', borderRadius: '0.375rem', fontSize: '0.825rem', fontFamily: 'monospace' }}
+                  style={{ flex: 1, padding: '0.5rem 0.75rem', border: applyAutoPrefilled ? '1px solid #bfdbfe' : '1px solid #d1d5db', background: applyAutoPrefilled ? '#f0f9ff' : 'white', borderRadius: '0.375rem', fontSize: '0.825rem', fontFamily: 'monospace' }}
                 />
                 <button
                   onClick={handleFetchApplyReimb}

@@ -33,6 +33,7 @@ async function main() {
       '0009_add_auto_approval.sql',
       '0010_add_expense_corrections.sql',
       '0011_add_coa_change_tracking.sql',
+      '0012_add_correction_sync_tracking.sql',
     ];
 
     for (const file of migrations) {
