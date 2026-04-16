@@ -119,6 +119,8 @@ export default function DisbursementsPage() {
     hasCorrections: boolean;
     originalAmount: number;
     adjustedAmount: number;
+    /** 该员工总待冲差笔数（含 0 抵扣）— 用于精度门判断 */
+    pendingCorrectionCount: number;
     corrections: Array<{
       correctionId: string;
       suggestedDeduction: number;
@@ -485,14 +487,15 @@ export default function DisbursementsPage() {
     }
   }, [activeTab, reimbursements.length, loading]);
 
-  // 获取报销单的打款金额（优先级：用户自定义 > 冲差抵扣预览 > 原金额）
+  // 获取报销单的打款金额（优先级：用户自定义 > 单笔冲差抵扣预览 > 原金额）
+  // 多笔冲差时不参与自动抵扣预览，按原金额显示。
   const getPaymentAmount = (item: Reimbursement) => {
     const originalAmount = item.totalAmountInBaseCurrency || 0;
     if (customPaymentAmounts[item.id] !== undefined) {
       return customPaymentAmounts[item.id];
     }
     const adj = correctionAdjustments[item.id];
-    if (adj?.hasCorrections) {
+    if (adj?.hasCorrections && adj.pendingCorrectionCount === 1) {
       return adj.adjustedAmount;
     }
     return originalAmount;
@@ -518,6 +521,7 @@ export default function DisbursementsPage() {
             hasCorrections: !!data.hasCorrections,
             originalAmount: data.originalAmount,
             adjustedAmount: data.adjustedAmount,
+            pendingCorrectionCount: data.pendingCorrectionCount ?? (data.corrections?.length || 0),
             corrections: data.corrections || [],
           },
         }));
@@ -1363,6 +1367,49 @@ export default function DisbursementsPage() {
                             const isDeduct = totalDeduction > 0;
                             const overridden = customPaymentAmounts[item.id] !== undefined;
                             const isFullyOffset = adj.adjustedAmount <= 0 && isDeduct;
+                            // 多笔冲差精度门：>1 笔时不自动匹配，避免把不相关的费用胡乱对账。
+                            const isMulti = adj.pendingCorrectionCount > 1;
+
+                            // ── 多冲差分支：只提示，不自动操作 ──────────────────────────────
+                            if (isMulti) {
+                              return (
+                                <div className="mb-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-base">⚠️</span>
+                                        <span className="text-sm font-semibold text-orange-800">
+                                          该员工有 {adj.pendingCorrectionCount} 笔待冲差（多笔不自动匹配）
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-orange-700 mb-2">
+                                        系统不会自动把不相关的冲差套到本张报销，请到冲差管理页人工选择哪笔抵扣到哪张报销。本次将按原金额 <strong>${adj.originalAmount.toFixed(2)}</strong> 打款。
+                                      </p>
+                                      <ul className="text-xs text-orange-700 space-y-0.5 pl-4 list-disc">
+                                        {adj.corrections.slice(0, 3).map(c => (
+                                          <li key={c.correctionId}>
+                                            {c.reason}（剩余 ${c.remainingAmount.toFixed(2)}）
+                                          </li>
+                                        ))}
+                                        {adj.corrections.length > 3 && (
+                                          <li>…等 {adj.corrections.length} 笔</li>
+                                        )}
+                                      </ul>
+                                    </div>
+                                    <div className="flex flex-col gap-1.5 shrink-0">
+                                      <button
+                                        onClick={() => router.push('/dashboard/corrections')}
+                                        className="px-3 py-1.5 text-xs font-semibold text-white bg-orange-600 rounded hover:bg-orange-700 whitespace-nowrap"
+                                      >
+                                        去冲差管理页人工处理
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            // ── 单冲差分支：保留原有自动抵扣 / 抵扣结清行为 ───────────────
                             return (
                               <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                                 <div className="flex items-start justify-between gap-3">
@@ -1370,7 +1417,7 @@ export default function DisbursementsPage() {
                                     <div className="flex items-center gap-2 mb-1">
                                       <span className="text-base">⚠️</span>
                                       <span className="text-sm font-semibold text-amber-800">
-                                        该员工有 {adj.corrections.length} 笔待冲差（{isDeduct ? '多付扣回' : '少付补付'}）
+                                        该员工有 1 笔待冲差（{isDeduct ? '多付扣回' : '少付补付'}）
                                       </span>
                                     </div>
                                     <p className="text-xs text-amber-700 mb-2">
@@ -1386,9 +1433,6 @@ export default function DisbursementsPage() {
                                           {c.reason}（${Math.abs(c.suggestedDeduction).toFixed(2)}）
                                         </li>
                                       ))}
-                                      {adj.corrections.length > 3 && (
-                                        <li>…等 {adj.corrections.length} 笔</li>
-                                      )}
                                     </ul>
                                     {isFullyOffset && !overridden && (
                                       <p className="text-xs text-amber-800 mt-2 font-medium">
@@ -1413,20 +1457,14 @@ export default function DisbursementsPage() {
                                     )}
                                     <button
                                       onClick={() => {
-                                        // Single correction → pre-fill apply modal on corrections page.
-                                        // Multiple corrections → just navigate to the list (user picks).
-                                        if (adj.corrections.length === 1) {
-                                          const c = adj.corrections[0];
-                                          const suggested = Math.abs(c.suggestedDeduction);
-                                          const params = new URLSearchParams({
-                                            applyCorrection: c.correctionId,
-                                            targetReimbId: item.id,
-                                            suggestedAmount: suggested.toFixed(2),
-                                          });
-                                          router.push(`/dashboard/corrections?${params.toString()}`);
-                                        } else {
-                                          router.push('/dashboard/corrections');
-                                        }
+                                        const c = adj.corrections[0];
+                                        const suggested = Math.abs(c.suggestedDeduction);
+                                        const params = new URLSearchParams({
+                                          applyCorrection: c.correctionId,
+                                          targetReimbId: item.id,
+                                          suggestedAmount: suggested.toFixed(2),
+                                        });
+                                        router.push(`/dashboard/corrections?${params.toString()}`);
                                       }}
                                       className="px-3 py-1 text-xs text-amber-700 border border-amber-300 rounded hover:bg-amber-100 whitespace-nowrap"
                                     >
@@ -1588,7 +1626,7 @@ export default function DisbursementsPage() {
                                           <span className="text-xs text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">
                                             已手工调整
                                           </span>
-                                        ) : correctionAdjustments[item.id]?.hasCorrections ? (
+                                        ) : correctionAdjustments[item.id]?.hasCorrections && correctionAdjustments[item.id].pendingCorrectionCount === 1 ? (
                                           <span className="text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
                                             已含冲差抵扣
                                           </span>

@@ -455,6 +455,8 @@ export async function calculateAdjustedPaymentAmount(
 ): Promise<{
   originalAmount: number;
   adjustedAmount: number;
+  /** 该员工所有 pending/partial 冲差总数（含 0 抵扣的）— 用于多冲差精度判断 */
+  pendingCorrectionCount: number;
   corrections: {
     correctionId: string;
     suggestedDeduction: number;
@@ -489,6 +491,7 @@ export async function calculateAdjustedPaymentAmount(
     return {
       originalAmount,
       adjustedAmount: originalAmount,
+      pendingCorrectionCount: 0,
       corrections: [],
     };
   }
@@ -503,8 +506,10 @@ export async function calculateAdjustedPaymentAmount(
 
   for (const correction of pendingCorrections) {
     if (correction.differenceAmount > 0) {
-      // 多付了 → 从当前报销中扣减
+      // 多付了 → 从当前报销中扣减。已经打到 0 的后续冲差不再进入建议列表，
+      // 避免调用方用 0 金额调 applyCorrection（会被 appliedAmount <= 0 拒绝）。
       const deduction = Math.min(correction.remainingAmount, adjustedAmount);
+      if (deduction <= 0) continue;
       adjustedAmount = Number((adjustedAmount - deduction).toFixed(2));
       correctionDetails.push({
         correctionId: correction.id,
@@ -515,6 +520,7 @@ export async function calculateAdjustedPaymentAmount(
     } else {
       // 少付了 → 追加到当前报销
       const supplement = correction.remainingAmount;
+      if (supplement <= 0) continue;
       adjustedAmount = Number((adjustedAmount + supplement).toFixed(2));
       correctionDetails.push({
         correctionId: correction.id,
@@ -528,6 +534,7 @@ export async function calculateAdjustedPaymentAmount(
   return {
     originalAmount,
     adjustedAmount,
+    pendingCorrectionCount: pendingCorrections.length,
     corrections: correctionDetails,
   };
 }

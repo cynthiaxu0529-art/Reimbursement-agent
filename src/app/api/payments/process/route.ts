@@ -168,6 +168,9 @@ export async function POST(request: NextRequest) {
     let correctionOriginalAmount = originalAmountUSD;
     let correctionAdjustedAmount = originalAmountUSD;
 
+    // 多冲差精度门：员工待冲差 > 1 笔时不做自动匹配，避免把不相关的费用胡乱对账。
+    // 财务在付款页能看到提示，自行去冲差管理页人工选择哪笔抵扣到哪张报销。
+    let multiCorrectionDeferred = false;
     if (!isCustomAmount) {
       try {
         const adj = await calculateAdjustedPaymentAmount(
@@ -177,7 +180,11 @@ export async function POST(request: NextRequest) {
         correctionOriginalAmount = adj.originalAmount;
         correctionAdjustedAmount = adj.adjustedAmount;
 
-        if (adj.corrections.length > 0) {
+        if (adj.pendingCorrectionCount > 1) {
+          // 多笔待冲差：跳过自动抵扣，按原金额打款，并在响应里告知调用方
+          multiCorrectionDeferred = true;
+        } else if (adj.corrections.length > 0) {
+          // 仅 1 笔待冲差：保留原本的自动抵扣行为
           pendingCorrections = adj.corrections.map((c) => ({
             correctionId: c.correctionId,
             // suggestedDeduction 多付为正、少付为负；applyCorrection 只接受正数 appliedAmount
@@ -330,6 +337,8 @@ export async function POST(request: NextRequest) {
         message = `打款请求已创建（金额已调整为 $${amountUSD.toFixed(2)}），请点击审批链接在钱包中完成审批`;
       } else if (correctionSuccessCount > 0) {
         message = `打款请求已创建（已自动抵扣 ${correctionSuccessCount} 笔冲差，实际打款 $${amountUSD.toFixed(2)}）${correctionFailureCount > 0 ? `；另有 ${correctionFailureCount} 笔抵扣失败，请手工检查` : ''}，请点击审批链接在钱包中完成审批`;
+      } else if (multiCorrectionDeferred) {
+        message = `打款请求已创建（按原金额 $${amountUSD.toFixed(2)} 打款）。该员工有多笔待冲差，系统未自动抵扣，请到冲差管理页人工选择哪笔抵扣到哪张报销。`;
       } else {
         message = '打款请求已创建，请点击审批链接在钱包中完成审批';
       }
@@ -351,6 +360,7 @@ export async function POST(request: NextRequest) {
         correctionOriginalAmount: !isCustomAmount && pendingCorrections.length > 0
           ? correctionOriginalAmount
           : undefined,
+        multiCorrectionDeferred: multiCorrectionDeferred ? true : undefined,
         toAddress: walletInfo.walletAddress,
         message,
       });

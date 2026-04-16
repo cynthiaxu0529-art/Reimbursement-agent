@@ -144,14 +144,29 @@
 - **没有**对应的正常 payment 记录（那条 `internal_offset` 不是转账、没有 `payoutId`），但 `/api/payments/stats` 等按 reimbursement 状态统计的接口不受影响
 - accounting agent 看到：费用入账 + 1220 反向调整 = 净现金流 0，与实际相符
 
+### 多冲差精度门（重要）
+
+**当某员工有 > 1 笔 pending/partial 冲差时，自动抵扣会被精度门拦截**：
+
+- `/api/payments/process` 不会自动调用 `applyCorrection`，按原金额打款，响应里带 `multiCorrectionDeferred: true`
+- `/api/reimbursements/[id]/settle-with-corrections` 直接 400 拒绝
+- 付款页 UI 横幅会从黄色 (auto) 切换到橙色 (manual-only)，文案改为「该员工有 N 笔待冲差（多笔不自动匹配），请到冲差管理页人工选择哪笔抵扣到哪张报销」
+
+**为什么有这个门**：原始设计把员工的所有 pending 冲差按顺序套到任何新报销上，可能把不相关的费用对账（比如「Claude API 多付 $100」被「Anthropic $23 订阅费」自动消耗）。多冲差时人是更精准的判断者，让人决定。
+
+**单冲差仍然自动**：1 笔 pending 冲差时仍然走完全自动抵扣的路径——因为单笔时「这是该员工目前唯一的待办」语义清晰，自动抵扣没有歧义。
+
+**怎么消化多冲差**：财务到冲差管理页，对每笔冲差点击「应用冲差」，分别选择目标报销单。也可以从付款页带 `?applyCorrection=<cid>&targetReimbId=<rid>` 跳过来——但只有付款页知道该员工总共有 1 笔（auto）还是多笔（manual），多笔时付款页只会跳到列表，让财务自己挑。
+
 ### Agent 调用指南
 
 accounting 场景下 agent 的推荐调用序列：
 
 | 场景 | 调用顺序 |
 |------|---------|
-| 标准付款（待冲差金额 < 报销金额） | ① `GET /api/corrections/check-adjustment?reimbursementId=X` 预览（可选）→ ② `POST /api/payments/process`（不传 `customAmount`）→ API 自动抵扣 + 记账 |
-| 整单全额被冲差抵扣 | ① `GET /api/corrections/check-adjustment` 发现 `adjustedAmount <= 0` → ② `POST /api/reimbursements/[id]/settle-with-corrections` 一键结清（或直接调 `/api/payments/process` 得到 `FULL_OFFSET_REQUIRED` 错误后跳转到 settle） |
+| 该员工只有 1 笔待冲差，金额 < 报销金额 | ① `GET /api/corrections/check-adjustment?reimbursementId=X` 预览（可选）→ ② `POST /api/payments/process`（不传 `customAmount`）→ API 自动抵扣 + 记账 |
+| 该员工只有 1 笔待冲差，整单全额抵扣 | ① `GET /api/corrections/check-adjustment` 发现 `adjustedAmount <= 0` 且 `pendingCorrectionCount === 1` → ② `POST /api/reimbursements/[id]/settle-with-corrections` 一键结清（或直接调 `/api/payments/process` 得到 `FULL_OFFSET_REQUIRED` 错误后跳转到 settle） |
+| 该员工有 ≥ 2 笔待冲差（精度门触发） | ① `GET /api/corrections/check-adjustment` 看到 `pendingCorrectionCount > 1` → ② **不要**直接 `process` 或 `settle`（前者会按原金额打、不抵扣；后者直接 400）→ ③ 提示人工到冲差管理页逐笔 `POST /api/corrections/[id]/apply` 把每笔冲差精准套到合适的目标报销 → ④ 抵完后再 `process` / `settle` |
 | 财务要求只抵一部分 | ① `GET /api/corrections/check-adjustment` 预览 → ② `POST /api/corrections/[id]/apply` 指定金额抵扣 → ③ `POST /api/payments/process` 带 `customAmount = 原 - 已抵`（显式传 customAmount 后系统不会再次自动抵扣） |
 
 所有端点都支持 API Key 认证（`Authorization: Bearer rk_*`），需要的 scope：
