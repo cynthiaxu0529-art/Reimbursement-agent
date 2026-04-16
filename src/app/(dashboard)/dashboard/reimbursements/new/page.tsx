@@ -541,12 +541,7 @@ export default function NewReimbursementPage() {
     ));
   };
 
-  const totalAmount = lineItems.reduce(
-    (sum, item) => sum + (parseFloat(item.amount) || 0),
-    0
-  );
-
-  // 计算美元总额
+  // 计算美元总额（记账本位币）。不再计算原币合计，因多币种混合相加无意义
   const totalAmountUSD = lineItems.reduce(
     (sum, item) => sum + (item.amountInUSD || 0),
     0
@@ -1389,12 +1384,8 @@ export default function NewReimbursementPage() {
                 borderTop: '1px solid #e5e7eb',
               }}>
                 <div style={{ display: 'flex', gap: '32px', alignItems: 'flex-end' }}>
-                  <div>
-                    <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '2px' }}>原币合计</p>
-                    <p style={{ fontSize: '20px', fontWeight: 600, color: '#6b7280' }}>
-                      ¥{totalAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-                    </p>
-                  </div>
+                  {/* 原币合计仅在多币种混合时无意义（30 SGD + 100 EUR 无法相加），
+                      且每行已经显示了各自原币金额，故此处只展示记账本位币合计 */}
                   <div>
                     <p style={{ fontSize: '12px', color: '#0369a1', marginBottom: '2px' }}>
                       折算美元 (记账本位币)
