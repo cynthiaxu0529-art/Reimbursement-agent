@@ -156,8 +156,12 @@ export async function POST(request: NextRequest) {
       isCustomAmount = true;
     }
 
-    // 冲差自动抵扣：仅在未提供 customAmount（财务未手工覆盖）时生效。
-    // 提供 customAmount 视为显式覆盖，跳过自动抵扣，由财务人工负责。
+    // 冲差处理分两层：
+    //  (a) 已应用抵扣（alreadyOffset）：历史上已经写入 correction_applications 的金额，
+    //      本次打款必须从应付里减掉，否则会出现「冲差记 $X + Fluxa 再付全额 = 双付」。
+    //  (b) 未应用的 pending 冲差：是否自动抵扣受 customAmount / 多冲差精度门控制。
+    // 当调用方提供 customAmount 时，视为显式覆盖——仍然扣 alreadyOffset 避免双付，但不再自动
+    // 应用 pending。未提供 customAmount 且只有 1 笔 pending 时走自动抵扣；>1 笔时交人工处理。
     type PendingCorrection = {
       correctionId: string;
       appliedAmount: number;
@@ -167,21 +171,37 @@ export async function POST(request: NextRequest) {
     let pendingCorrections: PendingCorrection[] = [];
     let correctionOriginalAmount = originalAmountUSD;
     let correctionAdjustedAmount = originalAmountUSD;
-
-    // 多冲差精度门：员工待冲差 > 1 笔时不做自动匹配，避免把不相关的费用胡乱对账。
-    // 财务在付款页能看到提示，自行去冲差管理页人工选择哪笔抵扣到哪张报销。
+    let alreadyOffset = 0;
     let multiCorrectionDeferred = false;
-    if (!isCustomAmount) {
-      try {
-        const adj = await calculateAdjustedPaymentAmount(
-          session.user.tenantId,
-          reimbursementId,
-        );
-        correctionOriginalAmount = adj.originalAmount;
-        correctionAdjustedAmount = adj.adjustedAmount;
 
+    try {
+      const adj = await calculateAdjustedPaymentAmount(
+        session.user.tenantId,
+        reimbursementId,
+      );
+      correctionOriginalAmount = adj.originalAmount;
+      correctionAdjustedAmount = adj.adjustedAmount;
+      alreadyOffset = adj.alreadyOffset;
+
+      // (a) alreadyOffset 永远扣 —— 哪怕 customAmount 指定了上限，也要保证不超过可付余额
+      if (alreadyOffset > 0) {
+        const maxAllowed = Number((originalAmountUSD - alreadyOffset).toFixed(2));
+        if (isCustomAmount && amountUSD > maxAllowed) {
+          return NextResponse.json({
+            success: false,
+            error: '自定义金额超过可付余额',
+            message: `该报销已被冲差抵扣 $${alreadyOffset.toFixed(2)}，可付余额仅为 $${maxAllowed.toFixed(2)}`,
+          }, { status: 400 });
+        }
+        if (!isCustomAmount) {
+          amountUSD = maxAllowed;
+        }
+      }
+
+      // (b) pending 冲差的自动抵扣
+      if (!isCustomAmount) {
         if (adj.pendingCorrectionCount > 1) {
-          // 多笔待冲差：跳过自动抵扣，按原金额打款，并在响应里告知调用方
+          // 多笔待冲差：跳过自动抵扣，按 (原金额 - alreadyOffset) 打款，告知调用方
           multiCorrectionDeferred = true;
         } else if (adj.corrections.length > 0) {
           // 仅 1 笔待冲差：保留原本的自动抵扣行为
@@ -194,10 +214,10 @@ export async function POST(request: NextRequest) {
           }));
           amountUSD = adj.adjustedAmount;
         }
-      } catch (err) {
-        // 冲差查询失败时不阻断付款——按原金额走，并告警记录
-        console.warn('[Payment] calculateAdjustedPaymentAmount failed, paying original amount:', err);
       }
+    } catch (err) {
+      // 冲差查询失败时不阻断付款——按原金额走，并告警记录
+      console.warn('[Payment] calculateAdjustedPaymentAmount failed, paying original amount:', err);
     }
 
     // 自动抵扣后金额 ≤ 0：Fluxa 不接受 $0 payout。

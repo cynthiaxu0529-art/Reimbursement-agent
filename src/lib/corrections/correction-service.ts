@@ -454,6 +454,8 @@ export async function calculateAdjustedPaymentAmount(
   reimbursementId: string
 ): Promise<{
   originalAmount: number;
+  /** 已经作为冲差抵扣目标写入 correction_applications 表的金额（历史，锁定） */
+  alreadyOffset: number;
   adjustedAmount: number;
   /** 该员工所有 pending/partial 冲差总数（含 0 抵扣的）— 用于多冲差精度判断 */
   pendingCorrectionCount: number;
@@ -481,22 +483,36 @@ export async function calculateAdjustedPaymentAmount(
 
   const originalAmount = reimbursement.totalAmountInBaseCurrency || reimbursement.totalAmount;
 
+  // 已应用到本报销单的冲差总额（已经锁定，无论是自动抵扣还是人工抵扣）。
+  // 这一步是必须的——否则付款接口会忽视「这张单已经被冲抵过」，导致对 Fluxa 发全额双付。
+  const appliedRows = await db
+    .select({ appliedAmount: correctionApplications.appliedAmount })
+    .from(correctionApplications)
+    .where(eq(correctionApplications.targetReimbursementId, reimbursementId));
+  const alreadyOffset = Number(
+    appliedRows.reduce((sum: number, r: { appliedAmount: number }) => sum + r.appliedAmount, 0).toFixed(2),
+  );
+
   // 查询该员工的待冲差记录
   const pendingCorrections = await getPendingCorrectionsForEmployee(
     tenantId,
     reimbursement.userId
   );
 
+  // 基线：先扣掉已应用的抵扣
+  const baselinePayable = Number((originalAmount - alreadyOffset).toFixed(2));
+
   if (pendingCorrections.length === 0) {
     return {
       originalAmount,
-      adjustedAmount: originalAmount,
+      alreadyOffset,
+      adjustedAmount: baselinePayable,
       pendingCorrectionCount: 0,
       corrections: [],
     };
   }
 
-  let adjustedAmount = originalAmount;
+  let adjustedAmount = baselinePayable;
   const correctionDetails: {
     correctionId: string;
     suggestedDeduction: number;
@@ -533,6 +549,7 @@ export async function calculateAdjustedPaymentAmount(
 
   return {
     originalAmount,
+    alreadyOffset,
     adjustedAmount,
     pendingCorrectionCount: pendingCorrections.length,
     corrections: correctionDetails,

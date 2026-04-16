@@ -101,16 +101,23 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return apiError('该报销单已存在未终态的付款记录，请勿重复结清', 409);
     }
 
-    // 计算待冲差
+    // 计算应付余额
     const adj = await calculateAdjustedPaymentAmount(tenantId, reimbursementId);
 
-    if (adj.corrections.length === 0) {
-      return apiError('该报销单没有待冲差记录，无需结清', 400);
+    // 两种结清路径：
+    //  (a) 已有 correction_applications 抵扣到该单（alreadyOffset > 0），且已扣完：
+    //      不需要再 apply，直接把状态推到 paid 即可
+    //  (b) 还有 pending 冲差需要 apply 才能扣完：
+    //      循环 apply 后再推 paid（受多冲差精度门约束）
+    const onlyPostApply = adj.alreadyOffset > 0 && adj.corrections.length === 0;
+
+    if (adj.alreadyOffset === 0 && adj.corrections.length === 0) {
+      return apiError('该报销单没有任何冲差记录，无需结清', 400);
     }
 
     // 多笔待冲差时不允许走自动结清——避免把不相关的冲差胡乱套到这张报销上。
     // 财务需要先去冲差管理页人工选择哪笔抵扣到哪张报销，剩余 = 0 后才能走结清。
-    if (adj.pendingCorrectionCount > 1) {
+    if (!onlyPostApply && adj.pendingCorrectionCount > 1) {
       return apiError(
         `该员工有 ${adj.pendingCorrectionCount} 笔待冲差，自动结清已被精度门拦截。请到冲差管理页人工选择应用，确保只把相关的冲差套到这张报销。`,
         400,
@@ -172,6 +179,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // 总抵扣 = 本次新应用的 + 历史已应用的
+    const settledTotalOffset = Number((totalOffset + adj.alreadyOffset).toFixed(2));
+
     // 生成 $0 payment 占位记录（provider='internal_offset'），便于历史列表、统计一致
     const now = new Date();
     await db.insert(payments).values({
@@ -203,7 +213,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               appliedAmount: ac.appliedAmount,
               direction: ac.direction,
             })),
-            totalOffset,
+            alreadyOffset: adj.alreadyOffset,
+            newlyApplied: totalOffset,
+            totalOffset: settledTotalOffset,
             settledAt: now.toISOString(),
             settledBy: authCtx.userId,
           },
@@ -211,12 +223,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
       .where(eq(reimbursements.id, reimbursementId));
 
+    const messageParts: string[] = [];
+    if (totalOffset > 0) {
+      messageParts.push(`本次新抵扣 $${totalOffset.toFixed(2)}`);
+    }
+    if (adj.alreadyOffset > 0) {
+      messageParts.push(`历史已抵扣 $${adj.alreadyOffset.toFixed(2)}`);
+    }
+
     return NextResponse.json({
       success: true,
       reimbursementId,
-      totalOffset,
+      totalOffset: settledTotalOffset,
+      alreadyOffset: adj.alreadyOffset,
+      newlyApplied: totalOffset,
       appliedCorrections,
-      message: `已通过冲差全额抵扣结清（共抵扣 $${totalOffset.toFixed(2)}，无需打款）`,
+      message: `已通过冲差全额抵扣结清（${messageParts.join('、')}，共 $${settledTotalOffset.toFixed(2)}，无需打款）`,
     });
   } catch (error) {
     console.error('Settle with corrections error:', error);

@@ -115,6 +115,8 @@ export default function DisbursementsPage() {
   type CorrectionAdjustment = {
     hasCorrections: boolean;
     originalAmount: number;
+    /** 本报销单已经被历史冲差抵扣的金额（锁定） */
+    alreadyOffset: number;
     adjustedAmount: number;
     /** 该员工总待冲差笔数（含 0 抵扣）— 用于精度门判断 */
     pendingCorrectionCount: number;
@@ -435,18 +437,22 @@ export default function DisbursementsPage() {
     }
   }, [activeTab, reimbursements.length, loading]);
 
-  // 获取报销单的打款金额（优先级：用户自定义 > 单笔冲差抵扣预览 > 原金额）
-  // 多笔冲差时不参与自动抵扣预览，按原金额显示。
+  // 获取报销单的打款金额（优先级：用户自定义 > 冲差抵扣后余额 > 原金额）。
+  // 当有 alreadyOffset（历史抵扣）时，至少要扣掉这部分防止双付；
+  // 此外单笔 pending 冲差时按抵扣后预览值显示，多笔 pending 不预览、只扣历史。
   const getPaymentAmount = (item: Reimbursement) => {
     const originalAmount = item.totalAmountInBaseCurrency || 0;
     if (customPaymentAmounts[item.id] !== undefined) {
       return customPaymentAmounts[item.id];
     }
     const adj = correctionAdjustments[item.id];
-    if (adj?.hasCorrections && adj.pendingCorrectionCount === 1) {
-      return adj.adjustedAmount;
+    if (!adj?.hasCorrections) return originalAmount;
+    // 单笔 pending：用 adjustedAmount（已经包含 alreadyOffset + pending 预估）
+    if (adj.pendingCorrectionCount === 1) {
+      return Math.max(0, adj.adjustedAmount);
     }
-    return originalAmount;
+    // 其它情况（多笔 pending / 仅历史抵扣）：只扣 alreadyOffset
+    return Math.max(0, Number((originalAmount - adj.alreadyOffset).toFixed(2)));
   };
 
   // 展开行时查询该报销单是否需要冲差抵扣（不阻塞 UI）
@@ -468,6 +474,7 @@ export default function DisbursementsPage() {
           [expandedId]: {
             hasCorrections: !!data.hasCorrections,
             originalAmount: data.originalAmount,
+            alreadyOffset: data.alreadyOffset ?? 0,
             adjustedAmount: data.adjustedAmount,
             pendingCorrectionCount: data.pendingCorrectionCount ?? (data.corrections?.length || 0),
             corrections: data.corrections || [],
@@ -1317,6 +1324,58 @@ export default function DisbursementsPage() {
                             const isFullyOffset = adj.adjustedAmount <= 0 && isDeduct;
                             // 多笔冲差精度门：>1 笔时不自动匹配，避免把不相关的费用胡乱对账。
                             const isMulti = adj.pendingCorrectionCount > 1;
+                            // 已历史抵扣但无 pending：需要直接走结清，防止对 Fluxa 发全额
+                            const onlyHistorical = adj.pendingCorrectionCount === 0 && adj.alreadyOffset > 0;
+
+                            // ── 已历史抵扣分支：只需结清（不用再 apply）────────────────────
+                            if (onlyHistorical) {
+                              const needsSettle = adj.adjustedAmount <= 0;
+                              return (
+                                <div className="mb-3 p-3 bg-sky-50 border border-sky-200 rounded-lg">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-base">ℹ️</span>
+                                        <span className="text-sm font-semibold text-sky-800">
+                                          本报销单已被历史冲差抵扣 ${adj.alreadyOffset.toFixed(2)}
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-sky-700 mb-1">
+                                        原金额 ${adj.originalAmount.toFixed(2)}
+                                        {' · '}
+                                        应付余额 <strong>${Math.max(0, adj.adjustedAmount).toFixed(2)}</strong>
+                                      </p>
+                                      {needsSettle ? (
+                                        <p className="text-xs text-sky-800 font-medium">
+                                          余额为 0，需走结清路径把状态推到「已付款」，<strong>不要</strong>对 Fluxa 发打款（会造成双付）。
+                                        </p>
+                                      ) : (
+                                        <p className="text-xs text-sky-700">
+                                          按余额 ${adj.adjustedAmount.toFixed(2)} 正常付款即可。
+                                        </p>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-col gap-1.5 shrink-0">
+                                      {needsSettle && (
+                                        <button
+                                          onClick={() => settleWithCorrections(item.id)}
+                                          disabled={settlingId === item.id}
+                                          className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:opacity-60 whitespace-nowrap"
+                                        >
+                                          {settlingId === item.id ? '结清中…' : '✓ 抵扣结清'}
+                                        </button>
+                                      )}
+                                      <button
+                                        onClick={() => router.push('/dashboard/corrections')}
+                                        className="px-3 py-1 text-xs text-sky-700 border border-sky-300 rounded hover:bg-sky-100 whitespace-nowrap"
+                                      >
+                                        查看冲差详情
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            }
 
                             // ── 多冲差分支：只提示，不自动操作 ──────────────────────────────
                             if (isMulti) {
