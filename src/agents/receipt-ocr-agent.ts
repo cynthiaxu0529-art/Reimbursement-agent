@@ -275,7 +275,102 @@ export class ReceiptOCRAgent {
     if (type === 'vat_invoice' || type === 'vat_special' || type === 'general_receipt') {
       const vendor = ((parsed.vendor as string) || '').toLowerCase();
       const description = ((parsed.description as string) || '').toLowerCase();
-      const combined = `${vendor} ${description}`;
+      const rawText = ((parsed.rawText as string) || '').toLowerCase();
+      // 跨境 SaaS 发票的商家名常出现在 rawText 中而不在 description 字段，
+      // 因此把 rawText 一并纳入关键词匹配。
+      const combined = `${vendor} ${description} ${rawText}`;
+
+      // AI 服务（Anthropic、OpenAI、Claude、ChatGPT、Gemini、DeepSeek、通义、文心等）
+      if (
+        combined.includes('anthropic') ||
+        combined.includes('claude') ||
+        combined.includes('openai') ||
+        combined.includes('chatgpt') ||
+        combined.includes(' gpt') ||
+        combined.includes('gpt-') ||
+        combined.includes('gemini') ||
+        combined.includes('cohere') ||
+        combined.includes('mistral') ||
+        combined.includes('huggingface') ||
+        combined.includes('hugging face') ||
+        combined.includes('deepseek') ||
+        combined.includes('perplexity') ||
+        combined.includes('replicate') ||
+        combined.includes('together ai') ||
+        combined.includes('通义') ||
+        combined.includes('文心') ||
+        combined.includes('智谱')
+      ) {
+        return ExpenseCategory.AI_TOKEN;
+      }
+      // 云资源（AWS、Azure、GCP、Vercel、Cloudflare、DigitalOcean、阿里云、腾讯云等）
+      if (
+        combined.includes('amazon web services') ||
+        combined.includes(' aws ') ||
+        combined.includes('aws,') ||
+        combined.includes('aws.') ||
+        combined.includes('azure') ||
+        combined.includes('google cloud') ||
+        combined.includes(' gcp') ||
+        combined.includes('digitalocean') ||
+        combined.includes('digital ocean') ||
+        combined.includes('linode') ||
+        combined.includes('vercel') ||
+        combined.includes('cloudflare') ||
+        combined.includes('netlify') ||
+        combined.includes('heroku') ||
+        combined.includes('render.com') ||
+        combined.includes('fly.io') ||
+        combined.includes('阿里云') ||
+        combined.includes('腾讯云') ||
+        combined.includes('华为云') ||
+        combined.includes('aliyun')
+      ) {
+        return ExpenseCategory.CLOUD_RESOURCE;
+      }
+      // 第三方 API 服务（Stripe、Twilio、SendGrid、Resend 等）
+      if (
+        combined.includes('stripe') ||
+        combined.includes('twilio') ||
+        combined.includes('sendgrid') ||
+        combined.includes('resend') ||
+        combined.includes('mailgun') ||
+        combined.includes('postmark') ||
+        combined.includes('algolia') ||
+        combined.includes('mapbox')
+      ) {
+        return ExpenseCategory.API_SERVICE;
+      }
+      // 软件订阅（GitHub、Notion、Figma、Linear、Slack、Jira 等）
+      if (
+        combined.includes('github') ||
+        combined.includes('gitlab') ||
+        combined.includes('notion') ||
+        combined.includes('figma') ||
+        combined.includes('linear') ||
+        combined.includes('slack') ||
+        combined.includes('jira') ||
+        combined.includes('atlassian') ||
+        combined.includes('confluence') ||
+        combined.includes('1password') ||
+        combined.includes('dropbox') ||
+        combined.includes('zoom') ||
+        combined.includes('jetbrains') ||
+        combined.includes('microsoft 365') ||
+        combined.includes('office 365')
+      ) {
+        return ExpenseCategory.SOFTWARE;
+      }
+      // 域名（Namecheap、GoDaddy、Google Domains 等）
+      if (
+        combined.includes('namecheap') ||
+        combined.includes('godaddy') ||
+        combined.includes('google domains') ||
+        combined.includes('name.com') ||
+        combined.includes('gandi')
+      ) {
+        return ExpenseCategory.DOMAIN;
+      }
 
       if (combined.includes('酒店') || combined.includes('hotel')) {
         return ExpenseCategory.HOTEL;

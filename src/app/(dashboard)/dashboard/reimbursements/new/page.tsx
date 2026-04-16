@@ -211,6 +211,29 @@ export default function NewReimbursementPage() {
       pr_communications: '公关',
       training: '培训',
       conference: '会议',
+      // 技术类
+      ai_token: 'AI 服务',
+      cloud_resource: '云资源',
+      api_service: 'API 服务',
+      software: '软件订阅',
+      hosting: '托管服务',
+      domain: '域名',
+      // 办公类
+      office_supplies: '办公用品',
+      equipment: '设备',
+      printing: '打印',
+      courier: '快递',
+      phone: '通讯',
+      internet: '网络',
+      utilities: '水电',
+      // 业务类
+      client_entertainment: '客户招待',
+      membership: '会员订阅',
+      // 出行类
+      car_rental: '租车',
+      fuel: '燃油',
+      parking: '停车',
+      toll: '过路',
       other: '费用',
     };
 
