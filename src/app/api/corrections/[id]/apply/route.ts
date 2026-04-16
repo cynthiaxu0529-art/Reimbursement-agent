@@ -74,7 +74,12 @@ export async function POST(
     });
   } catch (error) {
     console.error('Apply correction error:', error);
-    const message = error instanceof Error ? error.message : '冲差抵扣失败';
-    return NextResponse.json({ error: message }, { status: 400 });
+    const rawMessage = error instanceof Error ? error.message : '冲差抵扣失败';
+    // 把底层 DB / drizzle 错误转成用户友好提示，避免 SQL 细节泄漏到前端
+    const isSchemaError = /column .* does not exist|relation .* does not exist|Failed query/i.test(rawMessage);
+    const userMessage = isSchemaError
+      ? '数据库迁移未完成，请联系管理员运行 drizzle/0012_add_correction_sync_tracking.sql（或重新部署让自动迁移执行）'
+      : rawMessage;
+    return NextResponse.json({ error: userMessage }, { status: 400 });
   }
 }
