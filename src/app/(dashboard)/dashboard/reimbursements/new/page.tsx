@@ -676,6 +676,14 @@ export default function NewReimbursementPage() {
       if (result.success) {
         const reimbursementId = result.data?.id;
 
+        // 若后端触发了政策限额调整，明确告知用户（否则金额会"被静默改小"）
+        if (result.limitAdjustments && result.limitAdjustments.count > 0) {
+          const detail = Array.isArray(result.limitAdjustments.messages) && result.limitAdjustments.messages.length > 0
+            ? `\n\n${result.limitAdjustments.messages.join('\n')}`
+            : '';
+          alert(`${result.limitAdjustments.message || '部分金额超过政策限额，已自动调整'}${detail}`);
+        }
+
         if (confirmedItinerary && reimbursementId) {
           // 如果有已确认的行程单，关联到新创建的报销单
           try {
