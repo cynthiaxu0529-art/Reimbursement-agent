@@ -94,17 +94,31 @@ export async function GET(request: NextRequest) {
 
     const processingCount = processingResult[0]?.count || 0;
 
-    // 查询已付总数
+    // 查询已付总数（报销单：paid + reversed）
     const totalPaidResult = await db.select({
       count: sql<number>`count(*)::int`,
     })
       .from(reimbursements)
-      .where(and(reimbTenantCondition, eq(reimbursements.status, 'paid')));
+      .where(and(
+        reimbTenantCondition,
+        inArray(reimbursements.status, ['paid', 'reversed'])
+      ));
 
-    const totalPaidCount = totalPaidResult[0]?.count || 0;
+    // 已打款的预借款也计入"付款历史"（paid/reconciling/reconciled 都代表已完成打款）
+    const advancePaidResult = await db.select({
+      count: sql<number>`count(*)::int`,
+    })
+      .from(advances)
+      .where(and(
+        eq(advances.tenantId, tenantId),
+        inArray(advances.status, ['paid', 'reconciling', 'reconciled'])
+      ));
+
+    const totalPaidCount =
+      (totalPaidResult[0]?.count || 0) + (advancePaidResult[0]?.count || 0);
 
     // 查询今日已付的报销单数量
-    const todayPaidResult = await db.select({
+    const todayPaidReimbResult = await db.select({
       count: sql<number>`count(*)::int`,
     })
       .from(reimbursements)
@@ -115,7 +129,20 @@ export async function GET(request: NextRequest) {
         lt(reimbursements.paidAt, todayEnd)
       ));
 
-    const todayPaidCount = todayPaidResult[0]?.count || 0;
+    // 今日已付的预借款数量
+    const todayPaidAdvanceResult = await db.select({
+      count: sql<number>`count(*)::int`,
+    })
+      .from(advances)
+      .where(and(
+        eq(advances.tenantId, tenantId),
+        inArray(advances.status, ['paid', 'reconciling', 'reconciled']),
+        gte(advances.paidAt, todayStart),
+        lt(advances.paidAt, todayEnd)
+      ));
+
+    const todayPaidCount =
+      (todayPaidReimbResult[0]?.count || 0) + (todayPaidAdvanceResult[0]?.count || 0);
 
     // 查询已冲销的报销单数量
     const reversedResult = await db.select({

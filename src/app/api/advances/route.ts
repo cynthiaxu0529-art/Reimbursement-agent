@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { advances, users } from '@/lib/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 /**
@@ -36,7 +36,13 @@ export async function GET(request: NextRequest) {
     }
 
     if (status) {
-      conditions.push(eq(advances.status, status));
+      // 支持多个状态（逗号分隔），与 /api/reimbursements 保持一致
+      const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        conditions.push(eq(advances.status, statuses[0]));
+      } else if (statuses.length > 1) {
+        conditions.push(inArray(advances.status, statuses));
+      }
     }
 
     const advanceList = await db.query.advances.findMany({
