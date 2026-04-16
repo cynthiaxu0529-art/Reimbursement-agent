@@ -40,9 +40,12 @@ interface Reimbursement {
   };
   paymentStatus?: 'pending' | 'processing' | 'completed' | 'failed';
   paymentId?: string;
+  paidAt?: string;
   aiSuggestions?: any[];
   isAdvance?: boolean;
   advancePurpose?: string;
+  /** 原始预借款状态：paid | reconciling | reconciled（用于历史 tab 区分） */
+  advanceStatus?: string;
 }
 
 const categoryLabels: Record<string, { label: string; icon: string; color: string }> = {
@@ -292,6 +295,51 @@ export default function DisbursementsPage() {
           }
         }
 
+        // 付款历史 tab：同时获取已打款的预借款（paid/reconciling/reconciled）并合并到列表
+        // 预借款打款后，状态可能停留在 paid 或进入 reconciling/reconciled，
+        // 这三种状态都表示"已完成付款"，应在付款历史中显示
+        if (activeTab === 'history') {
+          try {
+            const advRes = await fetch('/api/advances?status=paid,reconciling,reconciled');
+            const advResult = await advRes.json();
+            if (advResult.success && advResult.data) {
+              const advanceItems: Reimbursement[] = advResult.data.map((adv: any) => ({
+                id: adv.id,
+                title: adv.title,
+                // 统一用 'paid' 作为展示状态，真实的预借款状态保留在 advanceStatus 中
+                status: 'paid',
+                totalAmount: adv.amount,
+                totalAmountInBaseCurrency: adv.amount,
+                baseCurrency: adv.currency || 'USD',
+                createdAt: adv.createdAt,
+                submittedAt: adv.createdAt,
+                approvedAt: adv.approvedAt,
+                paidAt: adv.paidAt,
+                paymentId: adv.paymentId,
+                items: [],
+                submitter: adv.user ? {
+                  id: adv.user.id,
+                  name: adv.user.name,
+                  email: adv.user.email,
+                  department: adv.user.department,
+                } : undefined,
+                isAdvance: true,
+                advancePurpose: adv.purpose || adv.description || '',
+                advanceStatus: adv.status,
+              }));
+              data = [...data, ...advanceItems];
+              // 按最近付款时间排序（没有 paidAt 时退回 createdAt）
+              data.sort((a: Reimbursement, b: Reimbursement) => {
+                const aTime = new Date(a.paidAt || a.createdAt).getTime();
+                const bTime = new Date(b.paidAt || b.createdAt).getTime();
+                return bTime - aTime;
+              });
+            }
+          } catch (err) {
+            console.error('Failed to fetch paid advances:', err);
+          }
+        }
+
         setReimbursements(data);
 
         // 用列表实际数据同步统计卡片，避免 stats API 静默失败时显示 $0
@@ -308,7 +356,11 @@ export default function DisbursementsPage() {
         } else if (activeTab === 'processing') {
           setPaymentStats(prev => ({ ...prev, processingCount: data.length }));
         } else if (activeTab === 'history') {
-          const paidItems = data.filter((r: Reimbursement) => r.status === 'paid');
+          // 历史列表包含：已付款报销（paid）+ 已冲销报销（reversed）+ 已打款预借款（统一映射为 paid）
+          // 这三类都应纳入"付款历史"总数
+          const paidItems = data.filter(
+            (r: Reimbursement) => r.status === 'paid' || r.status === 'reversed'
+          );
           setPaymentStats(prev => ({
             ...prev,
             totalPaidCount: paidItems.length,
@@ -1656,6 +1708,9 @@ export default function DisbursementsPage() {
                               (s: any) => s.type === 'fluxa_payout_initiated'
                             );
                             const isReversed = item.status === 'reversed';
+                            // 预借款有自己的 paidAt / paymentId 字段，没有 aiSuggestions
+                            const paidAtDisplay =
+                              payoutInfo?.initiatedAt || item.paidAt;
                             return (
                               <div className="pt-2 border-t space-y-2">
                                 {isReversed ? (
@@ -1672,34 +1727,42 @@ export default function DisbursementsPage() {
                                   <>
                                     <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
                                       <p className="text-sm font-medium text-green-800 mb-1">
-                                        已完成付款
+                                        {item.isAdvance ? '预借款已打款' : '已完成付款'}
                                       </p>
                                       <div className="text-xs text-green-700 space-y-1">
                                         <p>金额: ${(payoutInfo?.amountUSDC || item.totalAmountInBaseCurrency || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</p>
-                                        {payoutInfo?.initiatedAt && (
-                                          <p>发起时间: {formatDate(payoutInfo.initiatedAt)}</p>
+                                        {paidAtDisplay && (
+                                          <p>{item.isAdvance ? '付款时间' : '发起时间'}: {formatDate(paidAtDisplay)}</p>
+                                        )}
+                                        {item.isAdvance && item.advanceStatus && item.advanceStatus !== 'paid' && (
+                                          <p>核销状态: {item.advanceStatus === 'reconciling' ? '核销中' : item.advanceStatus === 'reconciled' ? '已核销' : item.advanceStatus}</p>
                                         )}
                                       </div>
                                     </div>
-                                    <Button
-                                      variant="outline"
-                                      onClick={() => {
-                                        setReversalTarget(item);
-                                        setReversalAmount('');
-                                        setReversalReason('');
-                                        setReversalCategory('full');
-                                      }}
-                                      className="w-full text-red-600 border-red-200 hover:bg-red-50"
-                                    >
-                                      <span className="mr-1">↩</span> 冲销 (转为员工应收)
-                                    </Button>
-                                    <a
-                                      href={`/dashboard/corrections?reimbId=${item.id}`}
-                                      className="block w-full text-center text-sm font-medium py-1.5 px-3 rounded-md border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100"
-                                      style={{ textDecoration: 'none' }}
-                                    >
-                                      ⚠️ 标记金额有误（冲差）
-                                    </a>
+                                    {/* 预借款不通过"冲销"流程处理（走核销流程），因此不显示冲销/冲差按钮 */}
+                                    {!item.isAdvance && (
+                                      <>
+                                        <Button
+                                          variant="outline"
+                                          onClick={() => {
+                                            setReversalTarget(item);
+                                            setReversalAmount('');
+                                            setReversalReason('');
+                                            setReversalCategory('full');
+                                          }}
+                                          className="w-full text-red-600 border-red-200 hover:bg-red-50"
+                                        >
+                                          <span className="mr-1">↩</span> 冲销 (转为员工应收)
+                                        </Button>
+                                        <a
+                                          href={`/dashboard/corrections?reimbId=${item.id}`}
+                                          className="block w-full text-center text-sm font-medium py-1.5 px-3 rounded-md border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100"
+                                          style={{ textDecoration: 'none' }}
+                                        >
+                                          ⚠️ 标记金额有误（冲差）
+                                        </a>
+                                      </>
+                                    )}
                                   </>
                                 )}
                               </div>
