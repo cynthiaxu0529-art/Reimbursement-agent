@@ -127,6 +127,7 @@ export default function DisbursementsPage() {
     }>;
   };
   const [correctionAdjustments, setCorrectionAdjustments] = useState<Record<string, CorrectionAdjustment>>({});
+  const [settlingId, setSettlingId] = useState<string | null>(null);
   // 冲销相关状态
   const [reversalTarget, setReversalTarget] = useState<Reimbursement | null>(null);
   const [reversalReason, setReversalReason] = useState('');
@@ -640,6 +641,13 @@ export default function DisbursementsPage() {
           window.open(result.approvalUrl, '_blank');
         }
         alert('付款已提交成功，请在 Fluxa 钱包中完成审批');
+      } else if (result.code === 'FULL_OFFSET_REQUIRED') {
+        // 抵扣后金额为 0：后端要求走 settle-with-corrections
+        if (confirm(`${result.message}\n\n是否立即通过冲差抵扣结清？`)) {
+          setProcessing(null);
+          await settleWithCorrections(id);
+          return;
+        }
       } else {
         // 显示详细的错误信息
         const errorMsg = result.message || result.error || '付款处理失败';
@@ -654,6 +662,43 @@ export default function DisbursementsPage() {
       alert(`付款处理失败: ${msg}`);
     } finally {
       setProcessing(null);
+    }
+  };
+
+  // 冲差全额抵扣结清：adjustedAmount <= 0 时使用，不走 Fluxa，直接写 offset + 推 status
+  const settleWithCorrections = async (id: string) => {
+    if (!confirm('该报销单将通过冲差全额抵扣结清（不打款），确认吗？')) return;
+    setSettlingId(id);
+    setErrorMessage(null);
+    try {
+      const res = await fetch(`/api/reimbursements/${id}/settle-with-corrections`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setReimbursements(prev => prev.filter(r => r.id !== id));
+        setSelectedIds(prev => prev.filter(sid => sid !== id));
+        setExpandedId(null);
+        setCorrectionAdjustments(prev => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        fetchPaymentStats();
+        alert(data.message || '已通过冲差抵扣结清');
+      } else {
+        const msg = data.message || data.error || '抵扣结清失败';
+        setErrorMessage(msg);
+        alert(`抵扣结清失败: ${msg}`);
+      }
+    } catch (error) {
+      console.error('Settle error:', error);
+      const msg = error instanceof Error ? error.message : '网络错误';
+      setErrorMessage(`抵扣结清失败: ${msg}`);
+      alert(`抵扣结清失败: ${msg}`);
+    } finally {
+      setSettlingId(null);
     }
   };
 
@@ -1317,6 +1362,7 @@ export default function DisbursementsPage() {
                             const totalDeduction = Number((adj.originalAmount - adj.adjustedAmount).toFixed(2));
                             const isDeduct = totalDeduction > 0;
                             const overridden = customPaymentAmounts[item.id] !== undefined;
+                            const isFullyOffset = adj.adjustedAmount <= 0 && isDeduct;
                             return (
                               <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                                 <div className="flex items-start justify-between gap-3">
@@ -1344,6 +1390,11 @@ export default function DisbursementsPage() {
                                         <li>…等 {adj.corrections.length} 笔</li>
                                       )}
                                     </ul>
+                                    {isFullyOffset && !overridden && (
+                                      <p className="text-xs text-amber-800 mt-2 font-medium">
+                                        该报销单可被冲差全额抵扣（无需打款）。点击右侧「抵扣结清」一键完成。
+                                      </p>
+                                    )}
                                     {overridden && (
                                       <p className="text-xs text-red-600 mt-2 font-medium">
                                         ⚠️ 已手工覆盖打款金额为 ${customPaymentAmounts[item.id].toFixed(2)}，系统不会自动记录冲差抵扣。请到冲差管理页手工确认。
@@ -1351,8 +1402,32 @@ export default function DisbursementsPage() {
                                     )}
                                   </div>
                                   <div className="flex flex-col gap-1.5 shrink-0">
+                                    {isFullyOffset && !overridden && (
+                                      <button
+                                        onClick={() => settleWithCorrections(item.id)}
+                                        disabled={settlingId === item.id}
+                                        className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:opacity-60 whitespace-nowrap"
+                                      >
+                                        {settlingId === item.id ? '结清中…' : '✓ 抵扣结清'}
+                                      </button>
+                                    )}
                                     <button
-                                      onClick={() => router.push('/dashboard/corrections')}
+                                      onClick={() => {
+                                        // Single correction → pre-fill apply modal on corrections page.
+                                        // Multiple corrections → just navigate to the list (user picks).
+                                        if (adj.corrections.length === 1) {
+                                          const c = adj.corrections[0];
+                                          const suggested = Math.abs(c.suggestedDeduction);
+                                          const params = new URLSearchParams({
+                                            applyCorrection: c.correctionId,
+                                            targetReimbId: item.id,
+                                            suggestedAmount: suggested.toFixed(2),
+                                          });
+                                          router.push(`/dashboard/corrections?${params.toString()}`);
+                                        } else {
+                                          router.push('/dashboard/corrections');
+                                        }
+                                      }}
                                       className="px-3 py-1 text-xs text-amber-700 border border-amber-300 rounded hover:bg-amber-100 whitespace-nowrap"
                                     >
                                       查看冲差详情
@@ -1366,7 +1441,7 @@ export default function DisbursementsPage() {
                                       >
                                         恢复自动抵扣
                                       </button>
-                                    ) : (
+                                    ) : !isFullyOffset ? (
                                       <button
                                         onClick={async () => {
                                           const saved = await saveCustomAmount(item.id, adj.originalAmount);
@@ -1378,7 +1453,7 @@ export default function DisbursementsPage() {
                                       >
                                         改为原金额
                                       </button>
-                                    )}
+                                    ) : null}
                                   </div>
                                 </div>
                               </div>

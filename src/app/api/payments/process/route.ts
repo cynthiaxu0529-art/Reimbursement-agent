@@ -193,16 +193,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 自动抵扣后金额 ≤ 0：Fluxa 会拒绝 $0 payout。改为提示财务手工处理
-    // （建议去冲差管理页直接 apply，不走 Fluxa）。
+    // 自动抵扣后金额 ≤ 0：Fluxa 不接受 $0 payout。
+    // 提示前端走 settle-with-corrections 端点结清（前端会在收到此信号后
+    // 展示「抵扣结清」按钮或直接调用结清端点）。
     if (amountUSD <= 0) {
       return NextResponse.json({
         success: false,
-        error: '抵扣后金额为 0',
-        message: `该报销单完全被冲差抵扣（原金额 $${originalAmountUSD.toFixed(2)}，冲差共 $${(originalAmountUSD - amountUSD).toFixed(2)}）。请到冲差管理页手工确认抵扣，无需发起 payout。`,
+        error: 'FULL_OFFSET_REQUIRED',
+        code: 'FULL_OFFSET_REQUIRED',
+        message: `该报销单完全被冲差抵扣（原金额 $${originalAmountUSD.toFixed(2)}，待冲差共 $${(correctionOriginalAmount - correctionAdjustedAmount).toFixed(2)}）。请调用 POST /api/reimbursements/${reimbursementId}/settle-with-corrections 完成无打款结清。`,
         correctionOriginalAmount,
-        correctionAdjustedAmount: amountUSD,
+        correctionAdjustedAmount,
         pendingCorrectionCount: pendingCorrections.length,
+        settleEndpoint: `/api/reimbursements/${reimbursementId}/settle-with-corrections`,
       }, { status: 400 });
     }
 

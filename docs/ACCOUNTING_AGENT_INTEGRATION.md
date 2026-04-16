@@ -8,6 +8,8 @@
 > - `src/lib/db/schema.ts` — `reimbursementItems` / `correctionApplications` 的 `synced_je_id` 字段
 > - `drizzle/0011_add_coa_change_tracking.sql` + `drizzle/0012_add_correction_sync_tracking.sql`
 > - `src/app/api/payments/process/route.ts` — 付款时自动抵扣冲差，写入 `correction_applications`
+> - `src/app/api/reimbursements/[id]/settle-with-corrections/route.ts` — 全额抵扣无需打款时的结清端点
+> - `src/app/api/corrections/check-adjustment/route.ts` — 打款前预览抵扣（Session 或 API Key 认证）
 > - `src/lib/corrections/correction-service.ts` — `calculateAdjustedPaymentAmount` / `applyCorrection` 核心逻辑
 
 ## 认证
@@ -108,23 +110,58 @@
 - 原报销的 JE **不动**，差额通过 1220 当期调整分录补平。会计政策上这是「本期调整」派的标准做法，不做跨期反转。
 - `item_id` 是 `correction_applications.id`（**不是**报销明细 id），mark-synced 必须带 `item_type: "correction_application"`。
 
-#### 冲差落库的两条路径
+#### 冲差落库的三条路径
 
-`correction_applications` 表由以下两种方式插入，对 accounting agent 完全透明——都产生同样的 1220 明细：
+`correction_applications` 表由以下三种方式插入，对 accounting agent 完全透明——都产生同样的 1220 明细：
 
-1. **付款时自动抵扣（默认路径）**
+1. **付款时自动抵扣（默认路径，最常见）**
    - 财务在「付款处理」页点「确认付款」且未传 `customAmount`
    - `POST /api/payments/process` 调用 `calculateAdjustedPaymentAmount()` → 得出建议金额 → Fluxa 按建议金额打款 → 成功后循环 `applyCorrection()` 写入 `correction_applications`
    - `appliedAt` ≈ 付款发起时间
-   - 绝大多数冲差应该走这条路径
+   - 绝大多数冲差走这条路径
 
-2. **冲差管理页手工抵扣（例外路径）**
+2. **全额抵扣结清（无需打款）**
+   - 当抵扣后 `adjustedAmount <= 0`（整单都被冲差吃掉）时，Fluxa 不能发 $0 payout，财务点「抵扣结清」按钮
+   - 前端调 `POST /api/reimbursements/[id]/settle-with-corrections`
+   - 端点循环 `applyCorrection()` + 写入一条 `amount=0 / paymentProvider='internal_offset'` 的 payment 占位记录 + 把报销状态从 `approved` 推到 `paid`
+   - 也可以由 `/api/payments/process` 主动引导：当检测到 `adjustedAmount <= 0` 时，响应 `{ success: false, code: 'FULL_OFFSET_REQUIRED', settleEndpoint: '...' }`，前端/agent 据此跳到 settle 端点
+
+3. **冲差管理页手工抵扣（例外路径）**
    - 财务在「冲差管理」页打开「应用冲差抵扣」弹窗，指定目标报销单 + 抵扣金额
    - `POST /api/corrections/[id]/apply` 直接调用 `applyCorrection()`
    - `appliedAt` = 手工应用时间
-   - 用于付款已经发生、或财务主动分多次抵扣的场景
+   - 用于付款已经发生、财务分多次抵扣、或任何需要精细控制金额的场景
+   - 从付款页跳转时，URL 会带 `?applyCorrection=<cid>&targetReimbId=<rid>&suggestedAmount=<n>`，弹窗会**自动预填**这三个字段，财务一键确认即可
 
-两条路径写入的记录在字段上完全一致（`applied_by` 都是当前会话用户），accounting agent 不需要区分。
+三条路径写入的记录在字段上完全一致（`applied_by` 都是当前会话用户），accounting agent 不需要区分。
+
+#### 全额抵扣结清在汇总里的形状
+
+路径 2（结清）产生的数据在下次拉取汇总时：
+
+- 新报销的**费用明细**（6xxx 科目）按 `reimbursement.status = 'paid'` 被纳入汇总，按原始金额入账
+- 1220 冲差调整行按应用期间被单独列出（等额反向冲抵）
+- **没有**对应的正常 payment 记录（那条 `internal_offset` 不是转账、没有 `payoutId`），但 `/api/payments/stats` 等按 reimbursement 状态统计的接口不受影响
+- accounting agent 看到：费用入账 + 1220 反向调整 = 净现金流 0，与实际相符
+
+### Agent 调用指南
+
+accounting 场景下 agent 的推荐调用序列：
+
+| 场景 | 调用顺序 |
+|------|---------|
+| 标准付款（待冲差金额 < 报销金额） | ① `GET /api/corrections/check-adjustment?reimbursementId=X` 预览（可选）→ ② `POST /api/payments/process`（不传 `customAmount`）→ API 自动抵扣 + 记账 |
+| 整单全额被冲差抵扣 | ① `GET /api/corrections/check-adjustment` 发现 `adjustedAmount <= 0` → ② `POST /api/reimbursements/[id]/settle-with-corrections` 一键结清（或直接调 `/api/payments/process` 得到 `FULL_OFFSET_REQUIRED` 错误后跳转到 settle） |
+| 财务要求只抵一部分 | ① `GET /api/corrections/check-adjustment` 预览 → ② `POST /api/corrections/[id]/apply` 指定金额抵扣 → ③ `POST /api/payments/process` 带 `customAmount = 原 - 已抵`（显式传 customAmount 后系统不会再次自动抵扣） |
+
+所有端点都支持 API Key 认证（`Authorization: Bearer rk_*`），需要的 scope：
+
+| 端点 | scope |
+|------|-------|
+| `GET /api/corrections/check-adjustment` | `payment:read` |
+| `POST /api/payments/process` | `payment:process` |
+| `POST /api/reimbursements/[id]/settle-with-corrections` | `payment:process` |
+| `POST /api/corrections/[id]/apply` | （目前 session only，后续可加 API Key） |
 
 ### 「付款已自动抵扣」场景的含义
 
@@ -210,7 +247,8 @@ for each summary:
 - **冲差跨期**：1220 明细永远按 `applied_at` 归期，与原报销的 `approved_at` 不对齐；这是设计行为。
 - **冲差被取消**：目前取消冲差（correction `status = cancelled`）不回滚 application，已应用的 application 会继续出现在汇总里——如遇此类需求需在 `expense_corrections` 表加状态过滤。
 - **付款时 applyCorrection 部分失败**：付款 API 先调 Fluxa、再循环 `applyCorrection`。单条冲差写入失败时不回滚（Fluxa 已接单），失败信息写到 `reimbursements.aiSuggestions.appliedCorrections[].ok = false`。accounting agent 不会看到这条失败的 application（因为没入库），下一次汇总拉取自然也不会包含它；需要人工去冲差管理页补 apply。
-- **整单被全额冲差吃掉**：调整后金额 ≤ 0 时付款 API 直接 400，要求财务去冲差管理页手工 apply，不发起 $0 payout。手工 apply 同样写入 `correction_applications`，后续汇总里会出现 1220 明细，但**没有**对应的正费用明细（因为该报销单状态不会推进到 `paid`，不会出现在普通 6xxx 科目里）。
+- **整单被全额冲差吃掉**：调整后金额 ≤ 0 时付款 API 返回 `code: 'FULL_OFFSET_REQUIRED'`，前端/agent 应转用 `POST /api/reimbursements/[id]/settle-with-corrections` 完成无打款结清。结清成功后报销状态直接 `approved → paid`，同时写入 `amount=0 / paymentProvider='internal_offset'` 的占位 payment 记录。此时汇总里会同时看到费用明细 + 1220 反向调整（两者等额抵消），这是正确的：费用归集照常，$0 现金流。
+- **settle-with-corrections 中途失败**：端点顺序调 `applyCorrection`，任一条失败立即中止并返回 500，**不会**推进 reimbursement 状态——避免半推进半失败。已成功的 application 已入库可保留（幂等无副作用）；重新调用 settle 端点时会重新查 `calculateAdjustedPaymentAmount`，只处理剩余未抵的冲差。
 
 ## 5. 上线 / Rollout Checklist
 
