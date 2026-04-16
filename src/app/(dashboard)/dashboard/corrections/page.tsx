@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
 
@@ -146,6 +146,49 @@ export default function CorrectionsPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Pre-fill apply modal from ?applyCorrection=<cid>&targetReimbId=<rid>&suggestedAmount=<n>
+  // Triggered after corrections list loads (so we can find the correction by id).
+  // Only fires once per matching URL — keyed by a ref so hot-reload / re-renders don't re-trigger.
+  const autoAppliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (corrections.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const correctionId = params.get('applyCorrection');
+    const targetReimbId = params.get('targetReimbId');
+    if (!correctionId || !targetReimbId) return;
+    if (autoAppliedRef.current === correctionId) return;
+    const correction = corrections.find(c => c.id === correctionId);
+    if (!correction) return;
+    autoAppliedRef.current = correctionId;
+
+    resetApplyModal();
+    setApplyTarget(correction);
+    setApplyReimbId(targetReimbId);
+
+    // Auto-lookup the target reimbursement and pre-fill amount
+    (async () => {
+      setFetchingApplyReimb(true);
+      try {
+        const info = await lookupReimbursement(targetReimbId);
+        if (!info) {
+          setApplyError('找不到目标报销单，请检查链接');
+          return;
+        }
+        setApplyError(null);
+        setApplyReimbInfo(info);
+        const suggestedAmountStr = params.get('suggestedAmount');
+        const suggestedAmount = suggestedAmountStr ? parseFloat(suggestedAmountStr) : NaN;
+        const defaultAmount = !isNaN(suggestedAmount) && suggestedAmount > 0
+          ? Math.min(suggestedAmount, correction.remainingAmount, info.totalAmountInBaseCurrency)
+          : Math.min(correction.remainingAmount, info.totalAmountInBaseCurrency);
+        setApplyAmount(defaultAmount.toFixed(2));
+      } finally {
+        setFetchingApplyReimb(false);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [corrections]);
 
   // ── Reimb lookup helper ─────────────────────────────────────────────────────
 
