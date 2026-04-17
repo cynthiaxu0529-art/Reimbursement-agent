@@ -54,13 +54,32 @@ export async function GET(request: NextRequest) {
 
     const result = await calculateAdjustedPaymentAmount(tenantId, reimbursementId);
 
+    // `hasCorrections` 涵盖两种应显示横幅的场景：
+    //  1. 存在 pending 冲差（可能需要 apply）
+    //  2. 本报销单已经被历史冲差抵扣过（alreadyOffset > 0）
+    // 后者一旦发生，即便 pending 为空也要在 UI 上提示，并阻止对 Fluxa 发全额打款（避免双付）。
+    const hasPending = result.corrections.length > 0;
+    const hasHistoricalOffset = result.alreadyOffset > 0;
+    const hasCorrections = hasPending || hasHistoricalOffset;
+
+    let message: string;
+    if (hasPending && hasHistoricalOffset) {
+      message = `该报销单已被历史抵扣 $${result.alreadyOffset.toFixed(2)}，另有 ${result.corrections.length} 笔待冲差。建议打款 $${result.adjustedAmount.toFixed(2)}（原金额 $${result.originalAmount.toFixed(2)}）`;
+    } else if (hasPending) {
+      message = `该员工有 ${result.corrections.length} 笔待冲差记录，建议打款金额从 $${result.originalAmount.toFixed(2)} 调整为 $${result.adjustedAmount.toFixed(2)}`;
+    } else if (hasHistoricalOffset) {
+      message = `本报销单已被历史冲差抵扣 $${result.alreadyOffset.toFixed(2)}，应付余额 $${result.adjustedAmount.toFixed(2)}`;
+    } else {
+      message = '无待冲差记录';
+    }
+
     return NextResponse.json({
       success: true,
       ...result,
-      hasCorrections: result.corrections.length > 0,
-      message: result.corrections.length > 0
-        ? `该员工有 ${result.corrections.length} 笔待冲差记录，建议打款金额从 $${result.originalAmount.toFixed(2)} 调整为 $${result.adjustedAmount.toFixed(2)}`
-        : '无待冲差记录',
+      hasCorrections,
+      hasHistoricalOffset,
+      hasPending,
+      message,
     });
   } catch (error) {
     console.error('Check adjustment error:', error);

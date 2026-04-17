@@ -144,6 +144,22 @@
 - **没有**对应的正常 payment 记录（那条 `internal_offset` 不是转账、没有 `payoutId`），但 `/api/payments/stats` 等按 reimbursement 状态统计的接口不受影响
 - accounting agent 看到：费用入账 + 1220 反向调整 = 净现金流 0，与实际相符
 
+### 防双付：`alreadyOffset` 检查（重要）
+
+`calculateAdjustedPaymentAmount` 返回的 `adjustedAmount` = `originalAmount - alreadyOffset - pendingProjected`。其中：
+
+- **`alreadyOffset`**：已经写入 `correction_applications` 表、以本报销单为目标的金额总和。这部分是**历史锁定**的，付款接口必须扣掉，否则会出现「冲差记了 $X + Fluxa 再付全额 = 员工拿 $2X」双付 bug。
+- **`pendingProjected`**：根据单笔/多笔精度门推测出的还会应用的抵扣。
+
+**`/api/payments/process`** 现在在查询 `calculateAdjustedPaymentAmount` 后：
+
+1. 永远扣 `alreadyOffset`——即便调用方传了 `customAmount`，也不允许 `customAmount > (originalAmount - alreadyOffset)`（400 rejected）。
+2. 再根据 `pendingCorrectionCount` 决定 pending 抵扣的处理（见下一小节）。
+
+**`GET /api/corrections/check-adjustment`** 响应里新增 `alreadyOffset` 和 `hasHistoricalOffset` 字段，UI 可以据此显示「本报销单已被历史抵扣 $X」的信息条。
+
+**典型场景**：财务在冲差管理页手工把 $100 冲差 apply 到这张 $100 报销后，应付余额 = 0。此时点 Process Payment 会被 API 用 `FULL_OFFSET_REQUIRED` 拦截并指引到 `settle-with-corrections`；后者会认识这张单已经全额被历史抵扣、无 pending 可 apply，直接写占位 payment + 推状态到 `paid`。
+
 ### 多冲差精度门（重要）
 
 **当某员工有 > 1 笔 pending/partial 冲差时，自动抵扣会被精度门拦截**：
