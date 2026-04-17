@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticate } from '@/lib/auth/api-key';
 import { db } from '@/lib/db';
 import { reimbursements, approvalChain, users } from '@/lib/db/schema';
-import { eq, and, inArray, or } from 'drizzle-orm';
+import { eq, and, inArray, or, isNull } from 'drizzle-orm';
 
 // 内存级别的简单限流（每个 API Key 每小时 1 次）
 const pollTimestamps = new Map<string, number>();
@@ -63,6 +63,36 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // 获取用户角色和部门，用于匹配基于角色的审批步骤（如"部门经理审批"）
+    const userRoles = context.user.roles || (context.user.role ? [context.user.role] : []);
+    let userDepartmentId = (context.user as { departmentId?: string }).departmentId;
+    if (userDepartmentId === undefined) {
+      const current = await db.query.users.findFirst({
+        where: eq(users.id, context.userId),
+        columns: { departmentId: true },
+      });
+      userDepartmentId = current?.departmentId || undefined;
+    }
+
+    const roleMatchCondition = userRoles.length > 0
+      ? and(
+          inArray(approvalChain.approverRole, userRoles),
+          userDepartmentId
+            ? or(
+                isNull(approvalChain.departmentId),
+                eq(approvalChain.departmentId, userDepartmentId)
+              )
+            : isNull(approvalChain.departmentId)
+        )
+      : undefined;
+
+    const approverCondition = roleMatchCondition
+      ? or(
+          eq(approvalChain.approverId, context.userId),
+          roleMatchCondition
+        )
+      : eq(approvalChain.approverId, context.userId);
+
     // 查询该用户作为审批人、状态为 pending 的审批链步骤
     const pendingSteps = await db
       .select({
@@ -76,7 +106,7 @@ export async function GET(request: NextRequest) {
       .from(approvalChain)
       .where(
         and(
-          eq(approvalChain.approverId, context.userId),
+          approverCondition,
           eq(approvalChain.status, 'pending')
         )
       );
