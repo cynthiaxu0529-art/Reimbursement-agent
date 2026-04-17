@@ -27,14 +27,36 @@ export async function GET(request: NextRequest) {
   const { context } = authResult;
 
   try {
-    // 获取用户角色，用于匹配基于角色的审批步骤
+    // 获取用户角色和部门，用于匹配基于角色的审批步骤
     const userRoles = context.user.roles || (context.user.role ? [context.user.role] : []);
 
-    // 查询该用户作为审批人（直接指定或通过角色匹配）、状态为 pending 的审批链步骤
-    const approverCondition = userRoles.length > 0
+    // Session 认证的 context 里没有 departmentId，从数据库补查
+    let userDepartmentId = (context.user as { departmentId?: string }).departmentId;
+    if (userDepartmentId === undefined) {
+      const current = await db.query.users.findFirst({
+        where: eq(users.id, context.userId),
+        columns: { departmentId: true },
+      });
+      userDepartmentId = current?.departmentId || undefined;
+    }
+
+    // 角色匹配时，若步骤绑定了部门，审批人必须属于同部门
+    const roleMatchCondition = userRoles.length > 0
+      ? and(
+          inArray(approvalChain.approverRole, userRoles),
+          userDepartmentId
+            ? or(
+                isNull(approvalChain.departmentId),
+                eq(approvalChain.departmentId, userDepartmentId)
+              )
+            : isNull(approvalChain.departmentId)
+        )
+      : undefined;
+
+    const approverCondition = roleMatchCondition
       ? or(
           eq(approvalChain.approverId, context.userId),
-          inArray(approvalChain.approverRole, userRoles)
+          roleMatchCondition
         )
       : eq(approvalChain.approverId, context.userId);
 

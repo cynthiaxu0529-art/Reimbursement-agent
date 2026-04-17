@@ -174,8 +174,14 @@ async function buildDefaultSteps(
   const steps: ChainStep[] = [];
   let stepOrder = 1;
 
-  // 1. 直属上级审批
-  if (submitter.managerId) {
+  // 1. 部门经理审批：同部门所有 role=manager 的用户都可审批（角色+部门匹配）
+  //    这样部门经理用 Agent / API Key / Web 都能审到该部门的报销单
+  const managerStep = await buildDepartmentManagerStep(submitter, tenantId, stepOrder);
+  if (managerStep) {
+    steps.push(managerStep);
+    stepOrder++;
+  } else if (submitter.managerId) {
+    // Fallback：没有部门或部门内无 manager，使用提交人直属上级（旧行为）
     steps.push({
       stepOrder: stepOrder++,
       stepType: 'manager',
@@ -187,7 +193,7 @@ async function buildDefaultSteps(
     });
   }
 
-  // 2. 部门负责人审批
+  // 2. 部门负责人审批（departments.managerId 指向的人，通常是更高级的负责人）
   if (submitter.departmentId) {
     const dept = await db.query.departments.findFirst({
       where: eq(departments.id, submitter.departmentId),
@@ -231,6 +237,42 @@ async function buildDefaultSteps(
 }
 
 /**
+ * 构建"部门经理审批"步骤：匹配提交人所在部门、角色为 manager 的所有人
+ * 任一部门经理都能审批，也支持通过 Agent / API Key 审批
+ */
+async function buildDepartmentManagerStep(
+  submitter: typeof users.$inferSelect,
+  tenantId: string,
+  stepOrder: number,
+  stepName?: string
+): Promise<ChainStep | null> {
+  if (!submitter.departmentId) return null;
+
+  const deptManagers = await db.query.users.findMany({
+    where: and(
+      eq(users.tenantId, tenantId),
+      eq(users.departmentId, submitter.departmentId),
+      eq(users.role, 'manager')
+    ),
+    columns: { id: true },
+  });
+
+  // 只有提交人自己是本部门唯一 manager 时，不生成此步骤（避免自审）
+  const otherManagers = deptManagers.filter(m => m.id !== submitter.id);
+  if (otherManagers.length === 0) return null;
+
+  return {
+    stepOrder,
+    stepType: 'manager',
+    stepName: stepName || '部门经理审批',
+    approverId: otherManagers[0].id, // 仅用于展示，实际匹配按 role+departmentId
+    approverRole: 'manager',
+    departmentId: submitter.departmentId,
+    amountThreshold: null,
+  };
+}
+
+/**
  * 解析单个审批步骤
  */
 async function resolveStep(
@@ -241,7 +283,16 @@ async function resolveStep(
 ): Promise<ChainStep | null> {
   switch (ruleStep.type as ApprovalStepTypeValue) {
     case 'manager': {
-      // 直属上级
+      // 部门经理：同部门所有 role=manager 的人都能审批
+      const managerStep = await buildDepartmentManagerStep(
+        submitter,
+        tenantId,
+        ruleStep.order,
+        ruleStep.name || '部门经理审批'
+      );
+      if (managerStep) return managerStep;
+
+      // Fallback：如果没找到部门经理，退回到旧的 submitter.managerId 逻辑
       if (!submitter.managerId) return null;
       return {
         stepOrder: ruleStep.order,
@@ -445,12 +496,16 @@ export async function processApprovalAction(
 
   // 2. 检查是否是当前步骤的审批人
   if (currentStep.approverId !== approverId) {
-    // 检查是否有角色匹配权限（如财务角色）
+    // 检查是否有角色匹配权限（如财务、部门经理）
     if (currentStep.approverRole) {
       const approver = await db.query.users.findFirst({
         where: eq(users.id, approverId),
       });
       if (approver?.role !== currentStep.approverRole) {
+        throw new Error('您不是当前步骤的审批人');
+      }
+      // 如果步骤绑定了部门，审批人必须属于同部门（防止跨部门审批）
+      if (currentStep.departmentId && approver.departmentId !== currentStep.departmentId) {
         throw new Error('您不是当前步骤的审批人');
       }
     } else {
@@ -535,7 +590,10 @@ export async function canUserApprove(reimbursementId: string, userId: string): P
       where: eq(users.id, userId),
     });
     if (user?.role === currentStep.approverRole) {
-      return true;
+      // 如果步骤绑定了部门，要求审批人属于同部门
+      if (!currentStep.departmentId || user.departmentId === currentStep.departmentId) {
+        return true;
+      }
     }
   }
 
