@@ -454,6 +454,11 @@ export async function mapExpenseWithAccountNameResolver(
   costCenter: string | null | undefined,
   departmentName: string | null | undefined,
   resolveName: (accountCode: string, fallbackName: string) => Promise<string>,
+  /**
+   * Optional CoA gate. When omitted, the default DB-backed check is used.
+   * Offline dry-runs pass in an in-memory Set so they don't need Postgres.
+   */
+  isKnown: (accountCode: string) => Promise<boolean> = isKnownAccountCode,
 ): Promise<{ accountCode: string; accountName: string; is_fallback: boolean; matched_by: 'category' | 'keyword' | 'fallback' }> {
   const fn = classifyDepartment(costCenter, departmentName);
   const { expenseType, matched_by } = matchExpenseType(category, description);
@@ -466,7 +471,7 @@ export async function mapExpenseWithAccountNameResolver(
   // If our rule table drifted away from the live endpoint (new rename / deactivate
   // on the accounting side), degrade to the function's miscellaneous bucket instead
   // of sending something that would warn as "not found in Chart of Accounts".
-  if (!(await isKnownAccountCode(accountCode))) {
+  if (!(await isKnown(accountCode))) {
     const misc = EXPENSE_TYPE_ACCOUNTS.miscellaneous;
     accountCode = misc[fn];
     fallbackName = misc[`${fn}Name` as keyof AccountCodeSet] as string;

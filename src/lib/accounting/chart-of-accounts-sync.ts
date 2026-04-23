@@ -34,7 +34,7 @@ interface SyncResult {
 // canonical 列表严格一致；真实来源仍以 /api/external/chart-of-accounts 为准。
 // ============================================================================
 
-const FALLBACK_ACCOUNTS: AccountingAccount[] = [
+export const FALLBACK_ACCOUNTS: AccountingAccount[] = [
   // ── R&D (contract canonical list) ──
   { account_code: '6410', account_name: 'R&D - Office Supplies', account_type: 'Expense', account_subtype: 'Research & Development' },
   { account_code: '6420', account_name: 'R&D - Cloud & Infrastructure', account_type: 'Expense', account_subtype: 'Research & Development' },
