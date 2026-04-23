@@ -9,11 +9,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursements, reimbursementItems, users } from '@/lib/db/schema';
+import { reimbursements, reimbursementItems, users, departments } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { getUserRoles } from '@/lib/auth/roles';
 import { apiError } from '@/lib/api-error';
-import { getCOAMapping } from '@/lib/coa/default-mappings';
+import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
+import {
+  ensureAccountsSynced,
+  getAccountName,
+  isKnownAccountCode,
+} from '@/lib/accounting/chart-of-accounts-sync';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,16 +97,55 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return apiError('请提供新的费用类别 (category)', 400);
     }
 
-    // 若未提供 coaCode / coaName，自动从默认映射中查找
-    let finalCoaCode = coaCode ?? null;
-    let finalCoaName = coaName ?? null;
+    // Make sure synced_accounts is warm before we validate / look up names.
+    await ensureAccountsSynced();
 
-    if (!finalCoaCode || !finalCoaName) {
-      const mapping = getCOAMapping(category as any);
-      if (mapping) {
-        finalCoaCode = finalCoaCode ?? mapping.coaCode;
-        finalCoaName = finalCoaName ?? mapping.coaName;
+    // Build department context so the derived code respects R&D / S&M / G&A split.
+    const owner = await db.query.users.findFirst({
+      where: eq(users.id, reimbursement.userId),
+      columns: { department: true, departmentId: true },
+    });
+    let costCenter: string | null = null;
+    let departmentName: string | null = owner?.department || null;
+    if (owner?.departmentId) {
+      const dept = await db.query.departments.findFirst({
+        where: eq(departments.id, owner.departmentId),
+        columns: { name: true, costCenter: true },
+      });
+      if (dept) {
+        departmentName = dept.name;
+        costCenter = dept.costCenter ?? null;
       }
+    }
+
+    let finalCoaCode: string | null = coaCode ?? null;
+    let finalCoaName: string | null = coaName ?? null;
+
+    if (finalCoaCode) {
+      // Explicit code supplied — must exist in canonical CoA or we reject up-front.
+      // Legacy dot-notation (6601.09 etc.) is no longer part of the canonical list
+      // and will be rejected here, which is the point.
+      if (!(await isKnownAccountCode(finalCoaCode))) {
+        return apiError(
+          `科目代码 ${finalCoaCode} 不在最新的 Chart of Accounts 中，请从同步后的科目表中选择`,
+          400,
+        );
+      }
+      if (!finalCoaName) {
+        finalCoaName = await getAccountName(finalCoaCode);
+      }
+    } else {
+      // Derive via canonical mapper — produces codes that already match the CoA
+      // and applies the Mapping conventions (company-wide SaaS / Web3 / GPU / AI
+      // APIs / S&M KOL & 红包).
+      const mapping = await mapExpenseToAccount(
+        category,
+        item.description || '',
+        costCenter,
+        departmentName,
+      );
+      finalCoaCode = mapping.accountCode;
+      finalCoaName = mapping.accountName;
     }
 
     // ---- 更新明细行 ----

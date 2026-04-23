@@ -4,29 +4,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useBaseCurrencyConversion } from '@/hooks/useBaseCurrencyConversion';
+import { useExpenseCategories } from '@/hooks/useExpenseCategories';
 import { CurrencyType } from '@/types';
 import TripItineraryPanel from '@/components/TripItineraryPanel';
-
-const expenseCategories = [
-  { value: 'flight', label: '机票', icon: '✈️' },
-  { value: 'train', label: '火车票', icon: '🚄' },
-  { value: 'hotel', label: '酒店住宿', icon: '🏨' },
-  { value: 'meal', label: '餐饮', icon: '🍽️' },
-  { value: 'taxi', label: '交通', icon: '🚕' },
-  { value: 'office_supplies', label: '办公用品', icon: '📎' },
-  { value: 'ai_token', label: 'AI 服务', icon: '🤖' },
-  { value: 'cloud_resource', label: '云资源', icon: '☁️' },
-  { value: 'software', label: '软件订阅', icon: '💿' },
-  { value: 'client_entertainment', label: '客户招待', icon: '🤝' },
-  { value: 'marketing', label: '市场推广', icon: '📢' },
-  { value: 'content_seo', label: '内容 & SEO', icon: '📝' },
-  { value: 'pr_communications', label: '公关 & 传播', icon: '📰' },
-  { value: 'training', label: '培训费', icon: '📚' },
-  { value: 'conference', label: '会议/活动', icon: '🎤' },
-  { value: 'courier', label: '快递费', icon: '📦' },
-  { value: 'phone', label: '通讯费', icon: '📱' },
-  { value: 'other', label: '其他', icon: '📋' },
-];
 
 const receiptTypeToCategory: Record<string, string> = {
   'flight_itinerary': 'flight',
@@ -86,6 +66,10 @@ const currencies = [
 export default function NewReimbursementPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 类目下拉数据源：运行时从 /api/chart-of-accounts 拉，
+  // 过滤掉 canonical code 不在 CoA 里的 UX 类目。
+  const { options: expenseCategories, loading: coaLoading, error: coaError } = useExpenseCategories();
 
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isRecognizing, setIsRecognizing] = useState(false);
@@ -1133,10 +1117,13 @@ export default function NewReimbursementPage() {
                             cursor: 'pointer',
                           }}
                         >
-                          <option value="">选择类别</option>
+                          <option value="">
+                            {coaLoading ? '加载科目表…' : coaError ? '科目表加载失败' : '选择类别'}
+                          </option>
                           {expenseCategories.map((cat) => (
                             <option key={cat.value} value={cat.value}>
                               {cat.icon} {cat.label}
+                              {cat.resolvedCode ? ` · ${cat.resolvedCode} ${cat.resolvedName}` : ''}
                             </option>
                           ))}
                         </select>

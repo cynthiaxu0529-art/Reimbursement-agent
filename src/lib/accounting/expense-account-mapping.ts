@@ -10,7 +10,7 @@
  *   4. 两者交叉得出最终科目代码
  */
 
-import { getAccountName } from './chart-of-accounts-sync';
+import { getAccountName, isKnownAccountCode } from './chart-of-accounts-sync';
 
 // ============================================================================
 // 部门 → 费用性质
@@ -82,9 +82,18 @@ type ExpenseType =
   | 'shipping'
   | 'telecom'
   | 'insurance'
-  | 'cloud'
-  | 'software'
-  | 'advertising'
+  // Tech / cloud — split per Mapping conventions
+  | 'ai_api'              // OpenAI / Anthropic / OpenRouter / Firecrawl → 6435
+  | 'gpu_compute'         // Runpod / Lambda Labs / Vast.ai → 6420
+  | 'web3_rpc'            // Alchemy / Infura / QuickNode / ZAN → 6425
+  | 'web3_subscription'   // Privy / Dynamic / wallet-connect → 6430
+  | 'company_saas'        // Notion / Slack / Zoom / 1Password / Google Workspace → 6350 regardless of function
+  | 'cloud'               // generic AWS/GCP/Azure/Vercel → 6420 (R&D) / 6150 (S&M) / 6390 (G&A)
+  | 'software'            // team-specific tool (defaults to R&D 6430 unless function overrides)
+  // S&M
+  | 'kol_marketing'       // KOL / KOC / influencer → 6125
+  | 'community_rewards'   // 红包 / airdrop / referral rewards → 6145
+  | 'advertising'         // Google / Meta / LinkedIn paid ads → 6120
   | 'content_seo'
   | 'pr_communications'
   | 'miscellaneous';
@@ -103,7 +112,7 @@ const EXPENSE_TYPE_ACCOUNTS: Record<ExpenseType, AccountCodeSet> = {
     gaName: 'G&A - Meals & Entertainment',
   },
   office_supplies: {
-    rd: '6460', sm: '6190', ga: '6230',
+    rd: '6410', sm: '6190', ga: '6230',
     rdName: 'R&D - Office Supplies',
     smName: 'S&M - Miscellaneous Expense',
     gaName: 'G&A - Office Supplies',
@@ -132,6 +141,41 @@ const EXPENSE_TYPE_ACCOUNTS: Record<ExpenseType, AccountCodeSet> = {
     smName: 'S&M - Miscellaneous Expense',
     gaName: 'G&A - Insurance',
   },
+  // "AI model APIs → 6435" — distinct from raw compute (6420) and software subs (6430)
+  ai_api: {
+    rd: '6435', sm: '6150', ga: '6350',
+    rdName: 'R&D - AI & API Services',
+    smName: 'S&M - CRM & Sales Tools',
+    gaName: 'G&A - Dues & Subscriptions',
+  },
+  // "Pay-per-second GPU rental goes to 6420 R&D - Cloud & Infrastructure"
+  gpu_compute: {
+    rd: '6420', sm: '6150', ga: '6390',
+    rdName: 'R&D - Cloud & Infrastructure',
+    smName: 'S&M - CRM & Sales Tools',
+    gaName: 'G&A - Miscellaneous Expense',
+  },
+  // Web3 consumption RPC / nodes / indexers / L2 gas → 6425
+  web3_rpc: {
+    rd: '6425', sm: '6150', ga: '6390',
+    rdName: 'R&D - Blockchain & On-chain Services',
+    smName: 'S&M - CRM & Sales Tools',
+    gaName: 'G&A - Miscellaneous Expense',
+  },
+  // Web3 SDK / hosted auth / subscription packages → 6430
+  web3_subscription: {
+    rd: '6430', sm: '6150', ga: '6390',
+    rdName: 'R&D - Software & Subscriptions',
+    smName: 'S&M - CRM & Sales Tools',
+    gaName: 'G&A - Miscellaneous Expense',
+  },
+  // Company-wide SaaS — routes to G&A 6350 regardless of who paid ("who uses", not "who paid")
+  company_saas: {
+    rd: '6350', sm: '6350', ga: '6350',
+    rdName: 'G&A - Dues & Subscriptions',
+    smName: 'G&A - Dues & Subscriptions',
+    gaName: 'G&A - Dues & Subscriptions',
+  },
   cloud: {
     rd: '6420', sm: '6150', ga: '6390',
     rdName: 'R&D - Cloud & Infrastructure',
@@ -139,9 +183,21 @@ const EXPENSE_TYPE_ACCOUNTS: Record<ExpenseType, AccountCodeSet> = {
     gaName: 'G&A - Miscellaneous Expense',
   },
   software: {
-    rd: '6430', sm: '6150', ga: '6390',
+    rd: '6430', sm: '6150', ga: '6350',
     rdName: 'R&D - Software & Subscriptions',
     smName: 'S&M - CRM & Sales Tools',
+    gaName: 'G&A - Dues & Subscriptions',
+  },
+  kol_marketing: {
+    rd: '6490', sm: '6125', ga: '6390',
+    rdName: 'R&D - Miscellaneous Expense',
+    smName: 'S&M - Influencer & KOL Marketing',
+    gaName: 'G&A - Miscellaneous Expense',
+  },
+  community_rewards: {
+    rd: '6490', sm: '6145', ga: '6390',
+    rdName: 'R&D - Miscellaneous Expense',
+    smName: 'S&M - Community Rewards & Incentives',
     gaName: 'G&A - Miscellaneous Expense',
   },
   advertising: {
@@ -180,7 +236,67 @@ interface ExpenseTypeRule {
   keywords: string[];
 }
 
+// Rule order matters: specific conventions must match BEFORE generic buckets.
+// e.g. "notion" should hit company_saas (6350), not software (6430).
+//      "openai" should hit ai_api (6435), not cloud (6420).
+//      "runpod" should hit gpu_compute (6420 directly), not cloud keyword soup.
+//      "kol"/"红包" should hit their own S&M lines (6125/6145), not advertising (6120).
 const EXPENSE_TYPE_RULES: ExpenseTypeRule[] = [
+  // ── Specific tech conventions (check first) ────────────────────────────
+  {
+    // "AI model APIs → 6435": OpenAI, Anthropic, OpenRouter, Firecrawl, embedding providers
+    expenseType: 'ai_api',
+    categories: ['ai_api', 'ai_token'],
+    keywords: [
+      'openai', 'anthropic', 'claude', 'chatgpt', ' gpt', 'gpt-',
+      'openrouter', 'firecrawl',
+      'gemini', 'cohere', 'mistral', 'huggingface', 'hugging face',
+      'deepseek', 'perplexity', 'replicate', 'together ai',
+      '通义', '文心', '智谱',
+      'ai api', 'llm', 'embedding', 'text-embedding',
+    ],
+  },
+  {
+    // "Pay-per-second GPU rental → 6420": Runpod / Lambda Labs / Vast.ai / SageMaker spot
+    expenseType: 'gpu_compute',
+    categories: ['gpu_compute', 'gpu'],
+    keywords: [
+      'runpod', 'lambda labs', 'lambdalabs', 'vast.ai', 'vast ai',
+      'sagemaker spot', 'coreweave', 'paperspace', 'gpu rental', 'gpu 租用',
+    ],
+  },
+  {
+    // Web3 consumption RPC / nodes / indexers / L2 gas → 6425
+    expenseType: 'web3_rpc',
+    categories: ['web3_rpc', 'rpc'],
+    keywords: [
+      'alchemy', 'infura', 'quicknode', 'zan.top', ' zan ',
+      'moralis', 'ankr', 'chainstack', 'the graph', 'thegraph',
+      'rpc node', 'rpc 节点', 'l2 gas', 'on-chain indexer',
+    ],
+  },
+  {
+    // Web3 SDK / hosted auth / subscription → 6430
+    expenseType: 'web3_subscription',
+    categories: ['web3_subscription'],
+    keywords: [
+      'privy.io', ' privy', 'walletconnect', 'wallet connect', 'wallet-connect',
+      'dynamic.xyz', 'web3auth', 'magic.link', 'thirdweb',
+    ],
+  },
+  {
+    // Company-wide SaaS → 6350 (G&A) regardless of who paid
+    // Integration guide: "The decision is based on who uses the tool, not who paid"
+    expenseType: 'company_saas',
+    categories: ['company_saas'],
+    keywords: [
+      'notion', 'slack', 'zoom', '1password', '1 password',
+      'google workspace', 'gsuite', 'g suite', 'google one',
+      'microsoft 365', 'office 365', 'm365',
+      'dropbox business', 'loom',
+    ],
+  },
+  // ── Travel, meals, office, etc. (unchanged mechanics) ──────────────────
   {
     expenseType: 'travel',
     categories: ['taxi', 'car_rental', 'fuel', 'parking', 'toll', 'flight', 'train', 'hotel'],
@@ -216,43 +332,46 @@ const EXPENSE_TYPE_RULES: ExpenseTypeRule[] = [
     categories: [],
     keywords: ['保险', 'insurance'],
   },
+  // ── S&M specific conventions ───────────────────────────────────────────
   {
-    expenseType: 'cloud',
-    categories: ['cloud_resource', 'ai_token'],
-    keywords: ['云', 'cloud', 'aws', 'gcp', 'azure', 'server', '服务器', 'ai token', 'openai', 'anthropic'],
-  },
-  {
-    expenseType: 'software',
-    categories: ['software'],
-    keywords: ['软件', 'software', 'license', '许可', 'saas', 'subscription', '订阅'],
-  },
-  {
-    expenseType: 'advertising',
-    // 'marketing' is the canonical category for KOL / 红包 / promotional spends
-    categories: ['marketing'],
+    // KOL / influencer fees → 6125 (must match before 'advertising' 6120)
+    expenseType: 'kol_marketing',
+    categories: ['kol', 'influencer'],
     keywords: [
+      'kol', 'koc', 'influencer', 'creator',
+      '达人', '博主', '网红', '主播',
+      'sponsorship fee', '达人推广', 'kol 投放',
+    ],
+  },
+  {
+    // Red packets / airdrops / community rewards / referral payouts → 6145
+    expenseType: 'community_rewards',
+    categories: ['red_packet', 'airdrop', 'rewards', 'referral'],
+    keywords: [
+      '红包', '运营红包', 'airdrop', '空投',
+      '社区奖励', '用户奖励', 'community reward', 'referral bonus',
+      '邀请奖励', '推荐奖励', 'reward pool', 'incentive pool',
+    ],
+  },
+  {
+    // Paid ads (Google / Meta / LinkedIn) — landed on a separate rule from KOL.
+    // 'marketing' category still maps here as a best-effort default when no
+    // more specific keyword matched.
+    expenseType: 'advertising',
+    categories: ['marketing', 'advertising'],
+    keywords: [
+      'google ads', 'google adwords', 'meta ads', 'facebook ads', 'linkedin ads',
+      'tiktok ads', '巨量引擎', '腾讯广告',
       '广告', 'advertising', 'promotion', '推广', '营销', 'marketing',
-      // KOL / influencer
-      'kol', '达人', '博主', '网红', '主播', 'influencer', 'creator', 'sponsor', '赞助',
-      // Operational red-packets & incentives
-      '红包', '运营红包', '奖励', '激励', '福利', '优惠券', 'coupon', 'incentive',
-      // Social / community / growth
-      '社媒', '社群', '增长', 'growth', 'community',
-      // Events
-      '活动', 'event', '展览', 'expo', '发布会',
     ],
   },
   {
     expenseType: 'content_seo',
     categories: ['content', 'seo'],
     keywords: [
-      // Content creation
       '内容', 'content', '文案', 'copywriting', '撰稿', '写作',
-      // SEO / SEM
       'seo', 'sem', '搜索优化', '搜索引擎',
-      // Video / media production
       '视频制作', '拍摄', 'video production', '素材', '设计外包',
-      // Blog / article
       '博客', 'blog', '文章', 'article',
     ],
   },
@@ -260,14 +379,36 @@ const EXPENSE_TYPE_RULES: ExpenseTypeRule[] = [
     expenseType: 'pr_communications',
     categories: ['pr', 'communications'],
     keywords: [
-      // PR
       '公关', 'pr', 'public relations', '媒体关系', 'media relations',
-      // Press
       '新闻稿', 'press release', '通稿', '媒体', 'media',
-      // Communications
       '传播', 'communications', '品牌传播', 'brand communications',
-      // External comms
       '外宣', '舆情', '危机公关',
+    ],
+  },
+  // ── Generic cloud / software (catch-alls, must be LAST) ────────────────
+  {
+    expenseType: 'cloud',
+    // 'cloud_resource' is the legacy catch-all for raw compute; leave here.
+    // NOTE: 'ai_token' no longer routes here — it's handled by ai_api above.
+    categories: ['cloud_resource'],
+    keywords: [
+      'amazon web services', ' aws ', 'aws,', 'aws.', 'azure',
+      'google cloud', ' gcp', 'digitalocean', 'digital ocean',
+      'linode', 'vercel', 'cloudflare', 'netlify', 'heroku',
+      'render.com', 'fly.io', '阿里云', '腾讯云', '华为云', 'aliyun',
+      '云服务', 'cloud server', 'server', '服务器',
+    ],
+  },
+  {
+    expenseType: 'software',
+    // Team-specific tools (GitHub, Figma, Linear, JetBrains, Jira, etc.)
+    // company-wide SaaS is handled earlier by company_saas.
+    categories: ['software'],
+    keywords: [
+      'github', 'gitlab', 'figma', 'linear.app', 'linear ',
+      'jira', 'atlassian', 'confluence', 'jetbrains',
+      'ahrefs', 'hubspot', 'apollo.io', 'semrush',
+      '软件', 'software', 'license', '许可', 'saas', 'subscription', '订阅',
     ],
   },
 ];
@@ -313,35 +454,58 @@ export async function mapExpenseWithAccountNameResolver(
   costCenter: string | null | undefined,
   departmentName: string | null | undefined,
   resolveName: (accountCode: string, fallbackName: string) => Promise<string>,
+  /**
+   * Optional CoA gate. When omitted, the default DB-backed check is used.
+   * Offline dry-runs pass in an in-memory Set so they don't need Postgres.
+   */
+  isKnown: (accountCode: string) => Promise<boolean> = isKnownAccountCode,
 ): Promise<{ accountCode: string; accountName: string; is_fallback: boolean; matched_by: 'category' | 'keyword' | 'fallback' }> {
   const fn = classifyDepartment(costCenter, departmentName);
   const { expenseType, matched_by } = matchExpenseType(category, description);
   const codes = EXPENSE_TYPE_ACCOUNTS[expenseType];
-  const accountCode = codes[fn];
-  const fallbackName = codes[`${fn}Name` as keyof AccountCodeSet] as string;
+  let accountCode = codes[fn];
+  let fallbackName = codes[`${fn}Name` as keyof AccountCodeSet] as string;
+  let isFallback = expenseType === 'miscellaneous';
+
+  // Gate: before emitting to accounting, verify the code is in the canonical CoA.
+  // If our rule table drifted away from the live endpoint (new rename / deactivate
+  // on the accounting side), degrade to the function's miscellaneous bucket instead
+  // of sending something that would warn as "not found in Chart of Accounts".
+  if (!(await isKnown(accountCode))) {
+    const misc = EXPENSE_TYPE_ACCOUNTS.miscellaneous;
+    accountCode = misc[fn];
+    fallbackName = misc[`${fn}Name` as keyof AccountCodeSet] as string;
+    isFallback = true;
+  }
+
   const accountName = await resolveName(accountCode, fallbackName);
-  return { accountCode, accountName, is_fallback: expenseType === 'miscellaneous', matched_by };
+  return { accountCode, accountName, is_fallback: isFallback, matched_by };
 }
 
 /**
- * 根据 category + description 匹配费用类型
- * 返回匹配到的 expenseType 以及匹配方式 (category / keyword / fallback)
+ * 根据 category + description 匹配费用类型。
+ *
+ * 改动说明（为满足 Mapping conventions）：以前是两遍扫描 —— 先扫所有 rule 的
+ * categories，再扫所有 rule 的 keywords，于是一个 `category='marketing'` +
+ * `description='KOL 达人推广'` 的条目会先被 advertising(6120) 捕获，落不到
+ * 预期的 kol_marketing(6125)。改为单遍扫描：按 rule 列表顺序，每条 rule
+ * **同时**看 description 关键词和 category。具体规则（ai_api / gpu_compute /
+ * web3_rpc / web3_subscription / company_saas / kol_marketing /
+ * community_rewards）都排在通用 cloud / software / advertising 前面，于是
+ * 优先命中。
  */
 function matchExpenseType(category: string, description: string): { expenseType: ExpenseType; matched_by: 'category' | 'keyword' | 'fallback' } {
   const categoryLower = (category || '').toLowerCase();
   const descLower = (description || '').toLowerCase();
 
   for (const rule of EXPENSE_TYPE_RULES) {
-    if (rule.categories.includes(categoryLower)) {
-      return { expenseType: rule.expenseType, matched_by: 'category' };
-    }
-  }
-
-  for (const rule of EXPENSE_TYPE_RULES) {
     for (const keyword of rule.keywords) {
-      if (descLower.includes(keyword.toLowerCase())) {
+      if (keyword && descLower.includes(keyword.toLowerCase())) {
         return { expenseType: rule.expenseType, matched_by: 'keyword' };
       }
+    }
+    if (categoryLower && rule.categories.includes(categoryLower)) {
+      return { expenseType: rule.expenseType, matched_by: 'category' };
     }
   }
 
