@@ -30,30 +30,37 @@ interface SyncResult {
 
 // ============================================================================
 // Fallback 硬编码科目表
+// 当 Accounting Agent 不可达时保底，字段与 contract 中的 R&D / S&M / G&A
+// canonical 列表严格一致；真实来源仍以 /api/external/chart-of-accounts 为准。
 // ============================================================================
 
 const FALLBACK_ACCOUNTS: AccountingAccount[] = [
-  // ── R&D 研发费用 ──
-  { account_code: '6410', account_name: 'R&D - Salaries & Benefits', account_type: 'Expense', account_subtype: 'Research & Development' },
+  // ── R&D (contract canonical list) ──
+  { account_code: '6410', account_name: 'R&D - Office Supplies', account_type: 'Expense', account_subtype: 'Research & Development' },
   { account_code: '6420', account_name: 'R&D - Cloud & Infrastructure', account_type: 'Expense', account_subtype: 'Research & Development' },
+  { account_code: '6425', account_name: 'R&D - Blockchain & On-chain Services', account_type: 'Expense', account_subtype: 'Research & Development' },
   { account_code: '6430', account_name: 'R&D - Software & Subscriptions', account_type: 'Expense', account_subtype: 'Research & Development' },
+  { account_code: '6435', account_name: 'R&D - AI & API Services', account_type: 'Expense', account_subtype: 'Research & Development' },
   { account_code: '6440', account_name: 'R&D - Travel & Entertainment', account_type: 'Expense', account_subtype: 'Research & Development' },
   { account_code: '6450', account_name: 'R&D - Meals & Entertainment', account_type: 'Expense', account_subtype: 'Research & Development' },
-  { account_code: '6460', account_name: 'R&D - Office Supplies', account_type: 'Expense', account_subtype: 'Research & Development' },
+  { account_code: '6460', account_name: 'R&D - Equipment & Hardware', account_type: 'Expense', account_subtype: 'Research & Development' },
   { account_code: '6470', account_name: 'R&D - Training & Conferences', account_type: 'Expense', account_subtype: 'Research & Development' },
+  { account_code: '6480', account_name: 'R&D - Dues & Subscriptions', account_type: 'Expense', account_subtype: 'Research & Development' },
   { account_code: '6490', account_name: 'R&D - Miscellaneous Expense', account_type: 'Expense', account_subtype: 'Research & Development' },
-  // ── S&M 销售费用 ──
+  // ── S&M ──
   { account_code: '6100', account_name: 'S&M - Sales Salaries & Commissions', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
   { account_code: '6110', account_name: 'S&M - Marketing Salaries', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
   { account_code: '6120', account_name: 'S&M - Digital Advertising', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
+  { account_code: '6125', account_name: 'S&M - Influencer & KOL Marketing', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
   { account_code: '6130', account_name: 'S&M - Content & SEO', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
   { account_code: '6140', account_name: 'S&M - Events & Conferences', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
+  { account_code: '6145', account_name: 'S&M - Community Rewards & Incentives', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
   { account_code: '6150', account_name: 'S&M - CRM & Sales Tools', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
   { account_code: '6160', account_name: 'S&M - PR & Communications', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
   { account_code: '6170', account_name: 'S&M - Travel & Entertainment', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
   { account_code: '6180', account_name: 'S&M - Meals & Entertainment', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
   { account_code: '6190', account_name: 'S&M - Miscellaneous Expense', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  // ── G&A 管理费用 ──
+  // ── G&A ──
   { account_code: '6220', account_name: 'G&A - Rent & Facilities', account_type: 'Expense', account_subtype: 'General & Administrative' },
   { account_code: '6230', account_name: 'G&A - Office Supplies', account_type: 'Expense', account_subtype: 'General & Administrative' },
   { account_code: '6240', account_name: 'G&A - Insurance', account_type: 'Expense', account_subtype: 'General & Administrative' },
@@ -61,6 +68,7 @@ const FALLBACK_ACCOUNTS: AccountingAccount[] = [
   { account_code: '6280', account_name: 'G&A - Meals & Entertainment', account_type: 'Expense', account_subtype: 'General & Administrative' },
   { account_code: '6290', account_name: 'G&A - Telephone & Internet', account_type: 'Expense', account_subtype: 'General & Administrative' },
   { account_code: '6330', account_name: 'G&A - Training & Development', account_type: 'Expense', account_subtype: 'General & Administrative' },
+  { account_code: '6350', account_name: 'G&A - Dues & Subscriptions', account_type: 'Expense', account_subtype: 'General & Administrative' },
   { account_code: '6370', account_name: 'G&A - Shipping & Postage', account_type: 'Expense', account_subtype: 'General & Administrative' },
   { account_code: '6390', account_name: 'G&A - Miscellaneous Expense', account_type: 'Expense', account_subtype: 'General & Administrative' },
 ];
@@ -172,6 +180,40 @@ export async function getAccountName(accountCode: string): Promise<string | null
     where: eq(syncedAccounts.accountCode, accountCode),
   });
   return account?.accountName || null;
+}
+
+/**
+ * 判断 account_code 是否存在于已同步的 Chart of Accounts。
+ * 出口前用它做 gate：未命中说明本地规则与权威 CoA 漂移，需要降级 + 告警。
+ */
+export async function isKnownAccountCode(accountCode: string): Promise<boolean> {
+  if (!accountCode) return false;
+  const account = await db.query.syncedAccounts.findFirst({
+    where: eq(syncedAccounts.accountCode, accountCode),
+  });
+  return !!account;
+}
+
+/**
+ * 以 account_subtype 分组的科目列表，供前端 / API 下拉直接消费。
+ * UI 必须按 subtype 做分组（见 integration guide "Integration requirements"），
+ * 不要再用 account_code 前缀去重新发明分组。
+ */
+export async function getAccountsGroupedBySubtype(): Promise<
+  Record<string, { accountCode: string; accountName: string }[]>
+> {
+  const rows = await db.query.syncedAccounts.findMany({
+    columns: { accountCode: true, accountName: true, accountSubtype: true },
+  });
+  const groups: Record<string, { accountCode: string; accountName: string }[]> = {};
+  for (const row of rows) {
+    const key = row.accountSubtype || 'Uncategorized';
+    (groups[key] ??= []).push({ accountCode: row.accountCode, accountName: row.accountName });
+  }
+  for (const list of Object.values(groups)) {
+    list.sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+  }
+  return groups;
 }
 
 // ============================================================================
