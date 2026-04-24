@@ -104,22 +104,19 @@ const generateFormId = (createdAt: string, id: string, isAdvance?: boolean): str
 export default function DisbursementsPage() {
   const router = useRouter();
 
-  // 财务调整科目下拉的运行时数据源：从 /api/chart-of-accounts 拉，
-  // 按 account_subtype 分组展示，不再硬编码旧的 6601.xx / 6699.01。
-  const {
-    options: expenseCategoryOptions,
-    loading: coaLoading,
-    error: coaError,
-  } = useExpenseCategories();
-  const adjustCategoryGroups = useMemo(() => {
-    const byGroup = new Map<string, typeof expenseCategoryOptions>();
-    for (const opt of expenseCategoryOptions) {
-      const key = opt.accountSubtype || 'Other';
-      if (!byGroup.has(key)) byGroup.set(key, []);
-      byGroup.get(key)!.push(opt);
+  // 财务调整入账科目 —— 按契约 "Integration requirements" 直接展示 CoA：
+  // 每个 account_code + account_name 一个选项，按 account_subtype 分组。
+  // 财务自行决定这笔支出落在 R&D / S&M / G&A 的哪个具体科目。
+  const { groups: coaGroups, loading: coaLoading, error: coaError } = useExpenseCategories();
+  const coaAccountByCode = useMemo(() => {
+    const m = new Map<string, { name: string; subtype: string }>();
+    for (const g of coaGroups) {
+      for (const a of g.accounts) {
+        m.set(a.accountCode, { name: a.accountName, subtype: g.account_subtype });
+      }
     }
-    return Array.from(byGroup.entries());
-  }, [expenseCategoryOptions]);
+    return m;
+  }, [coaGroups]);
 
   const [activeTab, setActiveTab] = useState<'ready' | 'processing' | 'history' | 'advances' | 'receivables'>('ready');
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
@@ -167,6 +164,10 @@ export default function DisbursementsPage() {
     currentCoaName?: string;
   } | null>(null);
   const [adjustNewCategory, setAdjustNewCategory] = useState('');
+  // 方案 A：财务直接挑 GL 科目（account_code），保持 category 不变，
+  // 只改会计入账归属。adjust-category API 在 coaCode 提供时会用
+  // isKnownAccountCode 把老点号编码 400 掉，保证出口合规。
+  const [adjustNewCoaCode, setAdjustNewCoaCode] = useState('');
   const [adjusting, setAdjusting] = useState(false);
 
   // 预览附件：将base64 data URL转为Blob URL以提高渲染性能；PDF直接在新标签页打开
@@ -876,7 +877,12 @@ export default function DisbursementsPage() {
   };
 
   const handleAdjustCategory = async () => {
-    if (!adjustingItem || !adjustNewCategory) return;
+    if (!adjustingItem || !adjustNewCoaCode) return;
+    const picked = coaAccountByCode.get(adjustNewCoaCode);
+    if (!picked) {
+      alert('所选科目不在最新的 CoA 中，请重新加载');
+      return;
+    }
     setAdjusting(true);
     try {
       const response = await fetch(
@@ -884,7 +890,12 @@ export default function DisbursementsPage() {
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ category: adjustNewCategory }),
+          // UX 类目保持不变（见方案 A），只覆盖会计入账的 GL 代码 / 名称。
+          body: JSON.stringify({
+            category: adjustingItem.currentCategory,
+            coaCode: adjustNewCoaCode,
+            coaName: picked.name,
+          }),
         }
       );
       const result = await response.json();
@@ -909,6 +920,7 @@ export default function DisbursementsPage() {
         );
         setAdjustingItem(null);
         setAdjustNewCategory('');
+        setAdjustNewCoaCode('');
       } else {
         alert(result.error || '调整科目失败');
       }
@@ -2010,8 +2022,8 @@ export default function DisbursementsPage() {
                   调整为 <span className="text-red-500">*</span>
                 </label>
                 <select
-                  value={adjustNewCategory}
-                  onChange={(e) => setAdjustNewCategory(e.target.value)}
+                  value={adjustNewCoaCode}
+                  onChange={(e) => setAdjustNewCoaCode(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   disabled={coaLoading || !!coaError}
                 >
@@ -2020,14 +2032,13 @@ export default function DisbursementsPage() {
                       ? '加载科目表…'
                       : coaError
                         ? `科目表加载失败：${coaError}`
-                        : '选择调整后的科目'}
+                        : '选择 GL 入账科目'}
                   </option>
-                  {adjustCategoryGroups.map(([subtype, opts]) => (
-                    <optgroup key={subtype} label={subtype}>
-                      {opts.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.icon} {opt.label}
-                          {opt.resolvedCode ? ` — ${opt.resolvedCode} ${opt.resolvedName}` : ''}
+                  {coaGroups.map((g) => (
+                    <optgroup key={g.account_subtype} label={g.account_subtype}>
+                      {g.accounts.map((a) => (
+                        <option key={a.accountCode} value={a.accountCode}>
+                          {a.accountCode}  {a.accountName}
                         </option>
                       ))}
                     </optgroup>
@@ -2036,11 +2047,14 @@ export default function DisbursementsPage() {
               </div>
 
               {/* 调整后科目预览 */}
-              {adjustNewCategory && adjustNewCategory !== adjustingItem.currentCategory && (
+              {adjustNewCoaCode && adjustNewCoaCode !== adjustingItem.currentCoaCode && (
                 <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
                   <p className="text-blue-700 font-medium mb-1">调整后入账科目</p>
-                  <p className="text-blue-600">
-                    {categoryLabels[adjustNewCategory]?.label || adjustNewCategory}
+                  <p className="text-blue-600 font-mono">
+                    {adjustNewCoaCode} {coaAccountByCode.get(adjustNewCoaCode)?.name}
+                  </p>
+                  <p className="text-blue-500 text-xs mt-1">
+                    分组：{coaAccountByCode.get(adjustNewCoaCode)?.subtype}
                   </p>
                 </div>
               )}
@@ -2048,7 +2062,11 @@ export default function DisbursementsPage() {
               {/* 按钮 */}
               <div className="flex gap-3 pt-2">
                 <button
-                  onClick={() => { setAdjustingItem(null); setAdjustNewCategory(''); }}
+                  onClick={() => {
+                    setAdjustingItem(null);
+                    setAdjustNewCategory('');
+                    setAdjustNewCoaCode('');
+                  }}
                   disabled={adjusting}
                   className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                 >
@@ -2056,7 +2074,11 @@ export default function DisbursementsPage() {
                 </button>
                 <button
                   onClick={handleAdjustCategory}
-                  disabled={!adjustNewCategory || adjustNewCategory === adjustingItem.currentCategory || adjusting}
+                  disabled={
+                    !adjustNewCoaCode ||
+                    adjustNewCoaCode === adjustingItem.currentCoaCode ||
+                    adjusting
+                  }
                   className="flex-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                 >
                   {adjusting ? '保存中...' : '确认调整'}
