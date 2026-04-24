@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useExpenseCategories } from '@/hooks/useExpenseCategories';
 
 interface ReimbursementItem {
   id: string;
@@ -102,6 +103,24 @@ const generateFormId = (createdAt: string, id: string, isAdvance?: boolean): str
 
 export default function DisbursementsPage() {
   const router = useRouter();
+
+  // 财务调整科目下拉的运行时数据源：从 /api/chart-of-accounts 拉，
+  // 按 account_subtype 分组展示，不再硬编码旧的 6601.xx / 6699.01。
+  const {
+    options: expenseCategoryOptions,
+    loading: coaLoading,
+    error: coaError,
+  } = useExpenseCategories();
+  const adjustCategoryGroups = useMemo(() => {
+    const byGroup = new Map<string, typeof expenseCategoryOptions>();
+    for (const opt of expenseCategoryOptions) {
+      const key = opt.accountSubtype || 'Other';
+      if (!byGroup.has(key)) byGroup.set(key, []);
+      byGroup.get(key)!.push(opt);
+    }
+    return Array.from(byGroup.entries());
+  }, [expenseCategoryOptions]);
+
   const [activeTab, setActiveTab] = useState<'ready' | 'processing' | 'history' | 'advances' | 'receivables'>('ready');
   const [reimbursements, setReimbursements] = useState<Reimbursement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1994,48 +2013,25 @@ export default function DisbursementsPage() {
                   value={adjustNewCategory}
                   onChange={(e) => setAdjustNewCategory(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={coaLoading || !!coaError}
                 >
-                  <optgroup label="差旅费 (6601)">
-                    <option value="flight">机票 — 6601.01</option>
-                    <option value="train">火车票 — 6601.02</option>
-                    <option value="hotel">酒店住宿 — 6601.03</option>
-                    <option value="meal">餐饮 — 6601.04</option>
-                    <option value="taxi">市内交通 — 6601.05</option>
-                    <option value="car_rental">租车 — 6601.06</option>
-                    <option value="fuel">燃油费 — 6601.07</option>
-                    <option value="parking">停车费 — 6601.08</option>
-                    <option value="toll">过路费 — 6601.09</option>
-                  </optgroup>
-                  <optgroup label="办公费 (6602)">
-                    <option value="office_supplies">办公用品 — 6602.01</option>
-                    <option value="equipment">设备采购 — 6602.02</option>
-                    <option value="software">软件订阅 — 6602.03</option>
-                  </optgroup>
-                  <optgroup label="技术费用 (6603)">
-                    <option value="ai_token">AI 服务 — 6603.01</option>
-                    <option value="cloud_resource">云资源 — 6603.02</option>
-                    <option value="api_service">API 服务 — 6603.03</option>
-                    <option value="hosting">托管服务 — 6603.04</option>
-                    <option value="domain">域名费 — 6603.05</option>
-                  </optgroup>
-                  <optgroup label="行政费用 (6604)">
-                    <option value="admin_general">行政综合 — 6604.01</option>
-                    <option value="courier">快递费 — 6604.02</option>
-                    <option value="printing">打印复印 — 6604.03</option>
-                    <option value="phone">通讯费 — 6604.04</option>
-                    <option value="internet">网络费 — 6604.05</option>
-                    <option value="utilities">水电费 — 6604.06</option>
-                  </optgroup>
-                  <optgroup label="业务费用 (6605)">
-                    <option value="client_entertainment">客户招待 — 6605.01</option>
-                    <option value="marketing">市场推广 — 6605.02</option>
-                    <option value="training">培训费 — 6605.03</option>
-                    <option value="conference">会议费 — 6605.04</option>
-                    <option value="membership">会员订阅 — 6605.05</option>
-                  </optgroup>
-                  <optgroup label="其他 (6699)">
-                    <option value="other">其他费用 — 6699.01</option>
-                  </optgroup>
+                  <option value="">
+                    {coaLoading
+                      ? '加载科目表…'
+                      : coaError
+                        ? `科目表加载失败：${coaError}`
+                        : '选择调整后的科目'}
+                  </option>
+                  {adjustCategoryGroups.map(([subtype, opts]) => (
+                    <optgroup key={subtype} label={subtype}>
+                      {opts.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.icon} {opt.label}
+                          {opt.resolvedCode ? ` — ${opt.resolvedCode} ${opt.resolvedName}` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
                 </select>
               </div>
 
