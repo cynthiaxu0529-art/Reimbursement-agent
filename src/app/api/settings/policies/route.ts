@@ -5,6 +5,10 @@ import { policies, users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import { apiError } from '@/lib/api-error';
+import { authenticate } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
+
+export const dynamic = 'force-dynamic';
 
 // Default policies based on company requirements
 const createDefaultPolicies = (tenantId: string) => [
@@ -86,31 +90,41 @@ const createDefaultPolicies = (tenantId: string) => [
 
 /**
  * GET /api/settings/policies - 获取所有政策
+ *
+ * 支持 Session（浏览器）和 API Key（Agent）双模式认证。
+ * Agent 调用时需要 `policy:read` scope。
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return apiError('未登录', 401);
+    const authResult = await authenticate(request, API_SCOPES.POLICY_READ);
+    if (!authResult.success) {
+      return apiError(authResult.error, authResult.statusCode);
     }
 
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
-    });
+    const { context: authCtx } = authResult;
+    let tenantId = authCtx.tenantId;
 
-    if (!user?.tenantId) {
-      return apiError('未关联公司', 404, 'NO_TENANT');
+    if (!tenantId) {
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, authCtx.userId),
+        columns: { tenantId: true },
+      });
+
+      if (!user?.tenantId) {
+        return apiError('未关联公司', 404, 'NO_TENANT');
+      }
+      tenantId = user.tenantId;
     }
 
     // 获取该租户的所有政策
     let policyList = await db.query.policies.findMany({
-      where: eq(policies.tenantId, user.tenantId),
+      where: eq(policies.tenantId, tenantId),
       orderBy: (policies, { asc }) => [asc(policies.priority)],
     });
 
     // 如果没有政策，创建默认政策
     if (policyList.length === 0) {
-      const defaultPolicies = createDefaultPolicies(user.tenantId);
+      const defaultPolicies = createDefaultPolicies(tenantId);
 
       for (const policy of defaultPolicies) {
         await db.insert(policies).values({
@@ -126,7 +140,7 @@ export async function GET() {
       }
 
       policyList = await db.query.policies.findMany({
-        where: eq(policies.tenantId, user.tenantId),
+        where: eq(policies.tenantId, tenantId),
         orderBy: (policies, { asc }) => [asc(policies.priority)],
       });
     }

@@ -3,22 +3,27 @@ import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { authenticate } from '@/lib/auth/api-key';
+import { API_SCOPES } from '@/lib/auth/scopes';
 
 // 标记为动态路由，避免构建时静态渲染错误
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/settings/profile - 获取用户资料
+ *
+ * 支持 Session（浏览器）和 API Key（Agent）双模式认证。
+ * Agent 调用时需要 `profile:read` scope。
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
+    const authResult = await authenticate(request, API_SCOPES.PROFILE_READ);
+    if (!authResult.success) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.statusCode });
     }
 
     const user = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
+      where: eq(users.id, authResult.context.userId),
     });
 
     if (!user) {
