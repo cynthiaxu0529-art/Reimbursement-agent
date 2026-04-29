@@ -228,6 +228,7 @@ export const SCOPE_PRESETS = {
     API_SCOPES.POLICY_READ,
     API_SCOPES.TRIP_READ,
     API_SCOPES.PROFILE_READ,
+    API_SCOPES.SETTINGS_READ,
   ],
 
   /** 员工基础：创建和管理自己的报销 */
@@ -243,6 +244,7 @@ export const SCOPE_PRESETS = {
     API_SCOPES.TRIP_READ,
     API_SCOPES.TRIP_CREATE,
     API_SCOPES.PROFILE_READ,
+    API_SCOPES.SETTINGS_READ,
   ],
 
   /** 分析：额外包含分析权限 */
@@ -252,6 +254,7 @@ export const SCOPE_PRESETS = {
     API_SCOPES.POLICY_READ,
     API_SCOPES.ANALYTICS_READ,
     API_SCOPES.PROFILE_READ,
+    API_SCOPES.SETTINGS_READ,
   ],
 
   /** 审批管理：查看待审批 + 执行审批（供 OpenClaw 等 Agent 管理审批流程） */
