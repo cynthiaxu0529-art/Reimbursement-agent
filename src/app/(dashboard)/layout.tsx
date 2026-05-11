@@ -45,6 +45,7 @@ function getNavItems(t: ReturnType<typeof useLanguage>['t']) {
     exchangeRates: { name: t.nav.exchangeRates, href: '/dashboard/settings/exchange-rates', icon: '💱' },
     accountingSummaries: { name: t.nav.accountingSummaries, href: '/dashboard/accounting-summaries', icon: '📒' },
     corrections: { name: t.nav.corrections, href: '/dashboard/corrections', icon: '↩' },
+    walletReconciliation: { name: t.nav.walletReconciliation, href: '/dashboard/wallet-reconciliation', icon: '🔗' },
     // API Key（所有人可用）
     apiKeys: { name: 'API Keys', href: '/dashboard/settings/api-keys', icon: '🔑' },
     // 管理员专属
@@ -89,6 +90,7 @@ function buildNavigation(roles: string[], navItems: ReturnType<typeof getNavItem
     addItem(navItems.exchangeRates);
     addItem(navItems.accountingSummaries);
     addItem(navItems.corrections);
+    addItem(navItems.walletReconciliation);
   }
 
   // 管理员功能（admin 或 super_admin 都可以管理团队）

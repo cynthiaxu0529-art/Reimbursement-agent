@@ -40,6 +40,7 @@ const en: Translations = {
     newReimbursement: '+ New Reimbursement',
     accountingSummaries: 'Accounting Summaries',
     corrections: 'Expense Corrections',
+    walletReconciliation: 'Wallet Reconciliation',
   },
 
   // Roles

@@ -38,6 +38,7 @@ const zh = {
     newReimbursement: '+ 新建报销',
     accountingSummaries: '记账汇总',
     corrections: '冲差管理',
+    walletReconciliation: '钱包对账',
   },
 
   // Roles

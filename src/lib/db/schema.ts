@@ -1669,3 +1669,131 @@ export const passwordResetTokensRelations = relations(passwordResetTokens, ({ on
     references: [users.id],
   }),
 }));
+
+// ============================================================================
+// 钱包对账（Fluxa 链上转账清单 vs 系统 payments 记录）
+// ============================================================================
+
+export const reconciliationStatusEnum = pgEnum('reconciliation_status', [
+  'parsing',    // 正在解析 CSV
+  'completed',  // 解析 + 匹配完成
+  'failed',     // 解析失败
+]);
+
+export const discrepancyTypeEnum = pgEnum('discrepancy_type', [
+  'system_only',          // 系统标 paid，链上清单里找不到
+  'chain_only',           // 链上清单里有，系统找不到对应 payment
+  'amount_mismatch',      // 配上但金额差超过容差
+  'address_mismatch',     // 配上但收款地址不符
+  'duplicate_payment',    // 一个 payment 对应多笔链上 tx
+  'low_confidence_match', // 仅靠模糊匹配命中，需财务人工确认
+]);
+
+/**
+ * 钱包对账记录 — 一次对账操作（一次 CSV 上传）。
+ *
+ * raw_rows 存原始 CSV 行（jsonb），供日后字段扩展不影响匹配逻辑；
+ * 结构汇总（matched_count、discrepancy_count）落字段方便列表展示。
+ */
+export const walletReconciliations = pgTable('wallet_reconciliations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  uploadedBy: uuid('uploaded_by')
+    .notNull()
+    .references(() => users.id),
+
+  fileName: text('file_name').notNull(),
+  // 从 CSV 各行 timestamp 推断的覆盖范围
+  periodStart: timestamp('period_start'),
+  periodEnd: timestamp('period_end'),
+
+  // 解析后的原始行（保留 raw 以便重跑匹配 / 字段扩展）
+  rawRows: jsonb('raw_rows').notNull().default([]),
+  rowCount: integer('row_count').notNull().default(0),
+
+  status: reconciliationStatusEnum('status').notNull().default('parsing'),
+  errorMessage: text('error_message'),
+
+  // 汇总统计（运行匹配后回填）
+  csvTotalAmount: real('csv_total_amount').notNull().default(0),
+  matchedCount: integer('matched_count').notNull().default(0),
+  matchedAmount: real('matched_amount').notNull().default(0),
+  discrepancyCount: integer('discrepancy_count').notNull().default(0),
+
+  // 跑匹配时锁定的容差配置（同币种 / 跨币种 / 时间窗口 / gas 计入与否）
+  toleranceConfig: jsonb('tolerance_config').notNull().default({}),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * 对账差异明细 — 一条差异 = 一条需要财务关注的不一致项。
+ *
+ * 配对成功且金额一致的不入这张表，只入 reconciliation 的 matched_count。
+ */
+export const reconciliationDiscrepancies = pgTable('reconciliation_discrepancies', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reconciliationId: uuid('reconciliation_id')
+    .notNull()
+    .references(() => walletReconciliations.id, { onDelete: 'cascade' }),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+
+  type: discrepancyTypeEnum('type').notNull(),
+
+  // 关联 payment（chain_only 类型为 null）
+  paymentId: uuid('payment_id').references(() => payments.id),
+  // 关联 csv 行索引（system_only 类型为 null），同时存 snapshot 供前端展示
+  csvRowIndex: integer('csv_row_index'),
+  csvRowSnapshot: jsonb('csv_row_snapshot'),
+
+  // 匹配上时记录用了哪个键
+  matchedBy: text('matched_by'),         // 'tx_hash' | 'payout_id' | 'fuzzy' | null
+  matchConfidence: text('match_confidence'), // 'high' | 'medium' | 'low' | null
+
+  // 差异详情（金额差、地址差等结构化数据，前端按 type 渲染）
+  details: jsonb('details').notNull().default({}),
+
+  resolved: boolean('resolved').notNull().default(false),
+  resolvedBy: uuid('resolved_by').references(() => users.id),
+  resolvedAt: timestamp('resolved_at'),
+  resolutionNote: text('resolution_note'),
+
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  reconciliationIdx: index('disc_reconciliation_idx').on(table.reconciliationId),
+  paymentIdx: index('disc_payment_idx').on(table.paymentId),
+  resolvedIdx: index('disc_resolved_idx').on(table.resolved),
+  typeIdx: index('disc_type_idx').on(table.type),
+}));
+
+export const walletReconciliationsRelations = relations(walletReconciliations, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [walletReconciliations.tenantId],
+    references: [tenants.id],
+  }),
+  uploader: one(users, {
+    fields: [walletReconciliations.uploadedBy],
+    references: [users.id],
+  }),
+  discrepancies: many(reconciliationDiscrepancies),
+}));
+
+export const reconciliationDiscrepanciesRelations = relations(reconciliationDiscrepancies, ({ one }) => ({
+  reconciliation: one(walletReconciliations, {
+    fields: [reconciliationDiscrepancies.reconciliationId],
+    references: [walletReconciliations.id],
+  }),
+  payment: one(payments, {
+    fields: [reconciliationDiscrepancies.paymentId],
+    references: [payments.id],
+  }),
+  resolver: one(users, {
+    fields: [reconciliationDiscrepancies.resolvedBy],
+    references: [users.id],
+  }),
+}));
