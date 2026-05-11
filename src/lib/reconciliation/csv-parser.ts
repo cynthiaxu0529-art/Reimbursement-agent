@@ -1,15 +1,18 @@
 /**
  * Fluxa 转账清单 CSV 解析器
  *
- * 假设字段（缺一个就标 missing，不会硬错）：
- *   必有：txHash, amount, token, fromAddress, toAddress, timestamp
- *   可选：status, gasFee, payoutId / transferId, chainId, network
+ * 必填：amount + toAddress + timestamp + (txHash 或 payoutId 至少一个)。
+ * 其它字段可选；不认识的列原样塞进 rawExtra（jsonb），便于后续扩展。
  *
- * 字段名做了大小写 / 下划线 / 连字符容错（fromAddress / from_address / from-address 都吃）。
- * 实在认不出的列放进 raw_extra，jsonb 存原样，便于后续扩展。
+ * 真实 Fluxa 导出字段示例（截至 2026-05）：
+ *   #, Mandate ID, Date, Description, Payee Wallet Address,
+ *   Payee FluxA Account, Payee Agent ID, Amount
+ *
+ * 注意 Fluxa 当前导出无 txHash 列——这意味着匹配主要靠 Mandate ID（payoutId）。
  */
 
 export interface FluxaCsvRow {
+  /** 链上交易哈希。Fluxa 当前导出没这一列，缺失时为 ''  */
   txHash: string;
   amount: number;
   token: string;
@@ -18,10 +21,11 @@ export interface FluxaCsvRow {
   timestamp: string; // ISO
   status?: string;   // success / failed / pending
   gasFee?: number;
+  /** Fluxa Mandate ID / 转账唯一 ID —— 实际主匹配键 */
   payoutId?: string;
   chainId?: string;
   network?: string;
-  /** 解析时遇到不认识的列原样塞进来 */
+  /** 解析时遇到不认识的列原样塞进来（包括 Description / FluxA Account / Agent ID 等） */
   rawExtra?: Record<string, string>;
   /** 这一行原始 CSV 内容（debug 用） */
   rawLine?: string;
@@ -38,8 +42,8 @@ const FIELD_ALIASES: Record<keyof FluxaCsvRow, string[]> = {
   txHash:      ['txhash', 'tx_hash', 'transaction_hash', 'hash'],
   amount:      ['amount', 'value'],
   token:       ['token', 'currency', 'asset', 'symbol'],
-  fromAddress: ['fromaddress', 'from_address', 'from'],
-  toAddress:   ['toaddress', 'to_address', 'to', 'recipient'],
+  fromAddress: ['fromaddress', 'from_address', 'from', 'payerwalletaddress', 'payer_wallet_address'],
+  toAddress:   ['toaddress', 'to_address', 'to', 'recipient', 'payeewalletaddress', 'payee_wallet_address', 'payeeaddress'],
   timestamp:   ['timestamp', 'time', 'date', 'created_at', 'block_time'],
   status:      ['status', 'state'],
   gasFee:      ['gasfee', 'gas_fee', 'fee', 'gas'],
@@ -120,11 +124,15 @@ export function parseFluxaCsv(content: string): CsvParseResult {
     if (!matched) unknownHeaders.push({ idx: i, raw: parseLine(lines[0])[i] });
   }
 
-  // 必填字段缺一报警，但仍试着解析（允许 partial）
-  const required: (keyof FluxaCsvRow)[] = ['txHash', 'amount', 'toAddress', 'timestamp'];
+  // 必填字段：amount + toAddress + timestamp + (txHash 或 payoutId 任一)
+  // Fluxa 当前导出无 txHash，必须靠 Mandate ID（=payoutId）匹配
+  const required: (keyof FluxaCsvRow)[] = ['amount', 'toAddress', 'timestamp'];
   const presentFields = new Set(Array.from(headerMap.values()).filter(Boolean) as string[]);
   for (const r of required) {
     if (!presentFields.has(r)) warnings.push(`CSV 缺少必填字段：${r}`);
+  }
+  if (!presentFields.has('txHash') && !presentFields.has('payoutId')) {
+    warnings.push('CSV 同时缺失 txHash 和 payoutId，将只能依赖 (地址+金额+时间) 模糊匹配');
   }
 
   for (let li = 1; li < lines.length; li++) {
@@ -155,13 +163,19 @@ export function parseFluxaCsv(content: string): CsvParseResult {
     }
 
     // 必填字段缺失 → 这一行进 errors，跳过
-    if (!row.txHash || row.amount === undefined || !row.toAddress || !row.timestamp) {
+    // txHash 或 payoutId 任一必须有，否则没法做精确匹配
+    const hasMatchKey = !!row.txHash || !!row.payoutId;
+    if (row.amount === undefined || !row.toAddress || !row.timestamp || !hasMatchKey) {
       errors.push({
         line: li + 1,
-        reason: `必填字段缺失（txHash=${!!row.txHash}, amount=${row.amount !== undefined}, toAddress=${!!row.toAddress}, timestamp=${!!row.timestamp}）`,
+        reason: `必填字段缺失（amount=${row.amount !== undefined}, toAddress=${!!row.toAddress}, timestamp=${!!row.timestamp}, matchKey(txHash|payoutId)=${hasMatchKey}）`,
       });
       continue;
     }
+
+    // txHash 字段在 FluxaCsvRow 上是 string，但 Fluxa 当前导出根本没这列。
+    // 给它一个空字符串占位，让下游 norm() 自然返回 ''，匹配阶段会跳过。
+    if (!row.txHash) row.txHash = '';
 
     // status 字段如果有，过滤掉非 success
     if (row.status && !isSuccessStatus(row.status)) {
