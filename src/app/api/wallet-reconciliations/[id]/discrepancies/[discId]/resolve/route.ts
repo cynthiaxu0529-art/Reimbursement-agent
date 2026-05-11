@@ -12,7 +12,7 @@ import {
   reconciliationDiscrepancies,
   users,
 } from '@/lib/db/schema';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getUserRoles, canProcessPayment } from '@/lib/auth/roles';
 import { apiError } from '@/lib/api-error';
 
