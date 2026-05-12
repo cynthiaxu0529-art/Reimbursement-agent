@@ -289,11 +289,13 @@ export default function DisbursementsPage() {
         const d = data.data;
         alert(
           `批量同步完成：\n` +
-            `扫描 ${d.totalScanned} 笔\n` +
-            `更新 ${d.totalUpdated} 笔\n` +
-            `标 paid ${d.markedPaid} 笔\n` +
-            `回滚 ${d.rolledBack} 笔\n` +
-            (d.errors > 0 ? `失败 ${d.errors} 笔（看控制台）` : '无错误'),
+            `Fluxa 在途扫描 ${d.totalScanned} 笔\n` +
+            `调用 Fluxa 更新 ${d.totalUpdated} 笔\n` +
+            `本地孤立状态修复 ${d.orphanReconciled ?? 0} 笔\n` +
+            `\n报销单状态变更：\n` +
+            `→ paid: ${d.markedPaid} 笔\n` +
+            `→ approved（回滚）: ${d.rolledBack} 笔\n` +
+            (d.errors > 0 ? `\n失败 ${d.errors} 笔（看控制台）` : '\n无错误'),
         );
         // 刷新当前 tab + 顶上的统计卡片
         await fetchReimbursements();

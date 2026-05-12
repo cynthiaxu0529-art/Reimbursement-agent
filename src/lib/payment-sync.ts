@@ -175,14 +175,94 @@ export interface BulkSyncResult {
   totalScanned: number;
   /** 实际成功更新的数量 */
   totalUpdated: number;
-  /** 转为 paid 的报销单数 */
+  /** 转为 paid 的报销单数（含孤立状态修复）*/
   markedPaid: number;
-  /** 回滚到 approved 的报销单数（失败/过期）*/
+  /** 回滚到 approved 的报销单数（失败/过期，含孤立状态修复）*/
   rolledBack: number;
   /** 失败条数 */
   errors: number;
+  /** 孤立状态修复：payment 已成功但 reimbursement 还卡在 processing 的数量 */
+  orphanReconciled: number;
   /** 每条详情（按 newStatus 简单分类）*/
   details: SyncOneResult[];
+}
+
+/**
+ * 孤立状态修复：payment.payout_status 已经是终态，但 reimbursement.status
+ * 还停在 processing。常见于一次性 sync-status 按钮调过 payments 表，
+ * 但 reimbursement 的更新失败 / 跨租户校验失败 / 早期版本根本没写回。
+ *
+ * 这一步不调 Fluxa（无网络开销），纯本地 SQL 修复，超快。
+ *
+ * @returns { markedPaid, rolledBack } 修了多少
+ */
+export async function reconcileOrphanedReimbursementStates(filter: {
+  tenantId?: string;
+} = {}): Promise<{ markedPaid: number; rolledBack: number }> {
+  // 先拉所有 payout_status='succeeded' 且 reimbursement.status != 'paid' 的
+  // 用 SQL 直接 join + 过滤
+  const baseConditions = [eq(payments.payoutStatus, 'succeeded')];
+  if (filter.tenantId) {
+    baseConditions.push(eq(reimbursements.tenantId, filter.tenantId));
+  }
+
+  const succeededOrphans = await db
+    .select({
+      paymentId: payments.id,
+      reimbursementId: payments.reimbursementId,
+      reimbursementStatus: reimbursements.status,
+      paymentPaidAt: payments.paidAt,
+    })
+    .from(payments)
+    .innerJoin(reimbursements, eq(payments.reimbursementId, reimbursements.id))
+    .where(and(...baseConditions));
+
+  const now = new Date();
+  let markedPaid = 0;
+  for (const row of succeededOrphans) {
+    if (row.reimbursementStatus === 'paid') continue;
+    await db
+      .update(reimbursements)
+      .set({
+        status: 'paid',
+        paidAt: row.paymentPaidAt || now,
+        updatedAt: now,
+      })
+      .where(eq(reimbursements.id, row.reimbursementId));
+    markedPaid += 1;
+  }
+
+  // 同样修 failed/expired 但 reimbursement 还在 processing 的
+  const failedConditions = [
+    inArray(payments.payoutStatus, ['failed', 'expired']),
+  ];
+  if (filter.tenantId) {
+    failedConditions.push(eq(reimbursements.tenantId, filter.tenantId));
+  }
+  const failedOrphans = await db
+    .select({
+      paymentId: payments.id,
+      reimbursementId: payments.reimbursementId,
+      reimbursementStatus: reimbursements.status,
+    })
+    .from(payments)
+    .innerJoin(reimbursements, eq(payments.reimbursementId, reimbursements.id))
+    .where(and(...failedConditions));
+
+  let rolledBack = 0;
+  for (const row of failedOrphans) {
+    if (row.reimbursementStatus !== 'processing') continue;
+    await db
+      .update(reimbursements)
+      .set({
+        status: 'approved',
+        updatedAt: now,
+      })
+      .where(eq(reimbursements.id, row.reimbursementId));
+    rolledBack += 1;
+  }
+
+  return { markedPaid, rolledBack };
 }
 
 /**
@@ -263,12 +343,19 @@ export async function syncInFlightPayments(filter: {
     }
   }
 
+  // 再跑一遍孤立状态修复（payment 已终态但 reimbursement 没跟上）
+  // 这一步纯本地 SQL，无 Fluxa 调用
+  const orphan = await reconcileOrphanedReimbursementStates({
+    tenantId: filter.tenantId,
+  });
+
   return {
     totalScanned: inFlightPayments.length,
     totalUpdated,
-    markedPaid,
-    rolledBack,
+    markedPaid: markedPaid + orphan.markedPaid,
+    rolledBack: rolledBack + orphan.rolledBack,
     errors,
+    orphanReconciled: orphan.markedPaid + orphan.rolledBack,
     details,
   };
 }
