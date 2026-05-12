@@ -24,6 +24,7 @@ import { API_SCOPES } from '@/lib/auth/scopes';
 import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
 import { ensureAccountsSynced } from '@/lib/accounting/chart-of-accounts-sync';
 import { loadClosedPeriods, resolvePostingPeriod } from '@/lib/accounting/period-closure';
+import { fetchPaidAmounts, paidScaleFactor } from '@/lib/accounting/paid-amount';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +36,15 @@ interface SummaryDetail {
   item_id: string;
   reimbursement_id: string;
   employee_name: string;
+  /**
+   * Amount that should be booked on the GL (in base currency). When the
+   * payment was capped under expense policy / customAmount / corrections,
+   * this is the scaled-down amount; the original receipt amount is exposed
+   * separately in `receipt_amount` so the accounting agent can audit.
+   */
   amount: number;
+  /** Original receipt amount in base currency, only set when capping was applied. */
+  receipt_amount?: number;
   description: string;
   category: string;
   /** 是否为迟报（item.date 落在已封月份，被改路由到当前期间） */
@@ -242,6 +251,25 @@ export async function GET(request: NextRequest) {
       .from(reimbursementItems)
       .where(inArray(reimbursementItems.reimbursementId, reimbursementIds));
 
+    // 5b. 拉取已 settled 的 payments，按 reimbursement 汇总实际打款金额。
+    // 当政策上限/customAmount/已抵扣冲差让 payments.amount < items 票据合计时，
+    // 我们按比例把每条 item 在 summary 里的金额下调，让会计入账金额=实际现金支出。
+    // 详见 src/lib/accounting/paid-amount.ts。
+    const { paidByReimbursement } = await fetchPaidAmounts(reimbursementIds);
+    const receiptByReimbursement = new Map<string, number>();
+    for (const it of allItems) {
+      const v = Number(it.amountInBaseCurrency || it.amount || 0);
+      receiptByReimbursement.set(
+        it.reimbursementId,
+        (receiptByReimbursement.get(it.reimbursementId) ?? 0) + v,
+      );
+    }
+    const scaleByReimbursement = new Map<string, number>();
+    for (const [rid, receipt] of receiptByReimbursement.entries()) {
+      const factor = paidScaleFactor(paidByReimbursement.get(rid), receipt);
+      if (factor !== null) scaleByReimbursement.set(rid, factor);
+    }
+
     // 6. 获取用户信息（用于 details）
     const userIds = [...new Set(allReimbursements.map(r => r.userId))];
     const userRecords = userIds.length > 0
@@ -342,15 +370,26 @@ export async function GET(request: NextRequest) {
       const group = groups.get(groupKey)!;
       const employeeName = userId ? (userMap.get(userId) || '未知') : '未知';
 
+      // Receipt amount in base currency, then pro-rate down if the
+      // reimbursement was capped at payout time (see fetchPaidAmounts).
+      const receiptAmount = Number(item.amountInBaseCurrency || item.amount || 0);
+      const scale = scaleByReimbursement.get(item.reimbursementId);
+      const bookedAmount = scale != null ? receiptAmount * scale : receiptAmount;
+
       // Build detail with item-level tracking for dedup
       const detail: SummaryDetail = {
         item_id: item.id,
         reimbursement_id: item.reimbursementId,
         employee_name: String(employeeName),
-        amount: Number((item.amountInBaseCurrency || item.amount).toFixed(2)),
+        amount: Number(bookedAmount.toFixed(2)),
         description: item.description,
         category: item.category,
       };
+      if (scale != null) {
+        // Expose the original receipt amount so accounting can audit the
+        // employee-absorbed delta (= receipt_amount - amount).
+        detail.receipt_amount = Number(receiptAmount.toFixed(2));
+      }
 
       // Include COA change info so accounting agent can update existing JEs
       if (item.previousCoaCode && item.coaChangedAt) {
@@ -370,7 +409,7 @@ export async function GET(request: NextRequest) {
       }
 
       group.details.push(detail);
-      group.totalAmount += item.amountInBaseCurrency || item.amount;
+      group.totalAmount += bookedAmount;
       group.recordCount += 1;
 
       // Track fallback mappings for finance to-do

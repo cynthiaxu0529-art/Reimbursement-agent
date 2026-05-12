@@ -16,13 +16,17 @@ import { getUserRoles } from '@/lib/auth/roles';
 import { mapExpenseWithAccountNameResolver } from '@/lib/accounting/expense-account-mapping';
 import { ensureAccountsSynced } from '@/lib/accounting/chart-of-accounts-sync';
 import { loadClosedPeriods, resolvePostingPeriod } from '@/lib/accounting/period-closure';
+import { fetchPaidAmounts, paidScaleFactor } from '@/lib/accounting/paid-amount';
 
 export const dynamic = 'force-dynamic';
 
 interface SummaryDetail {
   employee_name: string;
   department: string;
+  /** Booked amount (post-cap, in base currency). */
   amount: number;
+  /** Original receipt amount in base currency, only set when capping was applied. */
+  receipt_amount?: number;
   description: string;
   item_id: string;
   reimbursement_id: string;
@@ -175,6 +179,24 @@ export async function GET(request: NextRequest) {
     const reimbIds = allReimbs.map(r => r.id);
     const allItems = await db.select().from(reimbursementItems).where(inArray(reimbursementItems.reimbursementId, reimbIds));
 
+    // 已 settled 的 payments → 按 reimbursement 汇总实际打款。
+    // 上限 / customAmount / 已抵扣冲差导致 payments.amount < 票据合计时，
+    // 我们在这里按比例下调每条 item 的入账金额（见 src/lib/accounting/paid-amount.ts）。
+    const { paidByReimbursement } = await fetchPaidAmounts(reimbIds);
+    const receiptByReimbursement = new Map<string, number>();
+    for (const it of allItems) {
+      const v = Number(it.amountInBaseCurrency || it.amount || 0);
+      receiptByReimbursement.set(
+        it.reimbursementId,
+        (receiptByReimbursement.get(it.reimbursementId) ?? 0) + v,
+      );
+    }
+    const scaleByReimbursement = new Map<string, number>();
+    for (const [rid, receipt] of receiptByReimbursement.entries()) {
+      const factor = paidScaleFactor(paidByReimbursement.get(rid), receipt);
+      if (factor !== null) scaleByReimbursement.set(rid, factor);
+    }
+
     const userIds = [...new Set(allReimbs.map(r => r.userId))];
     const userRecords = userIds.length > 0
       ? await db.select({ id: users.id, name: users.name, departmentId: users.departmentId, department: users.department }).from(users).where(inArray(users.id, userIds))
@@ -278,10 +300,14 @@ export async function GET(request: NextRequest) {
       const group = groups.get(groupKey)!;
       const employeeName = userId ? String(userMap.get(userId) || '未知') : '未知';
 
+      const receiptAmount = Number(item.amountInBaseCurrency || item.amount || 0);
+      const scale = scaleByReimbursement.get(item.reimbursementId);
+      const bookedAmount = scale != null ? receiptAmount * scale : receiptAmount;
+
       const detail: SummaryDetail = {
         employee_name: employeeName,
         department: deptInfo?.name || '-',
-        amount: Number((item.amountInBaseCurrency || item.amount).toFixed(2)),
+        amount: Number(bookedAmount.toFixed(2)),
         description: item.description,
         item_id: item.id,
         reimbursement_id: item.reimbursementId,
@@ -289,6 +315,9 @@ export async function GET(request: NextRequest) {
         account_code: accountCode!,
         account_name: accountName || '',
       };
+      if (scale != null) {
+        detail.receipt_amount = Number(receiptAmount.toFixed(2));
+      }
 
       // Include COA change tracking for dedup awareness
       if (item.previousCoaCode && item.coaChangedAt) {
@@ -304,7 +333,7 @@ export async function GET(request: NextRequest) {
       }
 
       group.details.push(detail);
-      group.totalAmount += item.amountInBaseCurrency || item.amount;
+      group.totalAmount += bookedAmount;
       group.recordCount += 1;
     }
 
