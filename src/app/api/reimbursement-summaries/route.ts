@@ -262,7 +262,9 @@ export async function GET(request: NextRequest) {
 
     // 创建 reimbursement 到 user 的映射
     const reimbToUser = new Map(allReimbursements.map(r => [r.id, r.userId]));
-    const reimbToDate = new Map(allReimbursements.map(r => [r.id, r.approvedAt || new Date()]));
+    // approvedAt 留作兜底（极少数 item.date 缺失时用）。归期主要看 item.date —
+    // 见下方循环里对 period 的赋值。
+    const reimbToApprovedAt = new Map(allReimbursements.map(r => [r.id, r.approvedAt]));
 
     // 7. 按半月周期 + account_code 分组
     type GroupKey = string; // `${summaryId}::${accountCode}`
@@ -278,11 +280,14 @@ export async function GET(request: NextRequest) {
     }>();
 
     for (const item of allItems) {
-      // 确定日期（使用审批日期来确定归属周期）
-      const approvedAt = reimbToDate.get(item.reimbursementId);
-      if (!approvedAt) continue;
+      // 归期按"费用实际发生日期"item.date —— 权责发生制（accrual basis）。
+      // 如果按报销审批日 approvedAt 归期，迟报的费用会被错记到当期，
+      // 例如 2025-11 发生的 Claude API 费用，2026-05 才报，本应入 2025-11-B
+      // 期，按 approvedAt 会落到 2026-05 期，跨月跨年导致 P&L 失真。
+      const itemDate = item.date || reimbToApprovedAt.get(item.reimbursementId);
+      if (!itemDate) continue;
 
-      const period = getHalfMonthPeriod(approvedAt);
+      const period = getHalfMonthPeriod(itemDate);
 
       // Use stored coaCode if available (set by finance adjust), otherwise map dynamically
       const userId = reimbToUser.get(item.reimbursementId);
