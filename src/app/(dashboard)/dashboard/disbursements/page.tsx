@@ -125,6 +125,7 @@ export default function DisbursementsPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [processing, setProcessing] = useState<string | null>(null);
   const [batchProcessing, setBatchProcessing] = useState(false);
+  const [bulkSyncing, setBulkSyncing] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [refreshingStatus, setRefreshingStatus] = useState(false);
   // 自定义打款金额（财务可修改）
@@ -267,6 +268,43 @@ export default function DisbursementsPage() {
       }
     } catch (error) {
       console.error('Failed to fetch payment stats:', error);
+    }
+  };
+
+  const handleBulkSyncStatus = async () => {
+    if (bulkSyncing) return;
+    const confirmed = confirm(
+      '即将对所有在途付款（broadcasting/authorized/signed 等）调 Fluxa 拉取最新状态，可能用 10-30 秒。继续？',
+    );
+    if (!confirmed) return;
+    setBulkSyncing(true);
+    try {
+      const res = await fetch('/api/payments/sync-all-pending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const d = data.data;
+        alert(
+          `批量同步完成：\n` +
+            `扫描 ${d.totalScanned} 笔\n` +
+            `更新 ${d.totalUpdated} 笔\n` +
+            `标 paid ${d.markedPaid} 笔\n` +
+            `回滚 ${d.rolledBack} 笔\n` +
+            (d.errors > 0 ? `失败 ${d.errors} 笔（看控制台）` : '无错误'),
+        );
+        // 刷新当前 tab + 顶上的统计卡片
+        await fetchReimbursements();
+        await fetchPaymentStats();
+      } else {
+        alert(data.error || '批量同步失败');
+      }
+    } catch (err) {
+      alert(`批量同步异常: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBulkSyncing(false);
     }
   };
 
@@ -979,6 +1017,16 @@ export default function DisbursementsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <Button
+            onClick={handleBulkSyncStatus}
+            disabled={bulkSyncing}
+            variant="outline"
+            className="text-blue-600 border-blue-200 hover:bg-blue-50"
+            title="对所有在途 payment 调 Fluxa 拉取最新状态，回写到本地 DB"
+          >
+            <span className="mr-2">🔄</span>
+            {bulkSyncing ? '同步中…' : '批量同步在途付款'}
+          </Button>
           <Button variant="outline" className="text-gray-600">
             <span className="mr-2">📊</span> 导出报表
           </Button>
