@@ -43,6 +43,8 @@ export async function GET(request: NextRequest) {
     result.markedPaid,
     'rolledBack:',
     result.rolledBack,
+    'orphanReconciled:',
+    result.orphanReconciled,
     'errors:',
     result.errors,
   );
@@ -54,6 +56,7 @@ export async function GET(request: NextRequest) {
     totalUpdated: result.totalUpdated,
     markedPaid: result.markedPaid,
     rolledBack: result.rolledBack,
+    orphanReconciled: result.orphanReconciled,
     errors: result.errors,
   });
 }

@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       totalUpdated: result.totalUpdated,
       markedPaid: result.markedPaid,
       rolledBack: result.rolledBack,
+      orphanReconciled: result.orphanReconciled,
       errors: result.errors,
       sampleDetails: result.details.slice(0, 50),
     },
