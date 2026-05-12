@@ -21,7 +21,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { reimbursementItems, users } from '@/lib/db/schema';
+import { reimbursementItems, users, correctionApplications } from '@/lib/db/schema';
 import { eq, inArray } from 'drizzle-orm';
 import { getUserRoles } from '@/lib/auth/roles';
 
@@ -94,9 +94,34 @@ export async function PATCH(request: NextRequest) {
 
     const existingIds = new Set(existingItems.map(i => i.id));
     const missingIds = itemIds.filter(id => !existingIds.has(id));
+
     if (missingIds.length > 0) {
+      // 区分一下：是真的不存在，还是其实是 correction_applications 的 ID
+      // 汇总接口里 correction_application 行的 item_id = application.id
+      // 走的是另一张表，且科目固定 1220 不允许在 UI 改
+      const correctionMatches = await db
+        .select({ id: correctionApplications.id })
+        .from(correctionApplications)
+        .where(inArray(correctionApplications.id, missingIds));
+      const correctionIds = new Set(correctionMatches.map(r => r.id));
+
+      const trulyMissing = missingIds.filter(id => !correctionIds.has(id));
+      const correctionConflicts = missingIds.filter(id => correctionIds.has(id));
+
+      if (correctionConflicts.length > 0) {
+        return NextResponse.json(
+          {
+            error: `冲差调整记录不支持修改科目（科目固定为 1220）。请取消勾选这 ${correctionConflicts.length} 条 correction_adjustment 类型的记录后再批量修改。`,
+            error_code: 'CORRECTION_NOT_EDITABLE',
+            correction_ids: correctionConflicts,
+            other_missing_ids: trulyMissing,
+          },
+          { status: 400 }
+        );
+      }
+
       return NextResponse.json(
-        { error: `以下明细不存在: ${missingIds.join(', ')}` },
+        { error: `以下明细不存在: ${trulyMissing.join(', ')}` },
         { status: 404 }
       );
     }

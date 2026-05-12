@@ -24,6 +24,12 @@ interface SummaryDetail {
   category: string;
   account_code: string;
   account_name: string;
+  /**
+   * 'reimbursement_item' = 普通报销明细，可改科目；
+   * 'correction_application' = 冲差调整，科目固定 1220 不可改。
+   * 后端汇总返回时设置；前端用它控制勾选/编辑是否可用。
+   */
+  item_type?: 'reimbursement_item' | 'correction_application';
 }
 
 interface SummaryItem {
@@ -608,19 +614,22 @@ export default function AccountingSummariesPage() {
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    if (detail.item_type === 'correction_application') return;
                                     setEditingItemId(detail.item_id);
                                     setEditAccountCode(detail.account_code);
                                   }}
+                                  disabled={detail.item_type === 'correction_application'}
                                   style={{
                                     fontSize: '0.75rem',
                                     color: '#6b7280',
                                     background: 'none',
                                     border: 'none',
-                                    cursor: 'pointer',
+                                    cursor: detail.item_type === 'correction_application' ? 'not-allowed' : 'pointer',
+                                    opacity: detail.item_type === 'correction_application' ? 0.6 : 1,
                                   }}
-                                  title={ts.editMapping}
+                                  title={detail.item_type === 'correction_application' ? '冲差调整记录科目固定 1220，不可修改' : ts.editMapping}
                                 >
-                                  {detail.account_code} ✏️
+                                  {detail.account_code}{detail.item_type === 'correction_application' ? '' : ' ✏️'}
                                 </button>
                               )}
                             </div>
@@ -682,13 +691,17 @@ export default function AccountingSummariesPage() {
       return true;
     });
 
-    // Select all visible items
+    // 冲差调整记录科目固定 1220，不参与批量改科目
+    const isEditableDetail = (d: SummaryDetail) => d.item_type !== 'correction_application';
+    const editableDetails = filteredDetails.filter(isEditableDetail);
+
+    // Select all visible items (跳过冲差调整)
     const selectAllVisible = () => {
-      const ids = filteredDetails.map(d => d.item_id);
+      const ids = editableDetails.map(d => d.item_id);
       setSelectedItemIds(new Set(ids));
     };
     const deselectAll = () => setSelectedItemIds(new Set());
-    const isAllSelected = filteredDetails.length > 0 && filteredDetails.every(d => selectedItemIds.has(d.item_id));
+    const isAllSelected = editableDetails.length > 0 && editableDetails.every(d => selectedItemIds.has(d.item_id));
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -914,6 +927,7 @@ export default function AccountingSummariesPage() {
           {/* Table rows */}
           {filteredDetails.map((detail, idx) => {
             const isSelected = selectedItemIds.has(detail.item_id);
+            const isCorrection = detail.item_type === 'correction_application';
             return (
               <div
                 key={`${detail.item_id}-${idx}`}
@@ -925,17 +939,24 @@ export default function AccountingSummariesPage() {
                   borderBottom: '1px solid #f3f4f6',
                   gap: '0.5rem',
                   alignItems: 'center',
-                  backgroundColor: isSelected ? '#eff6ff' : 'transparent',
-                  cursor: 'pointer',
+                  backgroundColor: isSelected ? '#eff6ff' : isCorrection ? '#fafafa' : 'transparent',
+                  cursor: isCorrection ? 'default' : 'pointer',
                 }}
-                onClick={() => toggleItemSelect(detail.item_id)}
+                onClick={() => { if (!isCorrection) toggleItemSelect(detail.item_id); }}
+                title={isCorrection ? '冲差调整记录科目固定 1220，不可批量修改' : undefined}
               >
                 <input
                   type="checkbox"
                   checked={isSelected}
-                  onChange={() => toggleItemSelect(detail.item_id)}
+                  disabled={isCorrection}
+                  onChange={() => { if (!isCorrection) toggleItemSelect(detail.item_id); }}
                   onClick={(e) => e.stopPropagation()}
-                  style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                  style={{
+                    width: '15px',
+                    height: '15px',
+                    cursor: isCorrection ? 'not-allowed' : 'pointer',
+                    opacity: isCorrection ? 0.4 : 1,
+                  }}
                 />
                 <span style={{
                   fontFamily: 'monospace',
@@ -1018,19 +1039,22 @@ export default function AccountingSummariesPage() {
                   ) : (
                     <button
                       onClick={() => {
+                        if (isCorrection) return;
                         setEditingItemId(detail.item_id);
                         setEditAccountCode(detail.account_code);
                       }}
+                      disabled={isCorrection}
                       style={{
                         fontSize: '0.75rem',
                         color: '#6b7280',
                         background: 'none',
                         border: 'none',
-                        cursor: 'pointer',
+                        cursor: isCorrection ? 'not-allowed' : 'pointer',
+                        opacity: isCorrection ? 0.6 : 1,
                       }}
-                      title={ts.editMapping}
+                      title={isCorrection ? '冲差调整记录科目固定 1220，不可修改' : ts.editMapping}
                     >
-                      {detail.account_code} - {(detail.account_name.split(' - ')[1] || detail.account_name).substring(0, 12)} ✏️
+                      {detail.account_code} - {(detail.account_name.split(' - ')[1] || detail.account_name).substring(0, 12)}{isCorrection ? '' : ' ✏️'}
                     </button>
                   )}
                 </div>
