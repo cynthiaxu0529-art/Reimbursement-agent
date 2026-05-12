@@ -11,12 +11,18 @@
  */
 
 import { getAccountName, isKnownAccountCode } from './chart-of-accounts-sync';
+import {
+  EXPENSE_TYPE_ACCOUNTS,
+  type ExpenseType,
+  type ExpenseFunction as ExpenseFunctionType,
+  type AccountCodeSet,
+} from './account-rules';
 
 // ============================================================================
 // 部门 → 费用性质
 // ============================================================================
 
-export type ExpenseFunction = 'rd' | 'sm' | 'ga';
+export type ExpenseFunction = ExpenseFunctionType;
 
 /**
  * 部门名称关键词 → 费用性质（仅在部门未设置 costCenter 时作为降级匹配）
@@ -61,170 +67,10 @@ export function classifyDepartment(
   return 'ga';
 }
 
-// ============================================================================
-// 费用类型 → 科目代码（按费用性质分列）
-// ============================================================================
-
-interface AccountCodeSet {
-  rd: string;
-  sm: string;
-  ga: string;
-  rdName: string;
-  smName: string;
-  gaName: string;
-}
-
-type ExpenseType =
-  | 'travel'
-  | 'meals'
-  | 'office_supplies'
-  | 'training'
-  | 'shipping'
-  | 'telecom'
-  | 'insurance'
-  // Tech / cloud — split per Mapping conventions
-  | 'ai_api'              // OpenAI / Anthropic / OpenRouter / Firecrawl → 6435
-  | 'gpu_compute'         // Runpod / Lambda Labs / Vast.ai → 6420
-  | 'web3_rpc'            // Alchemy / Infura / QuickNode / ZAN → 6425
-  | 'web3_subscription'   // Privy / Dynamic / wallet-connect → 6430
-  | 'company_saas'        // Notion / Slack / Zoom / 1Password / Google Workspace → 6350 regardless of function
-  | 'cloud'               // generic AWS/GCP/Azure/Vercel → 6420 (R&D) / 6150 (S&M) / 6390 (G&A)
-  | 'software'            // team-specific tool (defaults to R&D 6430 unless function overrides)
-  // S&M
-  | 'kol_marketing'       // KOL / KOC / influencer → 6125
-  | 'community_rewards'   // 红包 / airdrop / referral rewards → 6145
-  | 'advertising'         // Google / Meta / LinkedIn paid ads → 6120
-  | 'content_seo'
-  | 'pr_communications'
-  | 'miscellaneous';
-
-const EXPENSE_TYPE_ACCOUNTS: Record<ExpenseType, AccountCodeSet> = {
-  travel: {
-    rd: '6440', sm: '6170', ga: '6270',
-    rdName: 'R&D - Travel & Entertainment',
-    smName: 'S&M - Travel & Entertainment',
-    gaName: 'G&A - Travel & Entertainment',
-  },
-  meals: {
-    rd: '6450', sm: '6180', ga: '6280',
-    rdName: 'R&D - Meals & Entertainment',
-    smName: 'S&M - Meals & Entertainment',
-    gaName: 'G&A - Meals & Entertainment',
-  },
-  office_supplies: {
-    rd: '6410', sm: '6190', ga: '6230',
-    rdName: 'R&D - Office Supplies',
-    smName: 'S&M - Miscellaneous Expense',
-    gaName: 'G&A - Office Supplies',
-  },
-  training: {
-    rd: '6470', sm: '6140', ga: '6330',
-    rdName: 'R&D - Training & Conferences',
-    smName: 'S&M - Events & Conferences',
-    gaName: 'G&A - Training & Development',
-  },
-  shipping: {
-    rd: '6490', sm: '6190', ga: '6370',
-    rdName: 'R&D - Miscellaneous Expense',
-    smName: 'S&M - Miscellaneous Expense',
-    gaName: 'G&A - Shipping & Postage',
-  },
-  telecom: {
-    rd: '6490', sm: '6190', ga: '6290',
-    rdName: 'R&D - Miscellaneous Expense',
-    smName: 'S&M - Miscellaneous Expense',
-    gaName: 'G&A - Telephone & Internet',
-  },
-  insurance: {
-    rd: '6490', sm: '6190', ga: '6240',
-    rdName: 'R&D - Miscellaneous Expense',
-    smName: 'S&M - Miscellaneous Expense',
-    gaName: 'G&A - Insurance',
-  },
-  // "AI model APIs → 6435" — distinct from raw compute (6420) and software subs (6430)
-  ai_api: {
-    rd: '6435', sm: '6150', ga: '6350',
-    rdName: 'R&D - AI & API Services',
-    smName: 'S&M - CRM & Sales Tools',
-    gaName: 'G&A - Dues & Subscriptions',
-  },
-  // "Pay-per-second GPU rental goes to 6420 R&D - Cloud & Infrastructure"
-  gpu_compute: {
-    rd: '6420', sm: '6150', ga: '6390',
-    rdName: 'R&D - Cloud & Infrastructure',
-    smName: 'S&M - CRM & Sales Tools',
-    gaName: 'G&A - Miscellaneous Expense',
-  },
-  // Web3 consumption RPC / nodes / indexers / L2 gas → 6425
-  web3_rpc: {
-    rd: '6425', sm: '6150', ga: '6390',
-    rdName: 'R&D - Blockchain & On-chain Services',
-    smName: 'S&M - CRM & Sales Tools',
-    gaName: 'G&A - Miscellaneous Expense',
-  },
-  // Web3 SDK / hosted auth / subscription packages → 6430
-  web3_subscription: {
-    rd: '6430', sm: '6150', ga: '6390',
-    rdName: 'R&D - Software & Subscriptions',
-    smName: 'S&M - CRM & Sales Tools',
-    gaName: 'G&A - Miscellaneous Expense',
-  },
-  // Company-wide SaaS — routes to G&A 6350 regardless of who paid ("who uses", not "who paid")
-  company_saas: {
-    rd: '6350', sm: '6350', ga: '6350',
-    rdName: 'G&A - Dues & Subscriptions',
-    smName: 'G&A - Dues & Subscriptions',
-    gaName: 'G&A - Dues & Subscriptions',
-  },
-  cloud: {
-    rd: '6420', sm: '6150', ga: '6390',
-    rdName: 'R&D - Cloud & Infrastructure',
-    smName: 'S&M - CRM & Sales Tools',
-    gaName: 'G&A - Miscellaneous Expense',
-  },
-  software: {
-    rd: '6430', sm: '6150', ga: '6350',
-    rdName: 'R&D - Software & Subscriptions',
-    smName: 'S&M - CRM & Sales Tools',
-    gaName: 'G&A - Dues & Subscriptions',
-  },
-  kol_marketing: {
-    rd: '6490', sm: '6125', ga: '6390',
-    rdName: 'R&D - Miscellaneous Expense',
-    smName: 'S&M - Influencer & KOL Marketing',
-    gaName: 'G&A - Miscellaneous Expense',
-  },
-  community_rewards: {
-    rd: '6490', sm: '6145', ga: '6390',
-    rdName: 'R&D - Miscellaneous Expense',
-    smName: 'S&M - Community Rewards & Incentives',
-    gaName: 'G&A - Miscellaneous Expense',
-  },
-  advertising: {
-    rd: '6490', sm: '6120', ga: '6390',
-    rdName: 'R&D - Miscellaneous Expense',
-    smName: 'S&M - Digital Advertising',
-    gaName: 'G&A - Miscellaneous Expense',
-  },
-  content_seo: {
-    rd: '6490', sm: '6130', ga: '6390',
-    rdName: 'R&D - Miscellaneous Expense',
-    smName: 'S&M - Content & SEO',
-    gaName: 'G&A - Miscellaneous Expense',
-  },
-  pr_communications: {
-    rd: '6490', sm: '6160', ga: '6390',
-    rdName: 'R&D - Miscellaneous Expense',
-    smName: 'S&M - PR & Communications',
-    gaName: 'G&A - Miscellaneous Expense',
-  },
-  miscellaneous: {
-    rd: '6490', sm: '6190', ga: '6390',
-    rdName: 'R&D - Miscellaneous Expense',
-    smName: 'S&M - Miscellaneous Expense',
-    gaName: 'G&A - Miscellaneous Expense',
-  },
-};
+// ExpenseType / AccountCodeSet / EXPENSE_TYPE_ACCOUNTS 已迁移到 ./account-rules
+// （单一真相源）。这里 re-export 给老调用方继续按本模块路径 import。
+export type { ExpenseType, AccountCodeSet } from './account-rules';
+export { EXPENSE_TYPE_ACCOUNTS };
 
 // ============================================================================
 // Category / keyword → 费用类型

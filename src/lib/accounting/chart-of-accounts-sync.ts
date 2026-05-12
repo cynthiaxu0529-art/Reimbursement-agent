@@ -9,17 +9,11 @@
 import { db } from '@/lib/db';
 import { syncedAccounts } from '@/lib/db/schema';
 import { eq, notInArray } from 'drizzle-orm';
-
-// ============================================================================
-// 类型定义
-// ============================================================================
-
-export interface AccountingAccount {
-  account_code: string;
-  account_name: string;
-  account_type: string;
-  account_subtype: string;
-}
+// FALLBACK_ACCOUNTS + AccountingAccount 已迁移到 account-rules（单一真相源，纯数据无 db 依赖）
+// 这里 re-export 让原有 import 路径继续工作。
+import { FALLBACK_ACCOUNTS, type AccountingAccount } from './account-rules';
+export { FALLBACK_ACCOUNTS };
+export type { AccountingAccount };
 
 interface SyncResult {
   success: boolean;
@@ -27,51 +21,6 @@ interface SyncResult {
   accountCount: number;
   error?: string;
 }
-
-// ============================================================================
-// Fallback 硬编码科目表
-// 当 Accounting Agent 不可达时保底，字段与 contract 中的 R&D / S&M / G&A
-// canonical 列表严格一致；真实来源仍以 /api/external/chart-of-accounts 为准。
-// ============================================================================
-
-export const FALLBACK_ACCOUNTS: AccountingAccount[] = [
-  // ── R&D (contract canonical list) ──
-  { account_code: '6410', account_name: 'R&D - Office Supplies', account_type: 'Expense', account_subtype: 'Research & Development' },
-  { account_code: '6420', account_name: 'R&D - Cloud & Infrastructure', account_type: 'Expense', account_subtype: 'Research & Development' },
-  { account_code: '6425', account_name: 'R&D - Blockchain & On-chain Services', account_type: 'Expense', account_subtype: 'Research & Development' },
-  { account_code: '6430', account_name: 'R&D - Software & Subscriptions', account_type: 'Expense', account_subtype: 'Research & Development' },
-  { account_code: '6435', account_name: 'R&D - AI & API Services', account_type: 'Expense', account_subtype: 'Research & Development' },
-  { account_code: '6440', account_name: 'R&D - Travel & Entertainment', account_type: 'Expense', account_subtype: 'Research & Development' },
-  { account_code: '6450', account_name: 'R&D - Meals & Entertainment', account_type: 'Expense', account_subtype: 'Research & Development' },
-  { account_code: '6460', account_name: 'R&D - Equipment & Hardware', account_type: 'Expense', account_subtype: 'Research & Development' },
-  { account_code: '6470', account_name: 'R&D - Training & Conferences', account_type: 'Expense', account_subtype: 'Research & Development' },
-  { account_code: '6480', account_name: 'R&D - Dues & Subscriptions', account_type: 'Expense', account_subtype: 'Research & Development' },
-  { account_code: '6490', account_name: 'R&D - Miscellaneous Expense', account_type: 'Expense', account_subtype: 'Research & Development' },
-  // ── S&M ──
-  { account_code: '6100', account_name: 'S&M - Sales Salaries & Commissions', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  { account_code: '6110', account_name: 'S&M - Marketing Salaries', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  { account_code: '6120', account_name: 'S&M - Digital Advertising', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  { account_code: '6125', account_name: 'S&M - Influencer & KOL Marketing', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  { account_code: '6130', account_name: 'S&M - Content & SEO', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  { account_code: '6140', account_name: 'S&M - Events & Conferences', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  { account_code: '6145', account_name: 'S&M - Community Rewards & Incentives', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  { account_code: '6150', account_name: 'S&M - CRM & Sales Tools', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  { account_code: '6160', account_name: 'S&M - PR & Communications', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  { account_code: '6170', account_name: 'S&M - Travel & Entertainment', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  { account_code: '6180', account_name: 'S&M - Meals & Entertainment', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  { account_code: '6190', account_name: 'S&M - Miscellaneous Expense', account_type: 'Expense', account_subtype: 'Sales & Marketing' },
-  // ── G&A ──
-  { account_code: '6220', account_name: 'G&A - Rent & Facilities', account_type: 'Expense', account_subtype: 'General & Administrative' },
-  { account_code: '6230', account_name: 'G&A - Office Supplies', account_type: 'Expense', account_subtype: 'General & Administrative' },
-  { account_code: '6240', account_name: 'G&A - Insurance', account_type: 'Expense', account_subtype: 'General & Administrative' },
-  { account_code: '6270', account_name: 'G&A - Travel & Entertainment', account_type: 'Expense', account_subtype: 'General & Administrative' },
-  { account_code: '6280', account_name: 'G&A - Meals & Entertainment', account_type: 'Expense', account_subtype: 'General & Administrative' },
-  { account_code: '6290', account_name: 'G&A - Telephone & Internet', account_type: 'Expense', account_subtype: 'General & Administrative' },
-  { account_code: '6330', account_name: 'G&A - Training & Development', account_type: 'Expense', account_subtype: 'General & Administrative' },
-  { account_code: '6350', account_name: 'G&A - Dues & Subscriptions', account_type: 'Expense', account_subtype: 'General & Administrative' },
-  { account_code: '6370', account_name: 'G&A - Shipping & Postage', account_type: 'Expense', account_subtype: 'General & Administrative' },
-  { account_code: '6390', account_name: 'G&A - Miscellaneous Expense', account_type: 'Expense', account_subtype: 'General & Administrative' },
-];
 
 // ============================================================================
 // 同步逻辑

@@ -3,6 +3,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
+import {
+  EXPENSE_TYPE_ACCOUNTS,
+  EXPENSE_RULES_DISPLAY,
+  FALLBACK_ACCOUNTS,
+  SUBTYPE_TO_GROUP,
+} from '@/lib/accounting/account-rules';
 
 // ============================================================================
 // Types
@@ -48,46 +54,25 @@ interface SyncedAccount {
 // Mapping Rules (for display)
 // ============================================================================
 
-const MAPPING_RULES_DISPLAY = [
-  { expenseType: '差旅 Travel', categories: 'taxi, flight, train, hotel, car_rental, fuel, parking, toll', rdCode: '6440', smCode: '6130', gaCode: '6270' },
-  { expenseType: '餐饮 Meals', categories: 'meal, client_entertainment', rdCode: '6450', smCode: '6140', gaCode: '6280' },
-  { expenseType: '办公用品 Office', categories: 'office_supplies, equipment, printing', rdCode: '6460', smCode: '6150', gaCode: '6230' },
-  { expenseType: '培训 Training', categories: 'training, conference', rdCode: '6470', smCode: '6160', gaCode: '6330' },
-  { expenseType: '云/AI Cloud', categories: 'cloud_resource, ai_token', rdCode: '6420', smCode: '6190', gaCode: '6390' },
-  { expenseType: '软件 Software', categories: 'software', rdCode: '6430', smCode: '6190', gaCode: '6390' },
-  { expenseType: '快递 Shipping', categories: 'courier', rdCode: '6490', smCode: '6190', gaCode: '6370' },
-  { expenseType: '通讯 Telecom', categories: 'phone, internet', rdCode: '6490', smCode: '6190', gaCode: '6290' },
-  { expenseType: '广告 Advertising', categories: '(keyword)', rdCode: '6490', smCode: '6120', gaCode: '6390' },
-  { expenseType: '其他 Misc', categories: '(default)', rdCode: '6490', smCode: '6190', gaCode: '6390' },
-];
+// AVAILABLE_ACCOUNTS / MAPPING_RULES_DISPLAY 从单一真相源 account-rules 派生，
+// 防止页面常量和实际入账逻辑、CoA fallback 表漂移（2025 年 S&M 编号迁移后
+// 原硬编码版本已经 stale 至今）。
+const MAPPING_RULES_DISPLAY = EXPENSE_RULES_DISPLAY.map(rule => {
+  const codes = EXPENSE_TYPE_ACCOUNTS[rule.expenseTypeKey];
+  return {
+    expenseType: rule.expenseType,
+    categories: rule.categories,
+    rdCode: codes.rd,
+    smCode: codes.sm,
+    gaCode: codes.ga,
+  };
+});
 
-const AVAILABLE_ACCOUNTS = [
-  // R&D
-  { code: '6420', name: 'R&D - Cloud & Infrastructure', group: 'R&D' },
-  { code: '6430', name: 'R&D - Software & Subscriptions', group: 'R&D' },
-  { code: '6440', name: 'R&D - Travel & Entertainment', group: 'R&D' },
-  { code: '6450', name: 'R&D - Meals & Entertainment', group: 'R&D' },
-  { code: '6460', name: 'R&D - Office Supplies', group: 'R&D' },
-  { code: '6470', name: 'R&D - Training & Conferences', group: 'R&D' },
-  { code: '6490', name: 'R&D - Miscellaneous Expense', group: 'R&D' },
-  // S&M
-  { code: '6120', name: 'S&M - Advertising & Promotion', group: 'S&M' },
-  { code: '6130', name: 'S&M - Travel & Entertainment', group: 'S&M' },
-  { code: '6140', name: 'S&M - Meals & Client Entertainment', group: 'S&M' },
-  { code: '6150', name: 'S&M - Office Supplies', group: 'S&M' },
-  { code: '6160', name: 'S&M - Training & Conferences', group: 'S&M' },
-  { code: '6190', name: 'S&M - Miscellaneous Expense', group: 'S&M' },
-  // G&A
-  { code: '6220', name: 'G&A - Rent & Facilities', group: 'G&A' },
-  { code: '6230', name: 'G&A - Office Supplies', group: 'G&A' },
-  { code: '6240', name: 'G&A - Insurance', group: 'G&A' },
-  { code: '6270', name: 'G&A - Travel & Entertainment', group: 'G&A' },
-  { code: '6280', name: 'G&A - Meals & Entertainment', group: 'G&A' },
-  { code: '6290', name: 'G&A - Telephone & Internet', group: 'G&A' },
-  { code: '6330', name: 'G&A - Training & Development', group: 'G&A' },
-  { code: '6370', name: 'G&A - Shipping & Postage', group: 'G&A' },
-  { code: '6390', name: 'G&A - Miscellaneous Expense', group: 'G&A' },
-];
+const AVAILABLE_ACCOUNTS = FALLBACK_ACCOUNTS.map(a => ({
+  code: a.account_code,
+  name: a.account_name,
+  group: SUBTYPE_TO_GROUP[a.account_subtype] || a.account_subtype,
+}));
 
 const CATEGORY_LABELS: Record<string, string> = {
   flight: '机票 Flight', train: '火车 Train', hotel: '酒店 Hotel',
