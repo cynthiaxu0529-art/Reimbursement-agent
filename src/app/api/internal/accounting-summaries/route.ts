@@ -205,7 +205,8 @@ export async function GET(request: NextRequest) {
     const syncedAccountMap = new Map<string, string>(syncedAccountRows.map(a => [a.accountCode, a.accountName]));
 
     const reimbToUser = new Map(allReimbs.map(r => [r.id, r.userId]));
-    const reimbToDate = new Map(allReimbs.map(r => [r.id, r.approvedAt || new Date()]));
+    // approvedAt 留作兜底；归期按 item.date 走（与 reimbursement-summaries 对齐）。
+    const reimbToApprovedAt = new Map(allReimbs.map(r => [r.id, r.approvedAt]));
 
     type GroupKey = string;
     const groups = new Map<GroupKey, {
@@ -218,10 +219,12 @@ export async function GET(request: NextRequest) {
     }>();
 
     for (const item of allItems) {
-      const approvedAt = reimbToDate.get(item.reimbursementId);
-      if (!approvedAt) continue;
+      // 归期按"费用实际发生日期"item.date —— 权责发生制（accrual basis）。
+      // 迟报费用按 approvedAt 归期会跨期，导致 P&L 失真。
+      const itemDate = item.date || reimbToApprovedAt.get(item.reimbursementId);
+      if (!itemDate) continue;
 
-      const period = getHalfMonthPeriod(approvedAt);
+      const period = getHalfMonthPeriod(itemDate);
 
       // 使用已存储的 coaCode 或根据部门费用性质重新映射
       const userId = reimbToUser.get(item.reimbursementId);
