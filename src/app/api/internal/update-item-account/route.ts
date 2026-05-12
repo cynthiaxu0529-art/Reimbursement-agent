@@ -24,6 +24,7 @@ import { db } from '@/lib/db';
 import { reimbursementItems, users, correctionApplications } from '@/lib/db/schema';
 import { eq, inArray } from 'drizzle-orm';
 import { getUserRoles } from '@/lib/auth/roles';
+import { loadClosedPeriods, monthIdOf } from '@/lib/accounting/period-closure';
 
 export const dynamic = 'force-dynamic';
 
@@ -132,10 +133,45 @@ export async function PATCH(request: NextRequest) {
         id: reimbursementItems.id,
         coaCode: reimbursementItems.coaCode,
         coaName: reimbursementItems.coaName,
+        date: reimbursementItems.date,
+        postedPeriodId: reimbursementItems.postedPeriodId,
       })
       .from(reimbursementItems)
       .where(inArray(reimbursementItems.id, itemIds));
     const currentCoaMap = new Map(currentItems.map(i => [i.id, { coaCode: i.coaCode, coaName: i.coaName }]));
+
+    // 封账阻拦：item 自然归期所在月份已锁定的不允许改 COA
+    // （已锁的期间财务已经对账完毕，改科目会让财报和已发出的报告对不上）
+    // super_admin 可以解锁该期间后再改
+    if (currentUser.tenantId) {
+      const closedMonths = await loadClosedPeriods(currentUser.tenantId);
+      const blocked: { id: string; month: string }[] = [];
+      for (const it of currentItems) {
+        // 若 posted_period_id 已固定，按它所在月判断；否则按 item.date
+        let monthKey: string | null = null;
+        if (it.postedPeriodId) {
+          const m = it.postedPeriodId.match(/^REIMB-SUM-(\d{4})(\d{2})-/);
+          if (m) monthKey = `${m[1]}-${m[2]}`;
+        } else if (it.date) {
+          monthKey = monthIdOf(it.date);
+        }
+        if (monthKey && closedMonths.get(monthKey) === 'locked') {
+          blocked.push({ id: it.id, month: monthKey });
+        }
+      }
+      if (blocked.length > 0) {
+        const months = Array.from(new Set(blocked.map(b => b.month))).join(', ');
+        return NextResponse.json(
+          {
+            error: `以下明细所在期间已封账（${months}），不可修改科目。请先解锁期间，或联系 super_admin。`,
+            error_code: 'PERIOD_LOCKED',
+            blocked_item_ids: blocked.map(b => b.id),
+            locked_months: Array.from(new Set(blocked.map(b => b.month))),
+          },
+          { status: 409 }
+        );
+      }
+    }
 
     // 逐条更新（因为每条可能有不同的 account_code/account_name）
     const results: { id: string; coaCode: string | null; coaName: string | null }[] = [];

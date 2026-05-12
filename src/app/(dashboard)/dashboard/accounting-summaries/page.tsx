@@ -30,6 +30,20 @@ interface SummaryDetail {
    * 后端汇总返回时设置；前端用它控制勾选/编辑是否可用。
    */
   item_type?: 'reimbursement_item' | 'correction_application';
+  /** 是否为迟报（item.date 落在已封月份，被改路由到当前期间） */
+  late_filing?: boolean;
+  /** 改路由前的自然归期 summary_id —— 仅 late_filing 时存在 */
+  original_period?: string;
+}
+
+interface PeriodClosure {
+  id: string;
+  periodId: string; // 'YYYY-MM'
+  status: 'open' | 'locked';
+  closedAt: string | null;
+  closedBy: string | null;
+  reason: string | null;
+  updatedAt: string;
 }
 
 interface SummaryItem {
@@ -127,6 +141,22 @@ export default function AccountingSummariesPage() {
   const [filterEmployee, setFilterEmployee] = useState<string>('all');
   const [filterAccountCode, setFilterAccountCode] = useState<string>('all');
 
+  // Period closure state
+  const [closures, setClosures] = useState<PeriodClosure[]>([]);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [closureBusyPeriod, setClosureBusyPeriod] = useState<string | null>(null);
+
+  /** 把 summary_id (REIMB-SUM-202605-A) 拆成月份 (2026-05)，用来查封账状态 */
+  const monthIdOfSummary = (summaryId: string): string | null => {
+    const m = summaryId.match(/^REIMB-SUM-(\d{4})(\d{2})-/);
+    return m ? `${m[1]}-${m[2]}` : null;
+  };
+  const closureMap = new Map(closures.map(c => [c.periodId, c]));
+  const isMonthLocked = (summaryId: string): boolean => {
+    const month = monthIdOfSummary(summaryId);
+    return month ? closureMap.get(month)?.status === 'locked' : false;
+  };
+
   const fetchSummaries = useCallback(async () => {
     try {
       setLoading(true);
@@ -166,9 +196,76 @@ export default function AccountingSummariesPage() {
     }
   }, [router]);
 
+  const fetchClosures = useCallback(async () => {
+    try {
+      const res = await fetch('/api/accounting-periods');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success) setClosures(data.data || []);
+    } catch {
+      // 封账数据加载失败不影响汇总展示
+    }
+  }, []);
+
   useEffect(() => {
     fetchSummaries();
-  }, [fetchSummaries]);
+    fetchClosures();
+    // 拿当前角色判断是否能看到封账按钮
+    fetch('/api/settings/role').then(r => r.json()).then(d => {
+      if (d?.roles?.includes('super_admin')) setIsSuperAdmin(true);
+    }).catch(() => {});
+  }, [fetchSummaries, fetchClosures]);
+
+  const handleClosePeriod = async (summaryId: string) => {
+    const month = monthIdOfSummary(summaryId);
+    if (!month) return;
+    const reason = prompt(`确认封账 ${month}？\n\n封账后：\n• 该月内未同步的明细，新报销会被改路由到当前期间（迟报）\n• 已同步的明细不动\n• 该月明细不能修改科目\n\n请输入封账原因（可选）：`);
+    if (reason === null) return;
+    setClosureBusyPeriod(month);
+    try {
+      const res = await fetch(`/api/accounting-periods/${month}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchClosures();
+        await fetchSummaries();
+      } else {
+        alert(data.error || '封账失败');
+      }
+    } finally {
+      setClosureBusyPeriod(null);
+    }
+  };
+
+  const handleUnlockPeriod = async (summaryId: string) => {
+    const month = monthIdOfSummary(summaryId);
+    if (!month) return;
+    const reason = prompt(`解锁 ${month}？\n\n⚠️ 解锁后已封期间的明细可以再被修改，会被记入审计日志。\n请填明确的解锁原因（必填，审计要求）：`);
+    if (!reason || !reason.trim()) {
+      if (reason !== null) alert('解锁必须填写原因');
+      return;
+    }
+    setClosureBusyPeriod(month);
+    try {
+      const res = await fetch(`/api/accounting-periods/${month}/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchClosures();
+        await fetchSummaries();
+      } else {
+        alert(data.error || '解锁失败');
+      }
+    } finally {
+      setClosureBusyPeriod(null);
+    }
+  };
 
   // Get unique periods for filter
   const periods = [...new Set(summaries.map(s => s.summary_id))];
@@ -400,11 +497,19 @@ export default function AccountingSummariesPage() {
           {ts.noSummaries}
         </div>
       ) : (
-        filteredSummaries.map(summary => (
+        filteredSummaries.map(summary => {
+          const monthId = monthIdOfSummary(summary.summary_id);
+          const closure = monthId ? closureMap.get(monthId) : undefined;
+          const locked = closure?.status === 'locked';
+          // 计算迟报金额（跨所有 item）
+          const lateFilingAmount = summary.items.reduce((sum, it) =>
+            sum + it.details.filter(d => d.late_filing).reduce((s, d) => s + d.amount, 0), 0);
+          const busy = closureBusyPeriod === monthId;
+          return (
           <div key={summary.summary_id} style={{
             backgroundColor: 'white',
             borderRadius: '0.75rem',
-            border: '1px solid #e5e7eb',
+            border: locked ? '1px solid #fcd34d' : '1px solid #e5e7eb',
             overflow: 'hidden',
           }}>
             {/* Summary header */}
@@ -415,13 +520,13 @@ export default function AccountingSummariesPage() {
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 cursor: 'pointer',
-                backgroundColor: expandedSummaryId === summary.summary_id ? '#f8fafc' : 'white',
+                backgroundColor: expandedSummaryId === summary.summary_id ? '#f8fafc' : locked ? '#fffbeb' : 'white',
               }}
               onClick={() => setExpandedSummaryId(
                 expandedSummaryId === summary.summary_id ? null : summary.summary_id
               )}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
                 <span style={{
                   display: 'inline-block',
                   padding: '0.25rem 0.625rem',
@@ -436,8 +541,73 @@ export default function AccountingSummariesPage() {
                 <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>
                   {summary.period_start} ~ {summary.period_end}
                 </span>
+                {locked && (
+                  <span
+                    title={`已封账 · ${closure?.closedAt ? new Date(closure.closedAt).toLocaleString('zh-CN') : ''}${closure?.reason ? ` · ${closure.reason}` : ''}`}
+                    style={{
+                      padding: '0.125rem 0.5rem',
+                      backgroundColor: '#fef3c7',
+                      color: '#92400e',
+                      borderRadius: '999px',
+                      fontSize: '0.7rem',
+                      fontWeight: 600,
+                    }}
+                  >
+                    🔒 已封账
+                  </span>
+                )}
+                {lateFilingAmount > 0 && (
+                  <span
+                    title="本期含迟报费用（自然归期落在已封月份）"
+                    style={{
+                      padding: '0.125rem 0.5rem',
+                      backgroundColor: '#dbeafe',
+                      color: '#1e40af',
+                      borderRadius: '999px',
+                      fontSize: '0.7rem',
+                      fontWeight: 600,
+                    }}
+                  >
+                    迟报 {formatCurrency(lateFilingAmount, summary.currency)}
+                  </span>
+                )}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }} onClick={(e) => e.stopPropagation()}>
+                {isSuperAdmin && monthId && (
+                  locked ? (
+                    <button
+                      onClick={() => handleUnlockPeriod(summary.summary_id)}
+                      disabled={busy}
+                      style={{
+                        padding: '0.25rem 0.625rem',
+                        fontSize: '0.75rem',
+                        border: '1px solid #d1d5db',
+                        backgroundColor: 'white',
+                        borderRadius: '0.375rem',
+                        cursor: busy ? 'wait' : 'pointer',
+                        color: '#374151',
+                      }}
+                    >
+                      {busy ? '...' : '🔓 解锁'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleClosePeriod(summary.summary_id)}
+                      disabled={busy}
+                      style={{
+                        padding: '0.25rem 0.625rem',
+                        fontSize: '0.75rem',
+                        border: '1px solid #f59e0b',
+                        backgroundColor: '#fff',
+                        color: '#92400e',
+                        borderRadius: '0.375rem',
+                        cursor: busy ? 'wait' : 'pointer',
+                      }}
+                    >
+                      {busy ? '...' : '🔒 封账'}
+                    </button>
+                  )
+                )}
                 <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>
                   {ts.itemCount.replace('{count}', String(summary.total_records))}
                 </span>
@@ -546,7 +716,24 @@ export default function AccountingSummariesPage() {
                             alignItems: 'center',
                             gap: '0.5rem',
                           }}>
-                            <span style={{ color: '#374151' }}>{detail.employee_name}</span>
+                            <span style={{ color: '#374151', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                              {detail.employee_name}
+                              {detail.late_filing && (
+                                <span
+                                  title={`迟报：原应入 ${detail.original_period || '?'} 期，因该期已封改路由到本期`}
+                                  style={{
+                                    padding: '0.0625rem 0.375rem',
+                                    backgroundColor: '#dbeafe',
+                                    color: '#1e40af',
+                                    borderRadius: '0.25rem',
+                                    fontSize: '0.625rem',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  迟报
+                                </span>
+                              )}
+                            </span>
                             <span style={{ color: '#6b7280', fontSize: '0.75rem' }}>{detail.department}</span>
                             <span style={{ color: '#6b7280' }}>
                               {CATEGORY_LABELS[detail.category] || detail.category}
@@ -554,8 +741,11 @@ export default function AccountingSummariesPage() {
                             <span style={{ textAlign: 'right', fontWeight: 500, color: '#111827' }}>
                               {formatCurrency(detail.amount)}
                             </span>
-                            <span style={{ color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {detail.description}
+                            <span
+                              title={detail.late_filing ? `迟报来自 ${detail.original_period || '?'} 期` : undefined}
+                              style={{ color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            >
+                              {detail.late_filing ? `[迟报 ${detail.original_period || ''}] ` : ''}{detail.description}
                             </span>
                             <div style={{ textAlign: 'center' }}>
                               {editingItemId === detail.item_id ? (
@@ -642,7 +832,8 @@ export default function AccountingSummariesPage() {
               </div>
             )}
           </div>
-        ))
+          );
+        })
       )}
     </div>
   );

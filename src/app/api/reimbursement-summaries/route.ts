@@ -23,6 +23,7 @@ import { authenticate, logAgentAction, type AuthContext } from '@/lib/auth/api-k
 import { API_SCOPES } from '@/lib/auth/scopes';
 import { mapExpenseToAccount } from '@/lib/accounting/expense-account-mapping';
 import { ensureAccountsSynced } from '@/lib/accounting/chart-of-accounts-sync';
+import { loadClosedPeriods, resolvePostingPeriod } from '@/lib/accounting/period-closure';
 import { fetchPaidAmounts, paidScaleFactor } from '@/lib/accounting/paid-amount';
 
 export const dynamic = 'force-dynamic';
@@ -46,6 +47,10 @@ interface SummaryDetail {
   receipt_amount?: number;
   description: string;
   category: string;
+  /** 是否为迟报（item.date 落在已封月份，被改路由到当前期间） */
+  late_filing?: boolean;
+  /** 改路由前的自然归期 summary_id —— 仅 late_filing 时存在 */
+  original_period?: string;
   /** Previous account code if COA was changed (for dedup — update existing JE instead of creating new) */
   previous_account_code?: string;
   /** Timestamp when the COA was last changed */
@@ -307,6 +312,14 @@ export async function GET(request: NextRequest) {
       fallbackHints: string[];  // collect original category/description snippets
     }>();
 
+    // 加载本租户已封账月份（用于迟报改路由）。
+    // Service Account 认证时 authCtx 为 null —— 该路径走的是跨租户拉取，
+    // closedMonths 留空让行为退化为按 item.date 自然归期，封账逻辑不生效。
+    const closedMonths = authCtx?.tenantId
+      ? await loadClosedPeriods(authCtx.tenantId)
+      : new Map<string, 'open' | 'locked'>();
+    const now = new Date();
+
     for (const item of allItems) {
       // 归期按"费用实际发生日期"item.date —— 权责发生制（accrual basis）。
       // 如果按报销审批日 approvedAt 归期，迟报的费用会被错记到当期，
@@ -315,7 +328,15 @@ export async function GET(request: NextRequest) {
       const itemDate = item.date || reimbToApprovedAt.get(item.reimbursementId);
       if (!itemDate) continue;
 
-      const period = getHalfMonthPeriod(itemDate);
+      // 封账改路由：item.date 落在已封月份 + 未同步过 → 走当前开放期间，打 late_filing
+      const resolved = resolvePostingPeriod({
+        itemDate,
+        isSynced: !!item.syncedJeId,
+        pinnedPeriodId: item.postedPeriodId,
+        closedMonths,
+        now,
+      });
+      const period = resolved.period;
 
       // Use stored coaCode if available (set by finance adjust), otherwise map dynamically
       const userId = reimbToUser.get(item.reimbursementId);
@@ -381,6 +402,12 @@ export async function GET(request: NextRequest) {
         detail.synced_je_id = item.syncedJeId;
       }
 
+      // 迟报标记：item.date 在已封月份，被改路由到当前期间
+      if (resolved.lateFiling) {
+        detail.late_filing = true;
+        detail.original_period = resolved.originalSummaryId;
+      }
+
       group.details.push(detail);
       group.totalAmount += bookedAmount;
       group.recordCount += 1;
@@ -423,7 +450,16 @@ export async function GET(request: NextRequest) {
     for (const row of allApplications) {
       const { application, correction } = row;
       const appliedAt = application.appliedAt || new Date();
-      const period = getHalfMonthPeriod(appliedAt);
+
+      // 冲差也走封账改路由：已封月份的未同步冲差挪到当前开放期间
+      const resolvedCorr = resolvePostingPeriod({
+        itemDate: appliedAt,
+        isSynced: !!application.syncedJeId,
+        pinnedPeriodId: application.postedPeriodId,
+        closedMonths,
+        now,
+      });
+      const period = resolvedCorr.period;
 
       const adjustmentCode = '1220';
       const adjustmentName = correction.differenceAmount > 0
@@ -463,6 +499,10 @@ export async function GET(request: NextRequest) {
       };
       if (application.syncedJeId) {
         correctionDetail.synced_je_id = application.syncedJeId;
+      }
+      if (resolvedCorr.lateFiling) {
+        correctionDetail.late_filing = true;
+        correctionDetail.original_period = resolvedCorr.originalSummaryId;
       }
       group.details.push(correctionDetail);
       group.totalAmount += adjustmentAmount;
