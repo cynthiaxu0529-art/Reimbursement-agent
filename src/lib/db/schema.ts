@@ -402,6 +402,17 @@ export const reimbursementItems = pgTable('reimbursement_items', {
   syncedJeId: text('synced_je_id'),
   syncedAt: timestamp('synced_at'),
 
+  /**
+   * 实际入账的半月期 ID（如 'REIMB-SUM-202605-A'）。
+   * - 未填则按 item.date 自然归期
+   * - 一旦同步过（syncedJeId 非空），归期就由本字段固定，封账机制不会再迁移它
+   * - 迟报时由 summary 接口自动写入到当前开放期间
+   */
+  postedPeriodId: text('posted_period_id'),
+
+  /** 是否为月末估提条目（V3 留口，当前未启用对应 UI） */
+  isAccrual: boolean('is_accrual').notNull().default(false),
+
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -882,6 +893,9 @@ export const correctionApplications = pgTable('correction_applications', {
   // can idempotently post the 1220 correction adjustment line in accounting summaries.
   syncedJeId: text('synced_je_id'),
   syncedAt: timestamp('synced_at'),
+
+  /** 与 reimbursement_items.posted_period_id 同义 —— 见那里的注释 */
+  postedPeriodId: text('posted_period_id'),
 
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
@@ -1794,6 +1808,83 @@ export const reconciliationDiscrepanciesRelations = relations(reconciliationDisc
   }),
   resolver: one(users, {
     fields: [reconciliationDiscrepancies.resolvedBy],
+    references: [users.id],
+  }),
+}));
+
+// ============================================================================
+// 会计期间封账（SOX-lite）
+//
+// SMB 风格的软锁定 + 审计日志：
+//   - 一个月一行（period_id 例：'2026-05'），不到月不能预创建
+//   - 锁定后，落到该期的 item.date 会被 summary 自动改路由到当前开放期间
+//     （并打 late_filing 标记），未真打 hard block
+//   - 解锁也记审计，super_admin only
+// ============================================================================
+
+export const periodClosureStatusEnum = pgEnum('period_closure_status', [
+  'open',
+  'locked',
+]);
+
+export const accountingPeriodClosures = pgTable('accounting_period_closures', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  /** 月份键，格式 YYYY-MM */
+  periodId: text('period_id').notNull(),
+  status: periodClosureStatusEnum('status').notNull().default('open'),
+  closedAt: timestamp('closed_at'),
+  closedBy: uuid('closed_by').references(() => users.id),
+  reason: text('reason'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  tenantPeriodIdx: index('apc_tenant_period_idx').on(table.tenantId, table.periodId),
+}));
+
+/** 封账状态变更审计日志 —— 审计师查得到谁什么时候锁/解锁了哪个期间 */
+export const periodClosureAuditLog = pgTable('period_closure_audit_log', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  periodId: text('period_id').notNull(),
+  /** 'locked' | 'unlocked' | 'reason_updated' */
+  action: text('action').notNull(),
+  actorUserId: uuid('actor_user_id')
+    .notNull()
+    .references(() => users.id),
+  actorEmailSnapshot: text('actor_email_snapshot').notNull(),
+  reason: text('reason'),
+  /** 变更前后的关键字段，供审计师做溯源 */
+  prevState: jsonb('prev_state'),
+  newState: jsonb('new_state'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  tenantPeriodIdx: index('pcal_tenant_period_idx').on(table.tenantId, table.periodId),
+  createdAtIdx: index('pcal_created_at_idx').on(table.createdAt),
+}));
+
+export const accountingPeriodClosuresRelations = relations(accountingPeriodClosures, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [accountingPeriodClosures.tenantId],
+    references: [tenants.id],
+  }),
+  closer: one(users, {
+    fields: [accountingPeriodClosures.closedBy],
+    references: [users.id],
+  }),
+}));
+
+export const periodClosureAuditLogRelations = relations(periodClosureAuditLog, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [periodClosureAuditLog.tenantId],
+    references: [tenants.id],
+  }),
+  actor: one(users, {
+    fields: [periodClosureAuditLog.actorUserId],
     references: [users.id],
   }),
 }));
