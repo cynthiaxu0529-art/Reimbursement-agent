@@ -57,6 +57,24 @@ interface DiscrepancyRow {
   } | null;
 }
 
+interface PeriodSummaryRow {
+  periodId: string;
+  walletOutflowTotal: number;
+  walletOutflowCount: number;
+  systemPaymentsTotal: number;
+  systemPaymentsCount: number;
+  systemBookedTotal: number;
+  systemBookedCount: number;
+  diffPayments: number;
+  diffBooked: number;
+  walletOnlyRowIndexes: number[];
+  systemOnlyPaymentIds: string[];
+  reviewStatus: 'unreviewed' | 'reviewed' | 'accepted';
+  reviewNote: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+}
+
 interface ReconciliationDetail {
   reconciliation: ReconciliationListItem & {
     rawRows: unknown[];
@@ -117,6 +135,9 @@ export default function WalletReconciliationPage() {
   const [detail, setDetail] = useState<ReconciliationDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [filterType, setFilterType] = useState<DiscrepancyType | 'all' | 'unresolved'>('unresolved');
+  const [view, setView] = useState<'items' | 'periods'>('items');
+  const [periods, setPeriods] = useState<PeriodSummaryRow[]>([]);
+  const [periodsLoading, setPeriodsLoading] = useState(false);
 
   const fetchList = useCallback(async () => {
     setLoading(true);
@@ -140,14 +161,30 @@ export default function WalletReconciliationPage() {
     }
   }, []);
 
+  const fetchPeriods = useCallback(async (id: string) => {
+    setPeriodsLoading(true);
+    try {
+      const res = await fetch(`/api/wallet-reconciliations/${id}/period-summary`);
+      const data = await res.json();
+      if (data.success) setPeriods(data.data || []);
+    } finally {
+      setPeriodsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchList();
   }, [fetchList]);
 
   useEffect(() => {
-    if (selectedId) fetchDetail(selectedId);
-    else setDetail(null);
-  }, [selectedId, fetchDetail]);
+    if (selectedId) {
+      fetchDetail(selectedId);
+      fetchPeriods(selectedId);
+    } else {
+      setDetail(null);
+      setPeriods([]);
+    }
+  }, [selectedId, fetchDetail, fetchPeriods]);
 
   const handleUpload = async (file: File) => {
     setUploading(true);
@@ -214,6 +251,40 @@ export default function WalletReconciliationPage() {
     }
   };
 
+  const handleReviewPeriod = async (
+    periodId: string,
+    status: 'unreviewed' | 'reviewed' | 'accepted',
+  ) => {
+    if (!selectedId) return;
+    let note = '';
+    if (status !== 'unreviewed') {
+      const promptMsg = status === 'accepted'
+        ? '接受这个月的差异（合理差异，不再追究）。请填写说明（审计可见）：'
+        : '标记此月已审核。请填写说明（可选）：';
+      const input = prompt(promptMsg, '');
+      if (input === null) return;
+      if (status === 'accepted' && !input.trim()) {
+        alert('"接受差异"必须填写说明');
+        return;
+      }
+      note = input.trim();
+    }
+    const res = await fetch(
+      `/api/wallet-reconciliations/${selectedId}/period-summary/${periodId}/review`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, note }),
+      },
+    );
+    const data = await res.json();
+    if (data.success) {
+      await fetchPeriods(selectedId);
+    } else {
+      alert(data.error || '操作失败');
+    }
+  };
+
   const filteredDiscrepancies = (detail?.discrepancies || []).filter((d) => {
     if (filterType === 'all') return true;
     if (filterType === 'unresolved') return !d.resolved;
@@ -248,6 +319,11 @@ export default function WalletReconciliationPage() {
             filteredDiscrepancies={filteredDiscrepancies}
             onRerun={() => handleRerun(selectedId)}
             onResolve={handleResolve}
+            view={view}
+            onViewChange={setView}
+            periods={periods}
+            periodsLoading={periodsLoading}
+            onReviewPeriod={handleReviewPeriod}
           />
         )}
       </div>
@@ -442,6 +518,11 @@ function DetailPanel({
   filteredDiscrepancies,
   onRerun,
   onResolve,
+  view,
+  onViewChange,
+  periods,
+  periodsLoading,
+  onReviewPeriod,
 }: {
   detail: ReconciliationDetail | null;
   loading: boolean;
@@ -450,6 +531,11 @@ function DetailPanel({
   filteredDiscrepancies: DiscrepancyRow[];
   onRerun: () => void;
   onResolve: (discId: string, unresolve: boolean) => void;
+  view: 'items' | 'periods';
+  onViewChange: (v: 'items' | 'periods') => void;
+  periods: PeriodSummaryRow[];
+  periodsLoading: boolean;
+  onReviewPeriod: (periodId: string, status: 'unreviewed' | 'reviewed' | 'accepted') => void;
 }) {
   if (loading || !detail) {
     return (
@@ -508,6 +594,54 @@ function DetailPanel({
         </button>
       </div>
 
+      {/* View tabs */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '1px solid #e5e7eb' }}>
+        <TabButton label="明细对账" sublabel="逐笔匹配" active={view === 'items'} onClick={() => onViewChange('items')} />
+        <TabButton label="按期对账" sublabel="月度总额 vs 钱包实付" active={view === 'periods'} onClick={() => onViewChange('periods')} />
+      </div>
+
+      {view === 'periods' ? (
+        <PeriodSummaryView periods={periods} loading={periodsLoading} onReview={onReviewPeriod} />
+      ) : (
+        <ItemsView
+          detail={detail}
+          filterType={filterType}
+          onFilterChange={onFilterChange}
+          filteredDiscrepancies={filteredDiscrepancies}
+          onResolve={onResolve}
+          r={r}
+          allTypes={allTypes}
+          unresolvedCount={unresolvedCount}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 按笔对账视图（原 DetailPanel 主体，抽出来）
+ */
+function ItemsView({
+  detail,
+  filterType,
+  onFilterChange,
+  filteredDiscrepancies,
+  onResolve,
+  r,
+  allTypes,
+  unresolvedCount,
+}: {
+  detail: ReconciliationDetail;
+  filterType: DiscrepancyType | 'all' | 'unresolved';
+  onFilterChange: (t: DiscrepancyType | 'all' | 'unresolved') => void;
+  filteredDiscrepancies: DiscrepancyRow[];
+  onResolve: (discId: string, unresolve: boolean) => void;
+  r: ReconciliationListItem;
+  allTypes: DiscrepancyType[];
+  unresolvedCount: number;
+}) {
+  return (
+    <>
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '16px' }}>
         <Stat label="链上行数" value={String(r.rowCount)} />
@@ -561,6 +695,243 @@ function DetailPanel({
           {filteredDiscrepancies.map((d) => (
             <DiscrepancyCard key={d.id} d={d} onResolve={onResolve} />
           ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function TabButton({ label, sublabel, active, onClick }: { label: string; sublabel?: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '8px 14px',
+        background: 'none',
+        border: 'none',
+        borderBottom: active ? '2px solid #2563eb' : '2px solid transparent',
+        cursor: 'pointer',
+        color: active ? '#1e40af' : '#6b7280',
+        fontSize: '13px',
+        fontWeight: active ? 600 : 500,
+        marginBottom: '-1px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: '2px',
+      }}
+    >
+      {label}
+      {sublabel && (
+        <span style={{ fontSize: '10px', fontWeight: 400, color: active ? '#3b82f6' : '#9ca3af' }}>
+          {sublabel}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function PeriodSummaryView({
+  periods,
+  loading,
+  onReview,
+}: {
+  periods: PeriodSummaryRow[];
+  loading: boolean;
+  onReview: (periodId: string, status: 'unreviewed' | 'reviewed' | 'accepted') => void;
+}) {
+  if (loading) {
+    return <div style={{ padding: '32px', textAlign: 'center', fontSize: '13px', color: '#6b7280' }}>加载按期对账数据中…</div>;
+  }
+  if (periods.length === 0) {
+    return <div style={{ padding: '32px', textAlign: 'center', fontSize: '13px', color: '#6b7280', backgroundColor: '#f9fafb', borderRadius: '8px' }}>无可对账的月份数据</div>;
+  }
+
+  const totalDiff = periods.reduce((s, p) => s + Math.abs(p.diffBooked), 0);
+
+  return (
+    <div>
+      <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px', lineHeight: 1.5 }}>
+        按月对比三种口径：<b>钱包实付</b>（CSV confirmed outflow）vs <b>系统 payments 成功</b>（基于 paidAt）vs <b>系统记账</b>（基于 item.date）。
+        三者本应一致；差异通常源于迟报跨期、应付未付、汇率波动或票据 vs 实付口径差。
+        差异合计 <b style={{ color: totalDiff > 0 ? '#b91c1c' : '#047857' }}>{fmtMoney(totalDiff)}</b>。
+      </p>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {periods.map((p) => (
+          <PeriodSummaryCard key={p.periodId} p={p} onReview={onReview} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PeriodSummaryCard({
+  p,
+  onReview,
+}: {
+  p: PeriodSummaryRow;
+  onReview: (periodId: string, status: 'unreviewed' | 'reviewed' | 'accepted') => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDiff = Math.abs(p.diffBooked) > 0.01 || Math.abs(p.diffPayments) > 0.01;
+  const statusColor = p.reviewStatus === 'accepted'
+    ? { bg: '#ecfdf5', fg: '#047857', label: '已接受差异' }
+    : p.reviewStatus === 'reviewed'
+    ? { bg: '#eff6ff', fg: '#1e40af', label: '已审核' }
+    : hasDiff
+    ? { bg: '#fef2f2', fg: '#b91c1c', label: '未处理' }
+    : { bg: '#f0fdf4', fg: '#047857', label: '一致' };
+
+  return (
+    <div
+      style={{
+        padding: '12px',
+        border: `1px solid ${p.reviewStatus !== 'unreviewed' ? '#d1fae5' : hasDiff ? '#fecaca' : '#e5e7eb'}`,
+        borderRadius: '8px',
+        backgroundColor: p.reviewStatus !== 'unreviewed' ? '#f0fdf4' : '#fff',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>{p.periodId}</span>
+          <span
+            style={{
+              fontSize: '11px',
+              padding: '2px 8px',
+              borderRadius: '999px',
+              backgroundColor: statusColor.bg,
+              color: statusColor.fg,
+              fontWeight: 600,
+            }}
+          >
+            {statusColor.label}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {p.reviewStatus === 'unreviewed' ? (
+            <>
+              <button
+                onClick={() => onReview(p.periodId, 'reviewed')}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: '12px',
+                  border: '1px solid #2563eb',
+                  backgroundColor: '#2563eb',
+                  color: '#fff',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                }}
+              >
+                标记已审核
+              </button>
+              {hasDiff && (
+                <button
+                  onClick={() => onReview(p.periodId, 'accepted')}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: '12px',
+                    border: '1px solid #10b981',
+                    backgroundColor: '#fff',
+                    color: '#047857',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  接受差异
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              onClick={() => onReview(p.periodId, 'unreviewed')}
+              style={{
+                padding: '4px 10px',
+                fontSize: '12px',
+                border: '1px solid #d1d5db',
+                backgroundColor: '#fff',
+                color: '#374151',
+                borderRadius: '6px',
+                cursor: 'pointer',
+              }}
+            >
+              撤销
+            </button>
+          )}
+          <button
+            onClick={() => setExpanded(!expanded)}
+            style={{
+              padding: '4px 10px',
+              fontSize: '12px',
+              border: '1px solid #d1d5db',
+              backgroundColor: '#fff',
+              color: '#374151',
+              borderRadius: '6px',
+              cursor: 'pointer',
+            }}
+          >
+            {expanded ? '收起' : '详情'}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', fontSize: '12px' }}>
+        <div style={{ padding: '8px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
+          <p style={{ color: '#6b7280', marginBottom: '4px' }}>钱包实付 ({p.walletOutflowCount} 笔)</p>
+          <p style={{ fontWeight: 600, color: '#111827' }}>{fmtMoney(p.walletOutflowTotal)}</p>
+        </div>
+        <div style={{ padding: '8px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
+          <p style={{ color: '#6b7280', marginBottom: '4px' }}>系统 payments ({p.systemPaymentsCount} 笔)</p>
+          <p style={{ fontWeight: 600, color: '#111827' }}>{fmtMoney(p.systemPaymentsTotal)}</p>
+          <p style={{ fontSize: '10px', color: Math.abs(p.diffPayments) > 0.01 ? '#b91c1c' : '#047857', marginTop: '2px' }}>
+            差 {p.diffPayments >= 0 ? '+' : ''}{p.diffPayments.toFixed(2)}
+          </p>
+        </div>
+        <div style={{ padding: '8px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
+          <p style={{ color: '#6b7280', marginBottom: '4px' }}>系统记账 ({p.systemBookedCount} 项)</p>
+          <p style={{ fontWeight: 600, color: '#111827' }}>{fmtMoney(p.systemBookedTotal)}</p>
+          <p style={{ fontSize: '10px', color: Math.abs(p.diffBooked) > 0.01 ? '#b91c1c' : '#047857', marginTop: '2px' }}>
+            差 {p.diffBooked >= 0 ? '+' : ''}{p.diffBooked.toFixed(2)}
+          </p>
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e5e7eb' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>
+            <div>
+              <p style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                钱包有 / 系统无（{p.walletOnlyRowIndexes.length} 行）
+              </p>
+              <p style={{ fontSize: '11px', color: '#6b7280' }}>
+                {p.walletOnlyRowIndexes.length === 0 ? '—' : `CSV 行索引: ${p.walletOnlyRowIndexes.slice(0, 10).join(', ')}${p.walletOnlyRowIndexes.length > 10 ? ' …' : ''}`}
+              </p>
+            </div>
+            <div>
+              <p style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                系统有 / 钱包无（{p.systemOnlyPaymentIds.length} 笔）
+              </p>
+              <p style={{ fontSize: '11px', color: '#6b7280', wordBreak: 'break-all' }}>
+                {p.systemOnlyPaymentIds.length === 0 ? '—' : `payment IDs: ${p.systemOnlyPaymentIds.slice(0, 3).map(id => id.slice(0, 8)).join(', ')}${p.systemOnlyPaymentIds.length > 3 ? ' …' : ''}`}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {p.reviewStatus !== 'unreviewed' && p.reviewNote && (
+        <div
+          style={{
+            marginTop: '8px',
+            padding: '6px 10px',
+            backgroundColor: '#ecfdf5',
+            borderLeft: '3px solid #10b981',
+            fontSize: '12px',
+            color: '#065f46',
+          }}
+        >
+          处理说明：{p.reviewNote}
+          {p.reviewedAt && <span style={{ marginLeft: '8px', color: '#6b7280' }}>· {fmtDate(p.reviewedAt)}</span>}
         </div>
       )}
     </div>

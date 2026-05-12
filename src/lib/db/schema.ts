@@ -1812,6 +1812,38 @@ export const reconciliationDiscrepanciesRelations = relations(reconciliationDisc
   }),
 }));
 
+/**
+ * 按期对账 review 状态
+ *
+ * 一份钱包对账记录（wallet_reconciliations）一旦上传，会自动按月聚合产出
+ * "系统记账总额 vs 钱包打款总额" 的差异分析。这张表存财务对每个月差异
+ * 的处理意见（已审核 / 接受差异 / 备注）。
+ *
+ * 不存计算值（system_total / wallet_total / diff），那些在查询时实时算，
+ * 保证一致性。
+ */
+export const walletReconciliationPeriodNotes = pgTable('wallet_reconciliation_period_notes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  reconciliationId: uuid('reconciliation_id')
+    .notNull()
+    .references(() => walletReconciliations.id, { onDelete: 'cascade' }),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  /** 'YYYY-MM' */
+  periodId: text('period_id').notNull(),
+  /** 'unreviewed' | 'reviewed' | 'accepted'（accepted = 接受这个差异不再追究） */
+  status: text('status').notNull().default('unreviewed'),
+  note: text('note'),
+  reviewedBy: uuid('reviewed_by').references(() => users.id),
+  reviewedAt: timestamp('reviewed_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  reconciliationIdx: index('wrpn_reconciliation_idx').on(table.reconciliationId),
+  periodIdx: index('wrpn_period_idx').on(table.tenantId, table.periodId),
+}));
+
 // ============================================================================
 // 会计期间封账（SOX-lite）
 //

@@ -1,18 +1,29 @@
 /**
  * Fluxa 转账清单 CSV 解析器
  *
+ * 兼容两种 Fluxa 导出格式：
+ *
+ *   1. Mandate Bills（早期格式，2026-Q1）
+ *      #, Mandate ID, Date, Description, Payee Wallet Address, Payee FluxA Account, Payee Agent ID, Amount
+ *
+ *   2. Wallet Activity（2026-Q2 起，更丰富）
+ *      ts_utc, biz_type, direction, network, currency, amount_raw, amount_usd, our_address,
+ *      counterparty, agent_id, agent_external_id, mandate_id, approval_id, tx_hash, status,
+ *      biz_ref, description
+ *
  * 必填：amount + toAddress + timestamp + (txHash 或 payoutId 至少一个)。
  * 其它字段可选；不认识的列原样塞进 rawExtra（jsonb），便于后续扩展。
  *
- * 真实 Fluxa 导出字段示例（截至 2026-05）：
- *   #, Mandate ID, Date, Description, Payee Wallet Address,
- *   Payee FluxA Account, Payee Agent ID, Amount
+ * 行过滤规则：
+ *   - direction='in' → 跳过（入金不是 payout）
+ *   - status ∉ {success, succeeded, confirmed, ok, 1} → 跳过 + warning
  *
- * 注意 Fluxa 当前导出无 txHash 列——这意味着匹配主要靠 Mandate ID（payoutId）。
+ * 注意：旧 Mandate Bills 格式无 txHash 列，匹配主要靠 Mandate ID（payoutId）；
+ *      新 Wallet Activity 格式 tx_hash + biz_ref 都有，一二级匹配都能用。
  */
 
 export interface FluxaCsvRow {
-  /** 链上交易哈希。Fluxa 当前导出没这一列，缺失时为 ''  */
+  /** 链上交易哈希。旧 Mandate Bills 格式没这一列，缺失时为 ''  */
   txHash: string;
   amount: number;
   token: string;
@@ -21,10 +32,14 @@ export interface FluxaCsvRow {
   timestamp: string; // ISO
   status?: string;   // success / failed / pending
   gasFee?: number;
-  /** Fluxa Mandate ID / 转账唯一 ID —— 实际主匹配键 */
+  /** Fluxa Mandate ID / 转账唯一 ID / 我们的 biz_ref —— 主匹配键 */
   payoutId?: string;
   chainId?: string;
   network?: string;
+  /** payout / trial_bonus / refund 等 —— Wallet Activity 格式独有 */
+  bizType?: string;
+  /** out / in —— Wallet Activity 格式独有，'in' 行会被过滤掉 */
+  direction?: string;
   /** 解析时遇到不认识的列原样塞进来（包括 Description / FluxA Account / Agent ID 等） */
   rawExtra?: Record<string, string>;
   /** 这一行原始 CSV 内容（debug 用） */
@@ -39,17 +54,22 @@ export interface CsvParseResult {
 }
 
 const FIELD_ALIASES: Record<keyof FluxaCsvRow, string[]> = {
-  txHash:      ['txhash', 'tx_hash', 'transaction_hash', 'hash'],
-  amount:      ['amount', 'value'],
+  // alias 已经经过 normalize（去 _ / - / 空格、转小写）后比对
+  txHash:      ['txhash', 'transactionhash', 'hash'],
+  // amountusd 优先级和 amount 同等；如果 Wallet Activity 同时有 amount_raw + amount_usd，
+  // 用户应该看 amount_usd（已经按币种 normalized 到 USD）
+  amount:      ['amount', 'value', 'amountusd'],
   token:       ['token', 'currency', 'asset', 'symbol'],
-  fromAddress: ['fromaddress', 'from_address', 'from', 'payerwalletaddress', 'payer_wallet_address'],
-  toAddress:   ['toaddress', 'to_address', 'to', 'recipient', 'payeewalletaddress', 'payee_wallet_address', 'payeeaddress'],
-  timestamp:   ['timestamp', 'time', 'date', 'created_at', 'block_time'],
+  fromAddress: ['fromaddress', 'from', 'payerwalletaddress', 'ouraddress'],
+  toAddress:   ['toaddress', 'to', 'recipient', 'payeewalletaddress', 'payeeaddress', 'counterparty'],
+  timestamp:   ['timestamp', 'time', 'date', 'createdat', 'blocktime', 'tsutc'],
   status:      ['status', 'state'],
-  gasFee:      ['gasfee', 'gas_fee', 'fee', 'gas'],
-  payoutId:    ['payoutid', 'payout_id', 'transferid', 'transfer_id', 'mandateid', 'mandate_id', 'id'],
-  chainId:     ['chainid', 'chain_id'],
+  gasFee:      ['gasfee', 'fee', 'gas'],
+  payoutId:    ['payoutid', 'transferid', 'mandateid', 'id', 'bizref'],
+  chainId:     ['chainid'],
   network:     ['network', 'chain'],
+  bizType:     ['biztype', 'transactiontype'],
+  direction:   ['direction', 'flow', 'inout'],
   rawExtra:    [],
   rawLine:     [],
 };
@@ -162,6 +182,12 @@ export function parseFluxaCsv(content: string): CsvParseResult {
       }
     }
 
+    // Wallet Activity 格式：direction='in' 是入金（trial_bonus / refund），不是 payout，跳过
+    if (row.direction && row.direction.trim().toLowerCase() === 'in') {
+      warnings.push(`第 ${li + 1} 行 direction=in（${row.bizType || '入金'}），跳过`);
+      continue;
+    }
+
     // 必填字段缺失 → 这一行进 errors，跳过
     // txHash 或 payoutId 任一必须有，否则没法做精确匹配
     const hasMatchKey = !!row.txHash || !!row.payoutId;
@@ -173,7 +199,7 @@ export function parseFluxaCsv(content: string): CsvParseResult {
       continue;
     }
 
-    // txHash 字段在 FluxaCsvRow 上是 string，但 Fluxa 当前导出根本没这列。
+    // txHash 字段在 FluxaCsvRow 上是 string，但旧 Mandate Bills 格式没这列。
     // 给它一个空字符串占位，让下游 norm() 自然返回 ''，匹配阶段会跳过。
     if (!row.txHash) row.txHash = '';
 
