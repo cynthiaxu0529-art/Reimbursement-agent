@@ -1920,3 +1920,32 @@ export const periodClosureAuditLogRelations = relations(periodClosureAuditLog, (
     references: [users.id],
   }),
 }));
+
+/**
+ * 数据异常审计 review 状态
+ *
+ * 钱包对账页的「数据审计」tab 会检测 payments + reimbursements 之间的状态
+ * 不一致（payment 失败但 reimb 标 paid 等）。这张表存财务对每条异常的处理
+ * 意见：已审核 / 已接受（合理）/ 已修复（动了底层数据）。
+ *
+ * anomaly_key 格式：'<type>:<resource_id>'，例如 'failed_but_paid:abc-uuid'。
+ * 每条异常一旦被 review，再扫到同样 key 就会带出之前的 note。
+ */
+export const dataAnomalyReviews = pgTable('data_anomaly_reviews', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id),
+  /** '<anomaly_type>:<payment_id|reimbursement_id>' */
+  anomalyKey: text('anomaly_key').notNull(),
+  /** 'reviewed' | 'accepted' | 'fixed' */
+  status: text('status').notNull(),
+  note: text('note'),
+  reviewedBy: uuid('reviewed_by').references(() => users.id),
+  reviewedAt: timestamp('reviewed_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  tenantIdx: index('dar_tenant_idx').on(table.tenantId),
+  keyIdx: index('dar_key_idx').on(table.tenantId, table.anomalyKey),
+}));
