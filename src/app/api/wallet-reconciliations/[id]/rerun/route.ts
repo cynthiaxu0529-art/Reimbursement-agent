@@ -18,7 +18,8 @@ import {
   reimbursements,
   users,
 } from '@/lib/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
+import { SUCCESS_PAYOUT_STATUSES } from '@/lib/payment-sync';
 import { getUserRoles, canProcessPayment } from '@/lib/auth/roles';
 import { apiError } from '@/lib/api-error';
 import {
@@ -80,7 +81,7 @@ export async function POST(
     .where(
       and(
         eq(reimbursements.tenantId, session.user.tenantId),
-        eq(payments.payoutStatus, 'succeeded'),
+        inArray(payments.payoutStatus, SUCCESS_PAYOUT_STATUSES as unknown as string[]),
         eq(payments.paymentProvider, 'fluxa'),
       ),
     );

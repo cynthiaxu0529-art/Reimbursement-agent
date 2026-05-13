@@ -17,10 +17,11 @@ import {
   reimbursements,
   users,
 } from '@/lib/db/schema';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { getUserRoles, canProcessPayment } from '@/lib/auth/roles';
 import { apiError } from '@/lib/api-error';
 import { parseFluxaCsv, inferPeriod } from '@/lib/reconciliation/csv-parser';
+import { SUCCESS_PAYOUT_STATUSES } from '@/lib/payment-sync';
 import {
   matchPaymentsAgainstCsv,
   DEFAULT_TOLERANCE,
@@ -128,7 +129,8 @@ export async function POST(request: NextRequest) {
       .where(
         and(
           eq(reimbursements.tenantId, ctx.tenantId),
-          eq(payments.payoutStatus, 'succeeded'),
+          // Fluxa 实际可能返回 succeeded / success / confirmed
+          inArray(payments.payoutStatus, SUCCESS_PAYOUT_STATUSES as unknown as string[]),
           eq(payments.paymentProvider, 'fluxa'),
         ),
       );
