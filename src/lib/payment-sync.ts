@@ -28,6 +28,19 @@ export const IN_FLIGHT_PAYOUT_STATUSES = [
   'broadcasting',
 ] as const;
 
+/**
+ * Fluxa 终态成功的所有变体。
+ * - 'succeeded' / 'success'：早期 / 当前 Fluxa API 文档值
+ * - 'confirmed'：Fluxa 当前生产实际返回的链上确认状态（占多数）
+ *
+ * 任何 join payments 时筛"成功支付"都必须用这三个的 inArray，
+ * 否则会漏掉 confirmed 的（生产环境实际占 ~95%）。
+ */
+export const SUCCESS_PAYOUT_STATUSES = ['succeeded', 'success', 'confirmed'] as const;
+
+/** Fluxa 终态失败 */
+export const FAILED_PAYOUT_STATUSES = ['failed', 'expired'] as const;
+
 export interface SyncOneResult {
   paymentId: string;
   payoutId: string;
@@ -199,9 +212,11 @@ export interface BulkSyncResult {
 export async function reconcileOrphanedReimbursementStates(filter: {
   tenantId?: string;
 } = {}): Promise<{ markedPaid: number; rolledBack: number }> {
-  // 先拉所有 payout_status='succeeded' 且 reimbursement.status != 'paid' 的
+  // 先拉所有 payout 已成功（succeeded/success/confirmed）但 reimbursement 还不是 paid 的
   // 用 SQL 直接 join + 过滤
-  const baseConditions = [eq(payments.payoutStatus, 'succeeded')];
+  const baseConditions = [
+    inArray(payments.payoutStatus, SUCCESS_PAYOUT_STATUSES as unknown as string[]),
+  ];
   if (filter.tenantId) {
     baseConditions.push(eq(reimbursements.tenantId, filter.tenantId));
   }
@@ -234,7 +249,7 @@ export async function reconcileOrphanedReimbursementStates(filter: {
 
   // 同样修 failed/expired 但 reimbursement 还在 processing 的
   const failedConditions = [
-    inArray(payments.payoutStatus, ['failed', 'expired']),
+    inArray(payments.payoutStatus, FAILED_PAYOUT_STATUSES as unknown as string[]),
   ];
   if (filter.tenantId) {
     failedConditions.push(eq(reimbursements.tenantId, filter.tenantId));

@@ -22,6 +22,7 @@ import {
 } from '@/lib/db/schema';
 import { and, eq, inArray } from 'drizzle-orm';
 import type { FluxaCsvRow } from './csv-parser';
+import { SUCCESS_PAYOUT_STATUSES } from '@/lib/payment-sync';
 
 export interface PeriodSummary {
   /** 'YYYY-MM' */
@@ -106,7 +107,8 @@ export async function computePeriodSummary(
     .where(
       and(
         eq(reimbursements.tenantId, tenantId),
-        eq(payments.payoutStatus, 'succeeded'),
+        // Fluxa 实际可能返回 succeeded / success / confirmed —— 都算成功
+        inArray(payments.payoutStatus, SUCCESS_PAYOUT_STATUSES as unknown as string[]),
         eq(payments.paymentProvider, 'fluxa'),
       ),
     );
