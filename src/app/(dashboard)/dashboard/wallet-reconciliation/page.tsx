@@ -57,6 +57,44 @@ interface DiscrepancyRow {
   } | null;
 }
 
+type AnomalyType =
+  | 'failed_but_paid'
+  | 'succeeded_but_not_paid'
+  | 'rejected_with_inflight'
+  | 'paid_no_payment'
+  | 'multiple_succeeded';
+
+interface DataAnomaly {
+  anomalyKey: string;
+  type: AnomalyType;
+  payment?: {
+    id: string;
+    payoutId: string | null;
+    payoutStatus: string | null;
+    amount: number;
+    currency: string;
+    paidAt: string | null;
+    txHash: string | null;
+  };
+  reimbursement: {
+    id: string;
+    title: string;
+    status: string;
+    totalAmountInBaseCurrency: number;
+    baseCurrency: string;
+    paidAt: string | null;
+    userId: string;
+    employee?: { name: string; email: string } | null;
+  };
+  description: string;
+  review?: {
+    status: 'reviewed' | 'accepted' | 'fixed';
+    note: string | null;
+    reviewedBy: string | null;
+    reviewedAt: string | null;
+  };
+}
+
 interface PeriodSummaryRow {
   periodId: string;
   walletOutflowTotal: number;
@@ -138,6 +176,10 @@ export default function WalletReconciliationPage() {
   const [view, setView] = useState<'items' | 'periods'>('items');
   const [periods, setPeriods] = useState<PeriodSummaryRow[]>([]);
   const [periodsLoading, setPeriodsLoading] = useState(false);
+  const [pageView, setPageView] = useState<'reconciliation' | 'audit'>('reconciliation');
+  const [anomalies, setAnomalies] = useState<DataAnomaly[]>([]);
+  const [anomalySummary, setAnomalySummary] = useState<{ total: number; unreviewed: number; byType: Record<string, number> } | null>(null);
+  const [anomaliesLoading, setAnomaliesLoading] = useState(false);
 
   const fetchList = useCallback(async () => {
     setLoading(true);
@@ -161,6 +203,83 @@ export default function WalletReconciliationPage() {
     }
   }, []);
 
+  const fetchAnomalies = useCallback(async () => {
+    setAnomaliesLoading(true);
+    try {
+      const res = await fetch('/api/wallet-reconciliations/data-anomalies');
+      const data = await res.json();
+      if (data.success) {
+        setAnomalies(data.data.anomalies || []);
+        setAnomalySummary(data.data.summary || null);
+      }
+    } finally {
+      setAnomaliesLoading(false);
+    }
+  }, []);
+
+  const handleResolveAnomaly = async (
+    anomalyKey: string,
+    status: 'reviewed' | 'accepted' | 'fixed',
+  ) => {
+    const prompts: Record<typeof status, string> = {
+      reviewed: '标记此异常已审核。备注（可选）：',
+      accepted: '接受此异常（合理差异，不再追究）。请填写说明（审计要求）：',
+      fixed: '标记为已修复（你已在系统外动了底层数据）。请填写说明：',
+    };
+    const note = prompt(prompts[status], '');
+    if (note === null) return;
+    if ((status === 'accepted' || status === 'fixed') && !note.trim()) {
+      alert(`status=${status} 必须填写说明`);
+      return;
+    }
+    const res = await fetch('/api/wallet-reconciliations/data-anomalies/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anomalyKey, status, note: note.trim() }),
+    });
+    const data = await res.json();
+    if (data.success) await fetchAnomalies();
+    else alert(data.error || '操作失败');
+  };
+
+  const handleRollbackPaid = async (anomalyKey: string, reimbursementId: string) => {
+    const note = prompt(
+      '把 reimbursement 从 paid 回滚到 approved。\n这是高敏感操作（仅 super_admin），必填回滚原因（审计可见）：',
+      '',
+    );
+    if (!note || !note.trim()) {
+      if (note !== null) alert('回滚必须填写说明');
+      return;
+    }
+    const res = await fetch('/api/wallet-reconciliations/data-anomalies/rollback-paid', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anomalyKey, reimbursementId, note: note.trim() }),
+    });
+    const data = await res.json();
+    if (data.success) await fetchAnomalies();
+    else alert(data.error || '回滚失败');
+  };
+
+  const handleForcePaid = async (anomalyKey: string, reimbursementId: string) => {
+    const note = prompt(
+      '强制把 reimbursement 标 paid。\n请填写说明（审计要求）：',
+      '',
+    );
+    if (!note || !note.trim()) {
+      if (note !== null) alert('强制 paid 必须填写说明');
+      return;
+    }
+    const res = await fetch('/api/wallet-reconciliations/data-anomalies/force-paid', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anomalyKey, reimbursementId, note: note.trim() }),
+    });
+    const data = await res.json();
+    if (data.success) await fetchAnomalies();
+    else alert(data.error || '操作失败');
+  };
+
   const fetchPeriods = useCallback(async (id: string) => {
     setPeriodsLoading(true);
     try {
@@ -174,7 +293,9 @@ export default function WalletReconciliationPage() {
 
   useEffect(() => {
     fetchList();
-  }, [fetchList]);
+    // 进入页面就预拉一次异常，给 tab 上的 badge 显示数字
+    fetchAnomalies();
+  }, [fetchList, fetchAnomalies]);
 
   useEffect(() => {
     if (selectedId) {
@@ -293,14 +414,42 @@ export default function WalletReconciliationPage() {
 
   return (
     <div style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
-      <div style={{ marginBottom: '24px' }}>
+      <div style={{ marginBottom: '16px' }}>
         <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>钱包对账</h1>
         <p style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
-          上传 Fluxa 钱包导出的转账清单（CSV），系统按 txHash → payoutId → 模糊匹配
-          三级 fallback 配对到 payments 表的成功转账，并把不一致的项标出来。
+          上传 Fluxa 钱包导出的转账清单（CSV）做对账；或在「数据审计」tab 检查 payments × reimbursements 状态一致性问题。
         </p>
       </div>
 
+      {/* Top-level tab switcher */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', borderBottom: '1px solid #e5e7eb' }}>
+        <TopTab
+          label="钱包对账"
+          sublabel="CSV 上传 + 对账"
+          active={pageView === 'reconciliation'}
+          onClick={() => setPageView('reconciliation')}
+        />
+        <TopTab
+          label="数据审计"
+          sublabel="payments × reimbursements 一致性"
+          active={pageView === 'audit'}
+          onClick={() => setPageView('audit')}
+          badge={anomalySummary?.unreviewed && anomalySummary.unreviewed > 0 ? anomalySummary.unreviewed : undefined}
+        />
+      </div>
+
+      {pageView === 'audit' ? (
+        <DataAuditView
+          anomalies={anomalies}
+          loading={anomaliesLoading}
+          summary={anomalySummary}
+          onRefresh={fetchAnomalies}
+          onResolveAnomaly={handleResolveAnomaly}
+          onRollbackPaid={handleRollbackPaid}
+          onForcePaid={handleForcePaid}
+        />
+      ) : (
+        <>
       <UploadCard onUpload={handleUpload} uploading={uploading} error={uploadError} />
 
       <div style={{ marginTop: '24px', display: 'grid', gridTemplateColumns: detail ? '1fr 2fr' : '1fr', gap: '24px' }}>
@@ -327,6 +476,8 @@ export default function WalletReconciliationPage() {
           />
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1110,4 +1261,372 @@ function KV({ k, v }: { k: string; v: string }) {
       <span style={{ color: '#111827', wordBreak: 'break-all' }}>{v}</span>
     </div>
   );
+}
+
+// ============================================================================
+// Top-level tab + data audit
+// ============================================================================
+
+function TopTab({
+  label,
+  sublabel,
+  active,
+  onClick,
+  badge,
+}: {
+  label: string;
+  sublabel?: string;
+  active: boolean;
+  onClick: () => void;
+  badge?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '10px 16px',
+        background: 'none',
+        border: 'none',
+        borderBottom: active ? '2px solid #2563eb' : '2px solid transparent',
+        cursor: 'pointer',
+        color: active ? '#1e40af' : '#6b7280',
+        fontSize: '14px',
+        fontWeight: active ? 600 : 500,
+        marginBottom: '-1px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: '2px',
+        position: 'relative',
+      }}
+    >
+      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {label}
+        {badge !== undefined && badge > 0 && (
+          <span
+            style={{
+              padding: '1px 7px',
+              fontSize: '11px',
+              fontWeight: 600,
+              backgroundColor: '#fef2f2',
+              color: '#b91c1c',
+              borderRadius: '999px',
+              lineHeight: 1.4,
+            }}
+          >
+            {badge}
+          </span>
+        )}
+      </span>
+      {sublabel && (
+        <span style={{ fontSize: '10px', fontWeight: 400, color: active ? '#3b82f6' : '#9ca3af' }}>
+          {sublabel}
+        </span>
+      )}
+    </button>
+  );
+}
+
+const ANOMALY_TYPE_LABELS: Record<AnomalyType, string> = {
+  failed_but_paid: '失败但已付',
+  succeeded_but_not_paid: '成功但未标 paid',
+  rejected_with_inflight: '已驳回但 payment 在途',
+  paid_no_payment: '已付但无 payment 记录',
+  multiple_succeeded: '重复打款',
+};
+
+const ANOMALY_TYPE_COLORS: Record<AnomalyType, { bg: string; fg: string }> = {
+  failed_but_paid:        { bg: '#fef2f2', fg: '#b91c1c' },
+  succeeded_but_not_paid: { bg: '#eff6ff', fg: '#1d4ed8' },
+  rejected_with_inflight: { bg: '#fff7ed', fg: '#c2410c' },
+  paid_no_payment:        { bg: '#fdf2f8', fg: '#be185d' },
+  multiple_succeeded:     { bg: '#fef3c7', fg: '#92400e' },
+};
+
+function DataAuditView({
+  anomalies,
+  loading,
+  summary,
+  onRefresh,
+  onResolveAnomaly,
+  onRollbackPaid,
+  onForcePaid,
+}: {
+  anomalies: DataAnomaly[];
+  loading: boolean;
+  summary: { total: number; unreviewed: number; byType: Record<string, number> } | null;
+  onRefresh: () => void;
+  onResolveAnomaly: (anomalyKey: string, status: 'reviewed' | 'accepted' | 'fixed') => void;
+  onRollbackPaid: (anomalyKey: string, reimbursementId: string) => void;
+  onForcePaid: (anomalyKey: string, reimbursementId: string) => void;
+}) {
+  const [filterType, setFilterType] = useState<AnomalyType | 'all' | 'unreviewed'>('unreviewed');
+
+  const filteredAnomalies = anomalies.filter((a) => {
+    if (filterType === 'all') return true;
+    if (filterType === 'unreviewed') return !a.review;
+    return a.type === filterType;
+  });
+
+  const allTypes = Array.from(new Set(anomalies.map((a) => a.type))) as AnomalyType[];
+
+  return (
+    <div style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+        <div>
+          <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>数据异常审计</h2>
+          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', lineHeight: 1.5 }}>
+            扫描 payments × reimbursements 状态一致性，surface 看起来不正常的记录。
+            财务可以逐条决定怎么处理：「标记已审核」记录看过；「接受差异」承认是合理异常；
+            「回滚 paid」/「强制 paid」是真正动数据。所有操作都记审计 note。
+          </p>
+        </div>
+        <button
+          onClick={onRefresh}
+          style={{
+            padding: '6px 12px',
+            border: '1px solid #d1d5db',
+            backgroundColor: '#fff',
+            borderRadius: '6px',
+            fontSize: '13px',
+            cursor: 'pointer',
+            color: '#374151',
+          }}
+        >
+          🔄 刷新
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: '32px', textAlign: 'center', color: '#6b7280', fontSize: '13px' }}>
+          扫描中…
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '16px' }}>
+            <div style={{ padding: '10px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
+              <p style={{ fontSize: '11px', color: '#6b7280' }}>异常总数</p>
+              <p style={{ fontSize: '18px', fontWeight: 700 }}>{summary?.total ?? 0}</p>
+            </div>
+            <div
+              style={{
+                padding: '10px',
+                backgroundColor: (summary?.unreviewed ?? 0) > 0 ? '#fef2f2' : '#f0fdf4',
+                borderRadius: '6px',
+              }}
+            >
+              <p style={{ fontSize: '11px', color: '#6b7280' }}>未处理</p>
+              <p
+                style={{
+                  fontSize: '18px',
+                  fontWeight: 700,
+                  color: (summary?.unreviewed ?? 0) > 0 ? '#b91c1c' : '#047857',
+                }}
+              >
+                {summary?.unreviewed ?? 0}
+              </p>
+            </div>
+            <div style={{ padding: '10px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
+              <p style={{ fontSize: '11px', color: '#6b7280' }}>异常类型数</p>
+              <p style={{ fontSize: '18px', fontWeight: 700 }}>
+                {summary ? Object.keys(summary.byType).length : 0}
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
+            <FilterChip
+              label={`未处理 (${anomalies.filter((a) => !a.review).length})`}
+              active={filterType === 'unreviewed'}
+              onClick={() => setFilterType('unreviewed')}
+            />
+            <FilterChip
+              label={`全部 (${anomalies.length})`}
+              active={filterType === 'all'}
+              onClick={() => setFilterType('all')}
+            />
+            {allTypes.map((t) => (
+              <FilterChip
+                key={t}
+                label={`${ANOMALY_TYPE_LABELS[t]} (${anomalies.filter((a) => a.type === t).length})`}
+                active={filterType === t}
+                onClick={() => setFilterType(t)}
+              />
+            ))}
+          </div>
+
+          {filteredAnomalies.length === 0 ? (
+            <div
+              style={{
+                padding: '32px',
+                textAlign: 'center',
+                fontSize: '13px',
+                color: '#6b7280',
+                backgroundColor: '#f9fafb',
+                borderRadius: '8px',
+              }}
+            >
+              {anomalies.length === 0 ? '🎉 没有发现数据异常' : '当前筛选下无记录'}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {filteredAnomalies.map((a) => (
+                <AnomalyCard
+                  key={a.anomalyKey}
+                  a={a}
+                  onResolve={(status) => onResolveAnomaly(a.anomalyKey, status)}
+                  onRollbackPaid={() => onRollbackPaid(a.anomalyKey, a.reimbursement.id)}
+                  onForcePaid={() => onForcePaid(a.anomalyKey, a.reimbursement.id)}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function AnomalyCard({
+  a,
+  onResolve,
+  onRollbackPaid,
+  onForcePaid,
+}: {
+  a: DataAnomaly;
+  onResolve: (status: 'reviewed' | 'accepted' | 'fixed') => void;
+  onRollbackPaid: () => void;
+  onForcePaid: () => void;
+}) {
+  const color = ANOMALY_TYPE_COLORS[a.type];
+  const resolved = !!a.review;
+
+  return (
+    <div
+      style={{
+        padding: '12px',
+        border: `1px solid ${resolved ? '#d1fae5' : '#e5e7eb'}`,
+        borderRadius: '8px',
+        backgroundColor: resolved ? '#f0fdf4' : '#fff',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <span
+            style={{
+              fontSize: '11px',
+              padding: '2px 8px',
+              borderRadius: '999px',
+              backgroundColor: color.bg,
+              color: color.fg,
+              fontWeight: 600,
+            }}
+          >
+            {ANOMALY_TYPE_LABELS[a.type]}
+          </span>
+          {resolved && (
+            <span style={{ fontSize: '11px', color: '#047857', fontWeight: 600 }}>
+              ✓ {a.review!.status === 'reviewed' ? '已审核' : a.review!.status === 'accepted' ? '已接受' : '已修复'}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+          {!resolved && (
+            <>
+              <button
+                onClick={() => onResolve('reviewed')}
+                style={btnStyle('#fff', '#374151', '#d1d5db')}
+              >
+                标记已审核
+              </button>
+              <button
+                onClick={() => onResolve('accepted')}
+                style={btnStyle('#fff', '#047857', '#10b981')}
+              >
+                接受差异
+              </button>
+              {a.type === 'failed_but_paid' && (
+                <button
+                  onClick={onRollbackPaid}
+                  style={btnStyle('#fff', '#b91c1c', '#fecaca')}
+                  title="把 reimbursement 从 paid 回滚到 approved（仅 super_admin）"
+                >
+                  回滚 paid
+                </button>
+              )}
+              {a.type === 'succeeded_but_not_paid' && (
+                <button
+                  onClick={onForcePaid}
+                  style={btnStyle('#fff', '#1e40af', '#bfdbfe')}
+                  title="强制把 reimbursement 标 paid"
+                >
+                  强制 paid
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px', lineHeight: 1.5 }}>
+        {a.description}
+      </p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>
+        <div style={{ padding: '8px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
+          <p style={{ fontWeight: 600, marginBottom: '6px', color: '#374151' }}>reimbursement</p>
+          <KV k="标题" v={a.reimbursement.title} />
+          <KV k="员工" v={a.reimbursement.employee?.name || '—'} />
+          <KV k="状态" v={a.reimbursement.status} />
+          <KV k="金额" v={fmtMoney(a.reimbursement.totalAmountInBaseCurrency, a.reimbursement.baseCurrency)} />
+          <KV k="paidAt" v={fmtDate(a.reimbursement.paidAt)} />
+        </div>
+        <div style={{ padding: '8px', backgroundColor: '#fafafa', borderRadius: '6px' }}>
+          <p style={{ fontWeight: 600, marginBottom: '6px', color: '#374151' }}>payment</p>
+          {a.payment ? (
+            <>
+              <KV k="payoutId" v={shortHash(a.payment.payoutId, 8, 4)} />
+              <KV k="状态" v={a.payment.payoutStatus || '—'} />
+              <KV k="金额" v={fmtMoney(a.payment.amount, a.payment.currency)} />
+              <KV k="txHash" v={shortHash(a.payment.txHash, 8, 6)} />
+              <KV k="paidAt" v={fmtDate(a.payment.paidAt)} />
+            </>
+          ) : (
+            <p style={{ color: '#9ca3af' }}>—（无 payment 记录）</p>
+          )}
+        </div>
+      </div>
+
+      {resolved && a.review!.note && (
+        <div
+          style={{
+            marginTop: '8px',
+            padding: '6px 10px',
+            backgroundColor: '#ecfdf5',
+            borderLeft: '3px solid #10b981',
+            fontSize: '12px',
+            color: '#065f46',
+          }}
+        >
+          处理说明：{a.review!.note}
+          {a.review!.reviewedAt && (
+            <span style={{ marginLeft: '8px', color: '#6b7280' }}>· {fmtDate(a.review!.reviewedAt)}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function btnStyle(bg: string, fg: string, border: string): React.CSSProperties {
+  return {
+    padding: '4px 10px',
+    fontSize: '12px',
+    border: `1px solid ${border}`,
+    backgroundColor: bg,
+    color: fg,
+    borderRadius: '6px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  };
 }
