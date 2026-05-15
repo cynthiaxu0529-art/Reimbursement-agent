@@ -155,17 +155,34 @@ export function useExpenseCategories(): UseExpenseCategoriesResult {
             return res.json() as Promise<{ costCenter: ExpenseFunction | null }>;
           });
 
-    Promise.all([coaPromise, ccPromise])
-      .then(([coaResult, ccResult]) => {
+    Promise.allSettled([coaPromise, ccPromise])
+      .then(([coaSettled, ccSettled]) => {
         if (cancelled) return;
-        coaCache = { groups: coaResult.groups, at: Date.now() };
-        costCenterCache = { value: ccResult.costCenter ?? null, at: Date.now() };
-        setGroups(coaResult.groups);
-        setCostCenter(ccResult.costCenter ?? null);
-      })
-      .catch((err: Error) => {
-        if (cancelled) return;
-        setError(err.message);
+
+        // CoA 是必需的：失败就报错，下拉空。
+        if (coaSettled.status === 'fulfilled') {
+          const coaResult = coaSettled.value;
+          coaCache = { groups: coaResult.groups, at: Date.now() };
+          setGroups(coaResult.groups);
+        } else {
+          const msg = (coaSettled.reason as Error)?.message || 'CoA 加载失败';
+          setError(msg);
+        }
+
+        // Cost center 是优化项：失败时降级到 ga（与服务端
+        // classifyDepartment 默认一致），不阻断下拉。
+        if (ccSettled.status === 'fulfilled') {
+          const ccResult = ccSettled.value;
+          costCenterCache = { value: ccResult.costCenter ?? null, at: Date.now() };
+          setCostCenter(ccResult.costCenter ?? null);
+        } else {
+          console.warn(
+            '[useExpenseCategories] cost-center fetch failed; falling back to ga:',
+            (ccSettled.reason as Error)?.message,
+          );
+          costCenterCache = { value: null, at: Date.now() };
+          setCostCenter(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
