@@ -109,76 +109,94 @@ export const EXPENSE_TYPE_ACCOUNTS: Record<ExpenseType, AccountCodeSet> = {
     gaName: 'G&A - Insurance',
   },
   ai_api: {
-    rd: '6435', sm: '6150', ga: '6350',
+    // Locked per integration guide Mapping conventions #4:
+    // "Anything billed as an LLM / AI API … goes to 6435 R&D - AI & API Services."
+    rd: '6435', sm: '6435', ga: '6435',
     rdName: 'R&D - AI & API Services',
-    smName: 'S&M - CRM & Sales Tools',
-    gaName: 'G&A - Dues & Subscriptions',
+    smName: 'R&D - AI & API Services',
+    gaName: 'R&D - AI & API Services',
   },
   gpu_compute: {
-    rd: '6420', sm: '6150', ga: '6390',
+    // Locked per Mapping conventions #3:
+    // "Pay-per-second GPU rental … goes to 6420 R&D - Cloud & Infrastructure
+    //  — same bucket as production cloud hosting, not as a separate account."
+    rd: '6420', sm: '6420', ga: '6420',
     rdName: 'R&D - Cloud & Infrastructure',
-    smName: 'S&M - CRM & Sales Tools',
-    gaName: 'G&A - Miscellaneous Expense',
+    smName: 'R&D - Cloud & Infrastructure',
+    gaName: 'R&D - Cloud & Infrastructure',
   },
   web3_rpc: {
-    rd: '6425', sm: '6150', ga: '6390',
+    // Locked per Mapping conventions #2 (Web3 consumption RPC / nodes / indexers).
+    rd: '6425', sm: '6425', ga: '6425',
     rdName: 'R&D - Blockchain & On-chain Services',
-    smName: 'S&M - CRM & Sales Tools',
-    gaName: 'G&A - Miscellaneous Expense',
+    smName: 'R&D - Blockchain & On-chain Services',
+    gaName: 'R&D - Blockchain & On-chain Services',
   },
   web3_subscription: {
-    rd: '6430', sm: '6150', ga: '6390',
+    // Locked per Mapping conventions #2 (Web3 SDK / hosted auth / subscription).
+    rd: '6430', sm: '6430', ga: '6430',
     rdName: 'R&D - Software & Subscriptions',
-    smName: 'S&M - CRM & Sales Tools',
-    gaName: 'G&A - Miscellaneous Expense',
+    smName: 'R&D - Software & Subscriptions',
+    gaName: 'R&D - Software & Subscriptions',
   },
   company_saas: {
+    // Locked per Mapping conventions #1 (company-wide SaaS → G&A regardless of payer).
     rd: '6350', sm: '6350', ga: '6350',
     rdName: 'G&A - Dues & Subscriptions',
     smName: 'G&A - Dues & Subscriptions',
     gaName: 'G&A - Dues & Subscriptions',
   },
   cloud: {
+    // Generic cloud (AWS / GCP / Vercel for hosting) still splits by payer team.
+    // GPU-specific compute is captured separately by `gpu_compute` (locked R&D).
     rd: '6420', sm: '6150', ga: '6390',
     rdName: 'R&D - Cloud & Infrastructure',
     smName: 'S&M - CRM & Sales Tools',
     gaName: 'G&A - Miscellaneous Expense',
   },
   software: {
+    // Contract explicitly splits by team: R&D-only tools (GitHub/Figma/Linear) →
+    // 6430; S&M-only tools (Ahrefs/HubSpot/Apollo) → 6150; company-wide is
+    // captured separately by `company_saas`.
     rd: '6430', sm: '6150', ga: '6350',
     rdName: 'R&D - Software & Subscriptions',
     smName: 'S&M - CRM & Sales Tools',
     gaName: 'G&A - Dues & Subscriptions',
   },
   kol_marketing: {
-    rd: '6490', sm: '6125', ga: '6390',
-    rdName: 'R&D - Miscellaneous Expense',
+    // Locked per Mapping conventions #5 (S&M top-level account, not split by payer).
+    rd: '6125', sm: '6125', ga: '6125',
+    rdName: 'S&M - Influencer & KOL Marketing',
     smName: 'S&M - Influencer & KOL Marketing',
-    gaName: 'G&A - Miscellaneous Expense',
+    gaName: 'S&M - Influencer & KOL Marketing',
   },
   community_rewards: {
-    rd: '6490', sm: '6145', ga: '6390',
-    rdName: 'R&D - Miscellaneous Expense',
+    // Locked per Mapping conventions #5 (red packets / airdrops / referral payouts).
+    rd: '6145', sm: '6145', ga: '6145',
+    rdName: 'S&M - Community Rewards & Incentives',
     smName: 'S&M - Community Rewards & Incentives',
-    gaName: 'G&A - Miscellaneous Expense',
+    gaName: 'S&M - Community Rewards & Incentives',
   },
   advertising: {
-    rd: '6490', sm: '6120', ga: '6390',
-    rdName: 'R&D - Miscellaneous Expense',
+    // Locked per Mapping conventions #5 (paid ads — Google / Meta / LinkedIn).
+    rd: '6120', sm: '6120', ga: '6120',
+    rdName: 'S&M - Digital Advertising',
     smName: 'S&M - Digital Advertising',
-    gaName: 'G&A - Miscellaneous Expense',
+    gaName: 'S&M - Digital Advertising',
   },
   content_seo: {
-    rd: '6490', sm: '6130', ga: '6390',
-    rdName: 'R&D - Miscellaneous Expense',
+    // Locked per Mapping conventions #5 (content production / SEO are S&M spend).
+    rd: '6130', sm: '6130', ga: '6130',
+    rdName: 'S&M - Content & SEO',
     smName: 'S&M - Content & SEO',
-    gaName: 'G&A - Miscellaneous Expense',
+    gaName: 'S&M - Content & SEO',
   },
   pr_communications: {
-    rd: '6490', sm: '6160', ga: '6390',
-    rdName: 'R&D - Miscellaneous Expense',
+    // Locked per Mapping conventions #5 (PR agency / press releases are S&M spend).
+    rd: '6160', sm: '6160', ga: '6160',
+    rdName: 'S&M - PR & Communications',
     smName: 'S&M - PR & Communications',
-    gaName: 'G&A - Miscellaneous Expense',
+    gaName: 'S&M - PR & Communications',
   },
   miscellaneous: {
     rd: '6490', sm: '6190', ga: '6390',

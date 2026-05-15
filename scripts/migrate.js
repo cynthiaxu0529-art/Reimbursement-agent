@@ -45,6 +45,7 @@ async function main() {
       '0015_add_period_closures.sql',
       '0016_add_wallet_reconciliation_period_notes.sql',
       '0017_add_data_anomaly_reviews.sql',
+      '0018_lock_contract_routing.sql',
     ];
 
     for (const file of migrations) {
